@@ -30,7 +30,7 @@ jobs:
       - name: Select from tools/registry.json
         id: sel
         run: |
-          include="$(infra/aws/select-tools.sh "${{ inputs.lambda_name }}")"
+          include="$(bash infra/aws/select-tools.sh "${{ inputs.lambda_name }}")"
           echo "Deploying: $include"
           {
             echo "include<<EOF"

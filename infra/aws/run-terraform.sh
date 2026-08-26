@@ -78,12 +78,12 @@ run_bootstrap() {
     return
   fi
 
-  terraform apply -input=false -no-color -auto-approve
+  terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
 
   echo "Migrating bootstrap state to s3://$BUCKET"
   disable_local_backend_override
   terraform init -migrate-state -force-copy -input=false -no-color
-  terraform apply -input=false -no-color -auto-approve
+  terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
 }
 
 run_dev() {

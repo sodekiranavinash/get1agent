@@ -76,10 +76,10 @@ jobs:
           fi
 
       - name: Bootstrap (S3 Terraform state)
-        run: infra/aws/run-terraform.sh bootstrap "${{ steps.mode.outputs.mode }}"
+        run: bash infra/aws/run-terraform.sh bootstrap "${{ steps.mode.outputs.mode }}"
 
       - name: Dev (challan-extractor Lambda)
-        run: infra/aws/run-terraform.sh dev "${{ steps.mode.outputs.mode }}"
+        run: bash infra/aws/run-terraform.sh dev "${{ steps.mode.outputs.mode }}"
 
       - name: Upload Terraform plans
         if: steps.mode.outputs.apply != 'true'

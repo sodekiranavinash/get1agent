@@ -5,7 +5,6 @@ variable "aws_region" {
 
 variable "package_path" {
   type        = string
-  description = "Zip from tools/challan-extractor/dist/function.zip, relative to this env root (infra/terraform/envs/dev)"
-  # envs/dev → envs → terraform → infra → repo root
+  description = "Path to function.zip, relative to infra/terraform/envs/dev"
   default     = "../../../../tools/challan-extractor/dist/function.zip"
 }
