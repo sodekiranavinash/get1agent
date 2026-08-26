@@ -60,7 +60,7 @@ run_bootstrap() {
     disable_local_backend_override
     init_s3
     if [[ "$MODE" == "apply" ]]; then
-      terraform apply -input=false -no-color -auto-approve
+      terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
     else
       terraform plan -input=false -no-color -out=tfplan
     fi
@@ -98,11 +98,19 @@ run_dev() {
     return
   fi
 
+  local zip="$ROOT/tools/challan-extractor/dist/function.zip"
+  if [[ ! -s "$zip" ]]; then
+    echo "Lambda zip missing or empty: $zip" >&2
+    echo "Run: make -C tools/challan-extractor package" >&2
+    exit 1
+  fi
+  echo "Lambda zip: $zip ($(wc -c <"$zip") bytes)"
+
   init_s3
   if [[ "$MODE" == "apply" ]]; then
-    terraform apply -input=false -no-color -auto-approve
+    terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
   else
-    terraform plan -input=false -no-color -out=tfplan
+    terraform plan -input=false -no-color -out=tfplan -lock-timeout=5m
   fi
 }
 

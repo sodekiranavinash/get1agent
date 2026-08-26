@@ -5,6 +5,7 @@ variable "aws_region" {
 
 variable "package_path" {
   type        = string
-  description = "Zip built by tools/challan-extractor/Makefile (make package)"
-  default     = "../../../tools/challan-extractor/dist/function.zip"
+  description = "Zip from tools/challan-extractor/dist/function.zip, relative to this env root (infra/terraform/envs/dev)"
+  # envs/dev → envs → terraform → infra → repo root
+  default     = "../../../../tools/challan-extractor/dist/function.zip"
 }

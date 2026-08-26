@@ -54,10 +54,15 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Initial CreateFunction needs a zip; later zip updates are the tools-* workflows.
+      # Initial CreateFunction needs a zip; later zip updates are the Tools workflow.
       - name: Package challan-extractor zip
         run: make package
         working-directory: tools/challan-extractor
+
+      - name: Verify Lambda zip
+        run: |
+          test -s tools/challan-extractor/dist/function.zip
+          unzip -l tools/challan-extractor/dist/function.zip | grep bootstrap
 
       - name: Decide plan vs apply
         id: mode

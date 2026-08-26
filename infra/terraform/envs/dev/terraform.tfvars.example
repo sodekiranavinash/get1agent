@@ -1,2 +1,2 @@
 aws_region   = "ap-south-1"
-package_path = "../../../tools/challan-extractor/dist/function.zip"
+package_path = "../../../../tools/challan-extractor/dist/function.zip"

@@ -2,6 +2,13 @@ locals {
   package_abs = abspath("${path.module}/${var.package_path}")
 }
 
+check "lambda_zip_exists" {
+  assert {
+    condition     = fileexists(local.package_abs)
+    error_message = "Lambda zip not found at ${local.package_abs}. The Infra workflow must run make package in tools/challan-extractor first."
+  }
+}
+
 module "challan_extractor" {
   source = "../../modules/lambda_tool"
 
