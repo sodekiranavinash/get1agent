@@ -1,22 +1,11 @@
 name: Tool — challan-extractor
 
 on:
-  pull_request:
-    paths:
-      - "tools/challan-extractor/**"
-      - ".github/workflows/tools-challan-extractor.yml"
-      - ".github/workflows/deploy-tool-lambda.yml"
-  push:
-    branches: [main]
-    paths:
-      - "tools/challan-extractor/**"
-      - ".github/workflows/tools-challan-extractor.yml"
-      - ".github/workflows/deploy-tool-lambda.yml"
   workflow_dispatch:
 
 concurrency:
   group: tool-challan-extractor
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -24,5 +13,5 @@ jobs:
     with:
       tool_dir: tools/challan-extractor
       function_name: get1agent-dev-challan-extractor
-      deploy: ${{ github.event_name != 'pull_request' }}
+      deploy: true
     secrets: inherit

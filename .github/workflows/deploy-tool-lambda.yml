@@ -14,10 +14,10 @@ on:
         type: string
         required: true
       deploy:
-        description: If false, only test and package (PRs)
+        description: If false, only test and package
         type: boolean
         required: false
-        default: false
+        default: true
 
 permissions:
   contents: read
