@@ -1,0 +1,76 @@
+# Reusable: test + zip a tools/* Lambda, optionally update the live function.
+# Each tool keeps its own caller workflow so UI / backend / agents can stay separate.
+name: Deploy tool Lambda
+
+on:
+  workflow_call:
+    inputs:
+      tool_dir:
+        description: Path to the tool, e.g. tools/challan-extractor
+        type: string
+        required: true
+      function_name:
+        description: Existing Lambda function name (created by Infra)
+        type: string
+        required: true
+      deploy:
+        description: If false, only test and package (PRs)
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+
+jobs:
+  tool:
+    name: ${{ inputs.tool_dir }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.tool_dir }}/go.mod
+          cache-dependency-path: ${{ inputs.tool_dir }}/go.sum
+
+      - name: Test and package
+        run: make package
+        working-directory: ${{ inputs.tool_dir }}
+
+      - name: Upload zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.function_name }}-zip
+          path: ${{ inputs.tool_dir }}/dist/function.zip
+
+      - name: Configure AWS credentials
+        if: inputs.deploy
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update Lambda code
+        if: inputs.deploy
+        env:
+          FUNCTION_NAME: ${{ inputs.function_name }}
+          ZIP: ${{ inputs.tool_dir }}/dist/function.zip
+        run: |
+          if ! aws lambda get-function --function-name "$FUNCTION_NAME" >/dev/null; then
+            echo "Function $FUNCTION_NAME does not exist. Run the Infra workflow first."
+            exit 1
+          fi
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file "fileb://$ZIP"
+          aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+          aws lambda get-function --function-name "$FUNCTION_NAME" \
+            --query 'Configuration.{FunctionName:FunctionName,LastModified:LastModified,CodeSize:CodeSize,Runtime:Runtime}' \
+            --output table

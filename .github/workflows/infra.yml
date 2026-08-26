@@ -1,0 +1,114 @@
+name: Infra
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply bootstrap (state bucket) then envs/dev Lambda resources
+        type: boolean
+        default: true
+
+concurrency:
+  group: infra-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: ap-south-1
+  TF_IN_AUTOMATION: "true"
+  TF_STATE_BUCKET: get1agent-terraform-state-ap-south-1
+
+jobs:
+  terraform:
+    name: Terraform (bootstrap + dev)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read Terraform version
+        id: tfver
+        run: echo "version=$(tr -d '[:space:]' < infra/terraform/.terraform-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ steps.tfver.outputs.version }}
+          terraform_wrapper: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/challan-extractor/go.mod
+          cache-dependency-path: tools/challan-extractor/go.sum
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive -diff infra/terraform
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Initial CreateFunction needs a zip; later zip updates are the tools-* workflows.
+      - name: Package challan-extractor zip
+        run: make package
+        working-directory: tools/challan-extractor
+
+      - name: Decide plan vs apply
+        id: mode
+        run: |
+          apply=false
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            apply=true
+          fi
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.apply }}" == "true" ]]; then
+            apply=true
+          fi
+          echo "apply=$apply" >> "$GITHUB_OUTPUT"
+          if [[ "$apply" == "true" ]]; then
+            echo "mode=apply" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=plan" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bootstrap (S3 Terraform state)
+        run: infra/aws/run-terraform.sh bootstrap "${{ steps.mode.outputs.mode }}"
+
+      - name: Dev (challan-extractor Lambda)
+        run: infra/aws/run-terraform.sh dev "${{ steps.mode.outputs.mode }}"
+
+      - name: Upload Terraform plans
+        if: steps.mode.outputs.apply != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plans
+          if-no-files-found: ignore
+          path: |
+            infra/terraform/bootstrap/tfplan
+            infra/terraform/envs/dev/tfplan
+
+      - name: Comment plans on PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### Terraform ${{ steps.mode.outputs.mode }} (dev)"
+            echo
+            echo "Bootstrap and \`envs/dev\` ran in this workflow. Full \`tfplan\` files are uploaded as artifacts when this is a plan-only run."
+          } | gh pr comment "${{ github.event.pull_request.number }}" --body-file -

@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# CI / laptop helper. Usage: run-terraform.sh <bootstrap|dev> <plan|apply>
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+STACK="${1:-}"
+MODE="${2:-}"
+BUCKET="${TF_STATE_BUCKET:-get1agent-terraform-state-ap-south-1}"
+
+if [[ "$STACK" != "bootstrap" && "$STACK" != "dev" ]]; then
+  echo "usage: $0 <bootstrap|dev> <plan|apply>" >&2
+  exit 2
+fi
+if [[ "$MODE" != "plan" && "$MODE" != "apply" ]]; then
+  echo "usage: $0 <bootstrap|dev> <plan|apply>" >&2
+  exit 2
+fi
+
+bucket_exists() {
+  local err rc
+  set +e
+  err="$(aws s3api head-bucket --bucket "$BUCKET" 2>&1)"
+  rc=$?
+  set -e
+  if [[ $rc -eq 0 ]]; then
+    return 0
+  fi
+  if grep -qiE '404|Not Found|NoSuchBucket|NotFound' <<<"$err"; then
+    return 1
+  fi
+  echo "$err" >&2
+  echo "Cannot determine if s3://$BUCKET exists (refusing to continue)." >&2
+  exit 1
+}
+
+init_s3() {
+  terraform init -input=false -no-color
+}
+
+init_local() {
+  terraform init -backend=false -input=false -no-color
+}
+
+run_bootstrap() {
+  cd "$ROOT/infra/terraform/bootstrap"
+
+  if bucket_exists; then
+    init_s3
+    if [[ "$MODE" == "apply" ]]; then
+      terraform apply -input=false -no-color -auto-approve
+    else
+      terraform plan -input=false -no-color -out=tfplan
+    fi
+    return
+  fi
+
+  echo "State bucket s3://$BUCKET does not exist yet."
+  init_local
+
+  if [[ "$MODE" != "apply" ]]; then
+    terraform plan -input=false -no-color -out=tfplan
+    echo "Skipping envs/dev until the bootstrap apply creates the state bucket."
+    return
+  fi
+
+  terraform apply -input=false -no-color -auto-approve
+  terraform init -migrate-state -force-copy -input=false -no-color
+  terraform apply -input=false -no-color -auto-approve
+}
+
+run_dev() {
+  cd "$ROOT/infra/terraform/envs/dev"
+
+  if ! bucket_exists; then
+    if [[ "$MODE" == "apply" ]]; then
+      echo "State bucket s3://$BUCKET is missing; bootstrap apply must run first." >&2
+      exit 1
+    fi
+    echo "Skipping envs/dev plan: state bucket s3://$BUCKET does not exist yet."
+    return
+  fi
+
+  init_s3
+  if [[ "$MODE" == "apply" ]]; then
+    terraform apply -input=false -no-color -auto-approve
+  else
+    terraform plan -input=false -no-color -out=tfplan
+  fi
+}
+
+if [[ "$STACK" == "bootstrap" ]]; then
+  run_bootstrap
+else
+  run_dev
+fi

@@ -1,0 +1,16 @@
+{
+  "name": "challan-extractor",
+  "description": "Fetch a Parivahan eChallan print-page URL and return structured challan fields plus evidence image URLs for the traffic challan advisor agent.",
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["url"],
+    "properties": {
+      "url": {
+        "type": "string",
+        "format": "uri",
+        "description": "https print-page URL on echallan.parivahan.gov.in (path /report/print-page)."
+      }
+    }
+  }
+}

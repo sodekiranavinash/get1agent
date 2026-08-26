@@ -1,0 +1,50 @@
+resource "aws_s3_bucket" "tfstate" {
+  bucket = var.state_bucket_name
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_s3_bucket_ownership_controls" "tfstate" {
+  bucket = aws_s3_bucket.tfstate.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "tfstate" {
+  bucket = aws_s3_bucket.tfstate.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "tfstate" {
+  bucket = aws_s3_bucket.tfstate.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "tfstate" {
+  bucket = aws_s3_bucket.tfstate.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+check "backend_bucket_name" {
+  assert {
+    condition     = aws_s3_bucket.tfstate.bucket == "get1agent-terraform-state-ap-south-1"
+    error_message = "state_bucket_name must match the hardcoded S3 backend bucket in versions.tf (and envs/*/versions.tf)."
+  }
+}

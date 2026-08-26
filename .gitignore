@@ -108,8 +108,25 @@ tmp/
 temp/
 .tmpdir/
 
-# Docker
-*.pid
+# Go / Lambda tools
+tools/*/dist/
+tools/*/bootstrap
+*.exe
+vendor/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
 
 # Local overrides
 *.local
