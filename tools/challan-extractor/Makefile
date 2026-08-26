@@ -20,7 +20,8 @@ invoke-mcp:
 package: tidy test
 	mkdir -p $(DIST)
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags="-s -w" -tags lambda.norpc -o $(DIST)/$(BINARY) ./cmd/bootstrap
-	cd $(DIST) && zip -q function.zip $(BINARY)
+	TZ=UTC touch -t 198001010000 $(DIST)/$(BINARY)
+	cd $(DIST) && zip -qX function.zip $(BINARY)
 
 clean:
 	rm -rf $(DIST)

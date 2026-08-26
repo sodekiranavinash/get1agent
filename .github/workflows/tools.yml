@@ -1,0 +1,53 @@
+name: Tools — deploy Lambda
+
+on:
+  workflow_dispatch:
+    inputs:
+      lambda_name:
+        description: "Lambda function name, e.g. get1agent-dev-challan-extractor (or tool folder, or all)"
+        required: true
+        type: string
+        default: get1agent-dev-challan-extractor
+      force:
+        description: Upload even if the zip SHA already matches the live function
+        type: boolean
+        default: false
+
+concurrency:
+  group: tools-deploy-${{ github.event.inputs.lambda_name }}
+  cancel-in-progress: false
+
+jobs:
+  pick:
+    name: Resolve tool(s)
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.sel.outputs.include }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select from tools/registry.json
+        id: sel
+        run: |
+          include="$(infra/aws/select-tools.sh "${{ inputs.lambda_name }}")"
+          echo "Deploying: $include"
+          {
+            echo "include<<EOF"
+            echo "$include"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: pick
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.pick.outputs.include) }}
+    uses: ./.github/workflows/deploy-tool-lambda.yml
+    with:
+      tool_dir: ${{ matrix.tool_dir }}
+      function_name: ${{ matrix.function_name }}
+      deploy: true
+      force: ${{ inputs.force }}
+    secrets: inherit
