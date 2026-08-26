@@ -4,21 +4,42 @@ import "strings"
 
 type Request struct {
 	URL       string   `json:"url"`
+	URLs      []string `json:"urls"`
 	Arguments *Request `json:"arguments,omitempty"`
 	Name      string   `json:"name,omitempty"`
 }
 
-func (r Request) ResolveURL() string {
-	if u := strings.TrimSpace(r.URL); u != "" {
-		return u
+func (r Request) ResolveURLs() []string {
+	out := collectURLs(r.URL, r.URLs)
+	if len(out) > 0 {
+		return out
 	}
 	if r.Arguments != nil {
-		return strings.TrimSpace(r.Arguments.URL)
+		return collectURLs(r.Arguments.URL, r.Arguments.URLs)
 	}
-	return ""
+	return nil
+}
+
+func collectURLs(single string, list []string) []string {
+	out := make([]string, 0, 1+len(list))
+	if u := strings.TrimSpace(single); u != "" {
+		out = append(out, u)
+	}
+	for _, u := range list {
+		if u = strings.TrimSpace(u); u != "" {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 type Response struct {
+	OK    bool       `json:"ok"`
+	Error *ErrorBody `json:"error,omitempty"`
+	Items []Item     `json:"items"`
+}
+
+type Item struct {
 	OK               bool       `json:"ok"`
 	SourceURL        string     `json:"sourceUrl,omitempty"`
 	Error            *ErrorBody `json:"error,omitempty"`

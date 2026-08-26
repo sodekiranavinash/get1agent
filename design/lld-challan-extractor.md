@@ -50,17 +50,19 @@ No S3, no DynamoDB, no secrets. Outbound HTTPS only to allow-listed hosts.
 
 ## 3. Input contract
 
-Single field. Same JSON whether invoked from a test console, a later MCP target, or a wrapped `arguments` object.
+`urls` array of print-page links (no count cap). Same JSON whether invoked from a test console, a later MCP target, or a wrapped `arguments` object.
 
 ```json
-{ "url": "https://echallan.parivahan.gov.in/report/print-page?challan_no=..." }
+{ "urls": ["https://echallan.parivahan.gov.in/report/print-page?challan_no=..."] }
 ```
 
 Also accepted (Gateway-style):
 
 ```json
-{ "arguments": { "url": "https://echallan.parivahan.gov.in/report/print-page?challan_no=..." } }
+{ "arguments": { "urls": ["https://echallan.parivahan.gov.in/report/print-page?challan_no=..."] } }
 ```
+
+Legacy single `url` is still accepted and treated as a one-element list.
 
 ### 3.1 URL rules (fail closed)
 
@@ -77,56 +79,61 @@ Reject `http`, IPs, other hosts, and open redirects. Do **not** follow redirects
 
 ## 4. Output contract
 
-Success: HTTP 200 (Lambda function success) with JSON body. Fields are always present; missing HTML values are `""`, empty arrays, or `null` as noted.
+Success: HTTP 200 (Lambda function success) with JSON body. Top-level `ok` is `true` when the request was accepted; each URL has its own item (same order as input). Item fields are always present; missing HTML values are `""`, empty arrays, or `null` as noted.
 
 ```json
 {
   "ok": true,
-  "sourceUrl": "https://echallan.parivahan.gov.in/report/print-page?challan_no=…",
-  "issuingAuthority": "Traffic Police Andhra Pradesh",
-  "officeName": "Kakinada",
-  "challanDate": "26-04-2026 19:53:06",
-  "challanDateIso": "2026-04-26T19:53:06+05:30",
-  "vehicleClass": "M-Cycle/Scooter(2WN)",
-  "vehicleNo": "AP40HP6758",
-  "challanNo": "AP186219260426195306",
-  "lgdCode": "746",
-  "dlNo": "No DL",
-  "placeOfIncident": "Door No 5, 1-41, Main Rd, …",
-  "documentImpounded": "No Document Impounded",
-  "ownerName": "S**E K***N A*****H",
-  "ownerAddress": "5*******2 …",
-  "driverName": "S**E K***N A*****H",
-  "fatherName": "SO S**E A********U",
-  "engineNo": "CK4GS31*****",
-  "chassisNo": ".........",
-  "violatorContactNo": "*******952",
-  "receivedAmountInr": 185,
-  "receiptDate": "07-05-2026",
-  "remarks": "Not Available",
-  "offences": [
+  "items": [
     {
-      "srNo": 1,
-      "offence": "Not producing DL and RC/ with out document. (LMV) Sec. 177",
-      "mvAct": "( Sec - 177 )",
-      "compoundingFeeInr": 150,
-      "offenceType": "Normal Penalty"
+      "ok": true,
+      "sourceUrl": "https://echallan.parivahan.gov.in/report/print-page?challan_no=…",
+      "issuingAuthority": "Traffic Police Andhra Pradesh",
+      "officeName": "Kakinada",
+      "challanDate": "26-04-2026 19:53:06",
+      "challanDateIso": "2026-04-26T19:53:06+05:30",
+      "vehicleClass": "M-Cycle/Scooter(2WN)",
+      "vehicleNo": "AP40HP6758",
+      "challanNo": "AP186219260426195306",
+      "lgdCode": "746",
+      "dlNo": "No DL",
+      "placeOfIncident": "Door No 5, 1-41, Main Rd, …",
+      "documentImpounded": "No Document Impounded",
+      "ownerName": "S**E K***N A*****H",
+      "ownerAddress": "5*******2 …",
+      "driverName": "S**E K***N A*****H",
+      "fatherName": "SO S**E A********U",
+      "engineNo": "CK4GS31*****",
+      "chassisNo": ".........",
+      "violatorContactNo": "*******952",
+      "receivedAmountInr": 185,
+      "receiptDate": "07-05-2026",
+      "remarks": "Not Available",
+      "offences": [
+        {
+          "srNo": 1,
+          "offence": "Not producing DL and RC/ with out document. (LMV) Sec. 177",
+          "mvAct": "( Sec - 177 )",
+          "compoundingFeeInr": 150,
+          "offenceType": "Normal Penalty"
+        }
+      ],
+      "officer": {
+        "name": "A Satyanarayana_SI Traffic-II",
+        "email": "kkd_ps2traffickkd_si2@echallan.appolice.gov.in",
+        "rank": "SUB INSPECTOR"
+      },
+      "images": {
+        "evidence": [
+          "https://echallan.parivahan.gov.in/www/challans_downloaded_images/….jpeg",
+          "https://echallan.parivahan.gov.in/www/challans_downloaded_images/….jpeg"
+        ],
+        "map": "https://maps.googleapis.com/maps/api/staticmap?…",
+        "qr": "https://echallan.parivahan.gov.in/report/qrcode?…",
+        "all": ["…every unique http(s) img src…"]
+      }
     }
-  ],
-  "officer": {
-    "name": "A Satyanarayana_SI Traffic-II",
-    "email": "kkd_ps2traffickkd_si2@echallan.appolice.gov.in",
-    "rank": "SUB INSPECTOR"
-  },
-  "images": {
-    "evidence": [
-      "https://echallan.parivahan.gov.in/www/challans_downloaded_images/….jpeg",
-      "https://echallan.parivahan.gov.in/www/challans_downloaded_images/….jpeg"
-    ],
-    "map": "https://maps.googleapis.com/maps/api/staticmap?…",
-    "qr": "https://echallan.parivahan.gov.in/report/qrcode?…",
-    "all": ["…every unique http(s) img src…"]
-  }
+  ]
 }
 ```
 
@@ -147,7 +154,7 @@ Relative srcs are resolved against the request URL.
 
 ### 4.2 Errors
 
-Function **succeeds** with `ok: false` for caller-fixable input (bad URL). Function **fails** (Lambda error) only for unexpected panics.
+Function **succeeds** with request-level `ok: false` when `urls` is missing. Per-URL failures live on that item (`ok: false` + `error`); other items still return. Function **fails** (Lambda error) only for unexpected panics.
 
 | `error.code` | When |
 | --- | --- |
@@ -156,8 +163,21 @@ Function **succeeds** with `ok: false` for caller-fixable input (bad URL). Funct
 | `parse_failed` | Body not HTML or empty extract of `challanNo` **and** `vehicleNo` |
 | `rate_limited` | Still 429 after retries |
 
+Request-level:
+
 ```json
-{ "ok": false, "error": { "code": "invalid_url", "message": "host not allowed" } }
+{ "ok": false, "error": { "code": "invalid_url", "message": "urls is required" }, "items": [] }
+```
+
+Per URL (other items still returned):
+
+```json
+{
+  "ok": true,
+  "items": [
+    { "ok": false, "sourceUrl": "https://…", "error": { "code": "invalid_url", "message": "host not allowed" } }
+  ]
+}
 ```
 
 Do not include raw HTML in errors. Do not log full query strings (challan tokens).
@@ -176,7 +196,7 @@ Do not include raw HTML in errors. Do not log full query strings (challan tokens
 | Redirects | Max 3, same allow-list host | — |
 | Response cap | 2 MiB | `HTTP_MAX_BODY_BYTES` |
 
-Parivahan print pages often take several seconds. A 1.5 s `http.Client.Timeout` fails while reading the body. Timeouts are applied **per attempt** on the request context. Retry only 429/5xx (not timeouts). Lambda timeout **25 s**.
+Parivahan print pages often take several seconds. A 1.5 s `http.Client.Timeout` fails while reading the body. Timeouts are applied **per attempt** on the request context. Retry only 429/5xx (not timeouts). Lambda timeout **25 s**. Multiple URLs are fetched by a pool of **4** goroutines (one in-flight GET per worker).
 
 Headers: browser-like `User-Agent`, `Accept: text/html`, `Accept-Language: en-IN`. HTTP/2 disabled (some NIC hosts stall h2).
 
@@ -245,8 +265,8 @@ State: S3 backend (`get1agent-terraform-state-ap-south-1`, native `use_lockfile`
 
 Tool name: **`challan-extractor`**.
 
-- Input schema: `{ "url": { "type": "string", "format": "uri" } }` required.
-- Output: the success JSON above (Gateway will wrap as tool result).
+- Input schema: `{ "urls": { "type": "array", "items": { "type": "string", "format": "uri" }, "minItems": 1 } }` required.
+- Output: `{ "ok": true, "items": [ …per-URL extract… ] }` (Gateway will wrap as tool result).
 - Attach only to the traffic challan advisor (`trafficrules`) when Gateway Terraform lands.
 
 ---
@@ -260,7 +280,8 @@ Tool name: **`challan-extractor`**.
 | Retry | httptest 429 then 200 → one success; 429×3 → `rate_limited` |
 | Retry-After | short header is slept (capped) |
 | Body cap | oversized body → `fetch_failed` |
-| Handler unwrap | top-level `url` and nested `arguments.url` |
+| Handler unwrap | top-level `urls` / legacy `url` and nested `arguments.urls` |
+| Batch | two URLs → two items in input order; one fetch error does not drop the other |
 
 No live calls to Parivahan in CI.
 

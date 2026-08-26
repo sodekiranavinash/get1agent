@@ -49,4 +49,9 @@ func main() {
 	if !resp.OK {
 		os.Exit(2)
 	}
+	for _, item := range resp.Items {
+		if !item.OK {
+			os.Exit(2)
+		}
+	}
 }
