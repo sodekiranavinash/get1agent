@@ -9,10 +9,7 @@ terraform {
   }
 
   # This backend uses the bucket created in s3.tf (chicken-and-egg).
-  # First apply from this directory:
-  #   terraform init -backend=false
-  #   terraform apply
-  #   terraform init -migrate-state
+  # First create via infra/aws/run-terraform.sh bootstrap apply (local override → create bucket → migrate).
   # If you change the bucket name, update this block and envs/*/versions.tf together.
   backend "s3" {
     bucket       = "get1agent-terraform-state-ap-south-1"

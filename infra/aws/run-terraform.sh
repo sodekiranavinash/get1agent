@@ -34,17 +34,30 @@ bucket_exists() {
 }
 
 init_s3() {
-  terraform init -input=false -no-color
+  terraform init -input=false -no-color -reconfigure
 }
 
-init_local() {
-  terraform init -backend=false -input=false -no-color
+# First-time bootstrap: S3 backend cannot init until the bucket exists.
+# Override to local, create the bucket, then migrate state onto S3.
+enable_local_backend_override() {
+  cat > backend_override.tf <<'EOF'
+terraform {
+  backend "local" {
+    path = "terraform.tfstate"
+  }
+}
+EOF
+}
+
+disable_local_backend_override() {
+  rm -f backend_override.tf
 }
 
 run_bootstrap() {
   cd "$ROOT/infra/terraform/bootstrap"
 
   if bucket_exists; then
+    disable_local_backend_override
     init_s3
     if [[ "$MODE" == "apply" ]]; then
       terraform apply -input=false -no-color -auto-approve
@@ -54,16 +67,21 @@ run_bootstrap() {
     return
   fi
 
-  echo "State bucket s3://$BUCKET does not exist yet."
-  init_local
+  echo "State bucket s3://$BUCKET does not exist yet; using local backend for first create."
+  enable_local_backend_override
+  terraform init -input=false -no-color -reconfigure
 
   if [[ "$MODE" != "apply" ]]; then
     terraform plan -input=false -no-color -out=tfplan
     echo "Skipping envs/dev until the bootstrap apply creates the state bucket."
+    disable_local_backend_override
     return
   fi
 
   terraform apply -input=false -no-color -auto-approve
+
+  echo "Migrating bootstrap state to s3://$BUCKET"
+  disable_local_backend_override
   terraform init -migrate-state -force-copy -input=false -no-color
   terraform apply -input=false -no-color -auto-approve
 }
