@@ -12,9 +12,9 @@ terraform {
   # First create via infra/aws/run-terraform.sh bootstrap apply (local override → create bucket → migrate).
   # If you change the bucket name, update this block and envs/*/versions.tf together.
   backend "s3" {
-    bucket       = "get1agent-terraform-state-ap-south-1"
+    bucket       = "get1agent-terraform-state-us-east-1"
     key          = "bootstrap/terraform.tfstate"
-    region       = "ap-south-1"
+    region       = "us-east-1"
     encrypt      = true
     use_lockfile = true
   }

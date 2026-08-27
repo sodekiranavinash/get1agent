@@ -16,9 +16,9 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION: ap-south-1
+  AWS_REGION: us-east-1
   TF_IN_AUTOMATION: "true"
-  TF_STATE_BUCKET: get1agent-terraform-state-ap-south-1
+  TF_STATE_BUCKET: get1agent-terraform-state-us-east-1
 
 jobs:
   terraform:

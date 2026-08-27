@@ -257,7 +257,7 @@ Reusable module `infra/terraform/modules/lambda_tool`:
 
 CI split: **Infra** creates the function, IAM, and logs. **Tools — deploy Lambda** (`.github/workflows/tools.yml`) is manual: pass tool name `challan-extractor`, the function name, or `all`. It zips and `UpdateFunctionCode` only when `CodeSha256` differs (same check Terraform would use for `source_code_hash`). Terraform ignores zip hash so infra apply does not overwrite a tools deploy. Register more tools in `tools/registry.json`.
 
-State: S3 backend (`get1agent-terraform-state-ap-south-1`, native `use_lockfile`, no DynamoDB). Create the bucket once via `infra/terraform/bootstrap` (`infra/aws/bootstrap-tf-state.sh`). Pin Terraform 1.15.9 (`.terraform-version`, `required_version >= 1.15.0`) and AWS provider in `versions.tf`.
+State: S3 backend (`get1agent-terraform-state-us-east-1`, native `use_lockfile`, no DynamoDB). Create the bucket once via `infra/terraform/bootstrap` (`infra/aws/bootstrap-tf-state.sh`). Pin Terraform 1.15.9 (`.terraform-version`, `required_version >= 1.15.0`) and AWS provider in `versions.tf`.
 
 ---
 

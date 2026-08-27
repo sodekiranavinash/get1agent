@@ -188,11 +188,13 @@ Tool contract (every Lambda):
 
 ## 7. Knowledge / RAG
 
-**Default for v1: Amazon Bedrock Knowledge Bases.** Documents live in S3; KB handles chunking, embeddings, and retrieve APIs. Expose retrieve as an MCP tool or Strands retrieve tool, scoped per agent (traffic rules vs company docs).
+**Default for most agents: Amazon Bedrock Knowledge Bases.** Documents live in S3; KB handles chunking, embeddings, and retrieve APIs. Expose retrieve as an MCP tool or Strands retrieve tool, scoped per agent.
 
-**S3-as-vector-store** (DIY embeddings in S3 / OpenSearch-less) is only if we need a custom index the KB cannot do. Do not build both in v1.
+**Exception — `trafficrules`:** tool `traffic-knowledge-base` (see `design/tools/traffic-knowledge-base.md`). Source PDFs in a **KB docs bucket**; **child** embeddings in **Amazon S3 Vectors**; **in-process BM25** over `index/lexical.json` (RRF hybrid, no OpenSearch); **section parents** as S3 JSON. Section-only queries skip Bedrock embed. Do **not** also create a Bedrock KB for this corpus.
 
-Per-agent isolation: separate KB or separate metadata filters (`agentId` / `corpus`) so `trafficrules` cannot retrieve `companyInfo` chunks.
+Do not put vectors in the sessions bucket. Do not build a second RAG stack for the same traffic corpus.
+
+Per-agent isolation: separate index / metadata filters (`corpus` / `agentId`) so `trafficrules` cannot retrieve `companyInfo` chunks.
 
 ---
 
@@ -388,7 +390,7 @@ One repo. **Terraform only** for AWS shape (no CDK). Path rule:
     _shared/                 # optional: SSE mapper, S3SessionManager wiring
   tools/
     challan-extractor/       # MCP Lambda + mcp.json (traffic challan advisor)
-    # next-tool/             # add more tools as siblings, not nested under lambda/
+    traffic-knowledge-base/  # S3 docs + S3 Vectors retrieve (see design/tools/)
   backend/
     history/                 # GET /conversations, GET by id, POST resume
     health/                  # optional GET /health
@@ -506,7 +508,7 @@ Per-agent IAM, PII redaction in events, evals in LangSmith, rate limits.
 - Distinct `sessionId` per agent role (host vs specialist). Do **not** provision AgentCore Memory.
 - API Gateway JWT **does** sit in front of AgentCore; that is the intended design.
 - Tools via Gateway unless duration/size forces Runtime-hosted MCP.
-- Knowledge Bases first; DIY S3 vectors only if KB is insufficient.
+- Knowledge Bases first except `traffic-knowledge-base` (S3 Vectors + in-process BM25 + section parents; LLD in `design/tools/`).
 - Stream **events** to the UI; do not wait for the full answer to show tools.
 - CloudWatch 7 days is ops logs. Chat history and resume state live in S3 via `S3SessionManager`. Keep sessions bucket ≠ KB document bucket.
 - Infra is Terraform; deploys are GitHub Actions with OIDC. No AWS keys in git. Prod apply is gated. Runtime images referenced by digest.
@@ -524,7 +526,7 @@ When implementing, in order:
 5. `S3SessionManager` with prefix `conversations/{userId}/{conversationId}/session/` plus `catalog.json`.
 6. History/resume in `backend/history/`: list/read the same S3 prefix (never another user’s prefix).
 7. MCP Gateway + first Lambda tool under `tools/challan-extractor/` (attach only to the traffic challan advisor agent).
-8. Bedrock KB retrieve tool with corpus isolation.
+8. `traffic-knowledge-base` MCP retrieve (S3 Vectors + BM25 RRF + section parents); other agents may still use Bedrock KB.
 9. LangSmith OTEL at Runtime process start; CloudWatch log groups with 7-day retention.
 10. Host Runtime in `agents/host/` + A2A + nested events (after specialists work standalone).
 

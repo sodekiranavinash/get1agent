@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 STACK="${1:-}"
 MODE="${2:-}"
-BUCKET="${TF_STATE_BUCKET:-get1agent-terraform-state-ap-south-1}"
+BUCKET="${TF_STATE_BUCKET:-get1agent-terraform-state-us-east-1}"
 
 if [[ "$STACK" != "bootstrap" && "$STACK" != "dev" ]]; then
   echo "usage: $0 <bootstrap|dev> <plan|apply>" >&2
