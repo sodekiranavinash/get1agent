@@ -1,1 +1,42 @@
 @import "tailwindcss";
+
+@theme inline {
+  --color-canvas: var(--app-canvas);
+  --color-surface: var(--app-surface);
+  --color-raised: var(--app-raised);
+  --color-border: var(--app-border);
+  --color-foreground: var(--app-foreground);
+  --color-muted: var(--app-muted);
+  --color-accent: var(--app-accent);
+}
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --app-canvas: #0a0a0a;
+  --app-surface: #141414;
+  --app-raised: #1a1a1a;
+  --app-border: #2e2e2e;
+  --app-foreground: #fafafa;
+  --app-muted: #a3a3a3;
+  --app-accent: #7c6cf6;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --app-canvas: #f5f5f7;
+  --app-surface: #ffffff;
+  --app-raised: #ffffff;
+  --app-border: #e5e5ea;
+  --app-foreground: #1d1d1f;
+  --app-muted: #6e6e73;
+  --app-accent: #6d5ef5;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  background-color: var(--app-canvas);
+  color: var(--app-foreground);
+}

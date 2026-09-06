@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI / laptop helper. Usage: run-terraform.sh <bootstrap|dev> <plan|apply>
+# CI / laptop helper. Usage: run-terraform.sh <bootstrap|dev|web> <plan|apply>
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -7,12 +7,12 @@ STACK="${1:-}"
 MODE="${2:-}"
 BUCKET="${TF_STATE_BUCKET:-get1agent-terraform-state-us-east-1}"
 
-if [[ "$STACK" != "bootstrap" && "$STACK" != "dev" ]]; then
-  echo "usage: $0 <bootstrap|dev> <plan|apply>" >&2
+if [[ "$STACK" != "bootstrap" && "$STACK" != "dev" && "$STACK" != "web" ]]; then
+  echo "usage: $0 <bootstrap|dev|web> <plan|apply>" >&2
   exit 2
 fi
 if [[ "$MODE" != "plan" && "$MODE" != "apply" ]]; then
-  echo "usage: $0 <bootstrap|dev> <plan|apply>" >&2
+  echo "usage: $0 <bootstrap|dev|web> <plan|apply>" >&2
   exit 2
 fi
 
@@ -86,25 +86,28 @@ run_bootstrap() {
   terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
 }
 
-run_dev() {
-  cd "$ROOT/infra/terraform/envs/dev"
+run_env() {
+  local env_name="$1"
+  cd "$ROOT/infra/terraform/envs/$env_name"
 
   if ! bucket_exists; then
     if [[ "$MODE" == "apply" ]]; then
       echo "State bucket s3://$BUCKET is missing; bootstrap apply must run first." >&2
       exit 1
     fi
-    echo "Skipping envs/dev plan: state bucket s3://$BUCKET does not exist yet."
+    echo "Skipping envs/$env_name plan: state bucket s3://$BUCKET does not exist yet."
     return
   fi
 
-  local zip="$ROOT/tools/challan-extractor/dist/function.zip"
-  if [[ ! -s "$zip" ]]; then
-    echo "Lambda zip missing or empty: $zip" >&2
-    echo "Run: make -C tools/challan-extractor package" >&2
-    exit 1
+  if [[ "$env_name" == "dev" ]]; then
+    local zip="$ROOT/tools/challan-extractor/dist/function.zip"
+    if [[ ! -s "$zip" ]]; then
+      echo "Lambda zip missing or empty: $zip" >&2
+      echo "Run: make -C tools/challan-extractor package" >&2
+      exit 1
+    fi
+    echo "Lambda zip: $zip ($(wc -c <"$zip") bytes)"
   fi
-  echo "Lambda zip: $zip ($(wc -c <"$zip") bytes)"
 
   init_s3
   if [[ "$MODE" == "apply" ]]; then
@@ -117,5 +120,5 @@ run_dev() {
 if [[ "$STACK" == "bootstrap" ]]; then
   run_bootstrap
 else
-  run_dev
+  run_env "$STACK"
 fi

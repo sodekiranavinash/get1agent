@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       apply:
-        description: Apply bootstrap (state bucket) then envs/dev Lambda resources
+        description: Apply bootstrap (state bucket), website bucket, then envs/dev Lambda resources
         type: boolean
         default: true
 
@@ -78,6 +78,9 @@ jobs:
       - name: Bootstrap (S3 Terraform state)
         run: bash infra/aws/run-terraform.sh bootstrap "${{ steps.mode.outputs.mode }}"
 
+      - name: Web (www.get1agent.com S3 website)
+        run: bash infra/aws/run-terraform.sh web "${{ steps.mode.outputs.mode }}"
+
       - name: Dev (challan-extractor Lambda)
         run: bash infra/aws/run-terraform.sh dev "${{ steps.mode.outputs.mode }}"
 
@@ -89,5 +92,6 @@ jobs:
           if-no-files-found: ignore
           path: |
             infra/terraform/bootstrap/tfplan
+            infra/terraform/envs/web/tfplan
             infra/terraform/envs/dev/tfplan
 
