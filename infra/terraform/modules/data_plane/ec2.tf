@@ -74,12 +74,15 @@ resource "aws_instance" "app" {
     aws_region                = data.aws_region.current.name
     ecr_repository_url        = aws_ecr_repository.api.repository_url
     api_port                  = var.api_port
+    api_hostname              = var.api_hostname
     name_prefix               = var.name_prefix
     db_credentials_secret_arn = aws_secretsmanager_secret.db_credentials.arn
     db_host                   = aws_db_instance.postgres.address
     db_name                   = var.db_name
     db_master_username        = var.db_username
     db_iam_username           = var.db_iam_username
+    setup_nginx_script        = file("${path.module}/setup-nginx.sh")
+    deploy_api_script         = file("${path.module}/deploy-api.sh.tpl")
   })
 
   tags = {

@@ -42,6 +42,6 @@ variable "data_plane_db_iam_username" {
 
 variable "data_plane_api_cidr_blocks" {
   type        = list(string)
-  default     = ["0.0.0.0/0"]
-  description = "CIDR blocks allowed to reach FastAPI on port 8000"
+  default     = []
+  description = "Optional direct FastAPI port access; leave empty so only nginx on :80 is public"
 }

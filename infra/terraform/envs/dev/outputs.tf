@@ -29,8 +29,13 @@ output "app_ssh_key_secret_arn" {
 }
 
 output "api_base_url" {
-  description = "FastAPI URL after backend deploy"
+  description = "API URL via nginx on port 80"
   value       = try(module.data_plane[0].api_base_url, null)
+}
+
+output "api_public_hostname" {
+  description = "Cloudflare DNS hostname for the API (A record -> app_public_ip)"
+  value       = try(module.data_plane[0].api_public_hostname, null)
 }
 
 output "ecr_repository_url" {

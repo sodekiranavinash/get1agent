@@ -59,6 +59,7 @@ if [[ "$MODE" == "apply" ]]; then
   echo "=== Infra deployed ==="
   echo "App IP:      $(terraform output -raw app_public_ip 2>/dev/null || echo n/a)"
   echo "API URL:     $(terraform output -raw api_base_url 2>/dev/null || echo n/a)"
+  echo "API domain:  $(terraform output -raw api_public_hostname 2>/dev/null || echo n/a)"
   echo "RDS host:    $(terraform output -raw postgres_endpoint 2>/dev/null || echo n/a)"
   echo ""
   echo "Next: bash infra/aws/deploy-control-plane.sh"

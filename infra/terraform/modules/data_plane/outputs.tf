@@ -19,8 +19,13 @@ output "app_ssh_key_secret_arn" {
 }
 
 output "api_base_url" {
-  description = "FastAPI base URL after deploy-control-plane workflow runs"
-  value       = "http://${aws_eip.app.public_ip}:${var.api_port}"
+  description = "API base URL via nginx on port 80 (point api.<domain> A record here in Cloudflare)"
+  value       = "http://${aws_eip.app.public_ip}"
+}
+
+output "api_public_hostname" {
+  description = "Cloudflare DNS: proxied A record api -> app_public_ip"
+  value       = var.api_hostname
 }
 
 output "ecr_repository_url" {

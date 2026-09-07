@@ -43,45 +43,13 @@ docker buildx build \
   "$ROOT/control_plane"
 
 echo "Deploying on EC2 via SSM..."
-COMMAND_ID="$(aws ssm send-command \
-  --region "$AWS_REGION" \
-  --instance-ids "$INSTANCE_ID" \
-  --document-name AWS-RunShellScript \
-  --comment "Deploy get1agent control_plane" \
-  --parameters commands='["/opt/get1agent/deploy-api.sh"]' \
-  --query Command.CommandId \
-  --output text)"
-
-aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --region "$AWS_REGION"
-
-aws ssm get-command-invocation \
-  --command-id "$COMMAND_ID" \
-  --instance-id "$INSTANCE_ID" \
-  --region "$AWS_REGION" \
-  --query StandardOutputContent \
-  --output text
-
-STATUS="$(aws ssm get-command-invocation \
-  --command-id "$COMMAND_ID" \
-  --instance-id "$INSTANCE_ID" \
-  --region "$AWS_REGION" \
-  --query Status \
-  --output text)"
-
-if [[ "$STATUS" != "Success" ]]; then
-  aws ssm get-command-invocation \
-    --command-id "$COMMAND_ID" \
-    --instance-id "$INSTANCE_ID" \
-    --region "$AWS_REGION" \
-    --query StandardErrorContent \
-    --output text >&2
-  exit 1
-fi
+bash "$ROOT/infra/aws/sync-ec2-api.sh"
 
 echo ""
 echo "=== control_plane deployed ==="
 echo "Health:  ${API_URL}/health"
 echo "Ready:   ${API_URL}/ready   (checks DB via IAM)"
 echo "Docs:    ${API_URL}/docs"
+echo "Public:  https://api.get1agent.com (after Cloudflare A record -> app IP)"
 echo ""
 echo "Verify: curl -s ${API_URL}/health"

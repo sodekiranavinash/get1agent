@@ -30,9 +30,30 @@ bash infra/aws/deploy-control-plane.sh
 ### 3) Verify
 
 ```bash
-curl -s http://<app-ip>:8000/health
-curl -s http://<app-ip>:8000/ready    # DB via IAM — should show database: ok
+curl -s http://<app-ip>/health
+curl -s http://<app-ip>/ready    # DB via IAM — should show database: ok
 ```
+
+After Cloudflare DNS (`api` A record → app IP, proxied):
+
+```bash
+curl -s https://api.get1agent.com/health
+```
+
+---
+
+## API domain (Cloudflare)
+
+nginx on EC2 listens on **port 80** and proxies to FastAPI on **localhost:8000**.
+
+| Step | Action |
+|------|--------|
+| 1 | `terraform output app_public_ip` |
+| 2 | Cloudflare DNS: **A** record `api` → that IP, **Proxied** (orange cloud) |
+| 3 | Cloudflare SSL/TLS → **Flexible** (same as www S3 site) |
+| 4 | `bash infra/aws/deploy-control-plane.sh` (syncs nginx + app) |
+
+Terraform opens **port 80** on the app security group. Port **8000** is not exposed publicly (FastAPI binds to localhost only).
 
 ---
 
@@ -110,7 +131,8 @@ Test connection → Finish.
 | Script | Purpose |
 |--------|---------|
 | `infra/aws/deploy-infra.sh` | Terraform: EC2 + RDS + ECR |
-| `infra/aws/deploy-control-plane.sh` | Docker build → ECR → SSM restart |
+| `infra/aws/deploy-control-plane.sh` | Docker build → ECR → EC2 (nginx + API via SSM) |
+| `infra/aws/sync-ec2-api.sh` | Upload nginx/deploy scripts and restart API on EC2 |
 | `infra/aws/deploy-all.sh` | Both in one command |
 | `infra/aws/db-tunnel.sh --show-creds` | Print DBeaver credentials |
 | `infra/aws/fetch-app-ssh-key.sh` | Save SSH key for DBeaver |
@@ -119,12 +141,12 @@ Test connection → Finish.
 
 ## Troubleshooting: `/health` not reachable
 
-**Symptom:** `curl http://<app-ip>:8000/health` → *connection refused* or timeout.
+**Symptom:** `curl http://<app-ip>/health` → *connection refused* or timeout.
 
 | Symptom | Likely cause |
 |---------|----------------|
-| Connection **refused** | EC2 is up, but nothing listens on 8000 (container crashed or never started) |
-| **Timeout** | Security group or wrong IP — check port 8000 inbound and Elastic IP |
+| Connection **refused** | nginx or container not running |
+| **Timeout** | Security group — check port **80** inbound and Elastic IP |
 
 ### Step 1 — Confirm the IP
 
@@ -144,7 +166,9 @@ AWS Console → **EC2** → select the app instance → **Connect** → **Sessio
 ```bash
 sudo docker ps -a
 sudo docker logs get1agent-api --tail 50
+sudo systemctl status nginx
 curl -s localhost:8000/health
+curl -s localhost/health
 ```
 
 **If logs show `exec format error`:** the image was built for the wrong CPU (amd64 on ARM t4g). Re-run deploy after the ARM64 build fix:
@@ -163,7 +187,7 @@ sudo /opt/get1agent/deploy-api.sh
 
 ### Step 4 — Check security group (only if timeout, not refused)
 
-EC2 → instance → **Security** tab → inbound rules must include **TCP 8000** from your network (default `0.0.0.0/0`).
+EC2 → instance → **Security** tab → inbound rules must include **TCP 80** from your network (default `0.0.0.0/0`).
 
 ---
 

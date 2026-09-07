@@ -26,10 +26,22 @@ resource "aws_security_group_rule" "app_ssh" {
   cidr_blocks       = var.allowed_ssh_cidr_blocks
 }
 
-resource "aws_security_group_rule" "app_api" {
+resource "aws_security_group_rule" "app_http" {
   type              = "ingress"
   security_group_id = aws_security_group.app.id
-  description       = "FastAPI HTTP"
+  description       = "nginx HTTP (Cloudflare -> api subdomain)"
+  from_port         = 80
+  to_port           = 80
+  protocol          = "tcp"
+  cidr_blocks       = var.allowed_http_cidr_blocks
+}
+
+resource "aws_security_group_rule" "app_api" {
+  count = length(var.allowed_api_cidr_blocks) > 0 ? 1 : 0
+
+  type              = "ingress"
+  security_group_id = aws_security_group.app.id
+  description       = "Direct FastAPI access (optional; default is nginx-only)"
   from_port         = var.api_port
   to_port           = var.api_port
   protocol          = "tcp"

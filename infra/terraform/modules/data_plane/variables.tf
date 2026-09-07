@@ -21,10 +21,22 @@ variable "allowed_ssh_cidr_blocks" {
   }
 }
 
-variable "allowed_api_cidr_blocks" {
+variable "allowed_http_cidr_blocks" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
-  description = "CIDR blocks allowed to reach the FastAPI port (restrict in production)"
+  description = "CIDR blocks allowed to reach nginx on port 80 (Cloudflare proxied api subdomain)"
+}
+
+variable "allowed_api_cidr_blocks" {
+  type        = list(string)
+  default     = []
+  description = "Optional direct FastAPI port access; leave empty so only nginx on :80 is public"
+}
+
+variable "api_hostname" {
+  type        = string
+  default     = "api.get1agent.com"
+  description = "Public API hostname for nginx server_name (Cloudflare A record)"
 }
 
 variable "api_port" {
