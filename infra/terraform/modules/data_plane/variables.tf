@@ -77,6 +77,6 @@ variable "allocated_storage_gb" {
 
 variable "backup_retention_days" {
   type        = number
-  default     = 7
-  description = "Automated backup retention (free tier includes 20 GB backup storage)"
+  default     = 1
+  description = "Automated backup retention days (AWS free tier max is 1)"
 }
