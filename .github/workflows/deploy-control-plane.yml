@@ -57,12 +57,18 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push Docker image
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image (ARM64 for t4g EC2)
         env:
           ECR_URL: ${{ steps.targets.outputs.ecr }}
         run: |
-          docker build -t "$ECR_URL:latest" control_plane
-          docker push "$ECR_URL:latest"
+          docker buildx build \
+            --platform linux/arm64 \
+            -t "$ECR_URL:latest" \
+            --push \
+            control_plane
 
       - name: Deploy on EC2 via SSM
         env:
@@ -98,6 +104,22 @@ jobs:
               --output text
             exit 1
           fi
+
+      - name: Verify health endpoint
+        env:
+          API_URL: ${{ steps.targets.outputs.api_url }}
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if curl -sf "${API_URL}/health"; then
+              echo ""
+              echo "Health check passed on attempt ${attempt}"
+              exit 0
+            fi
+            echo "Waiting for API (attempt ${attempt}/6)..."
+            sleep 10
+          done
+          echo "Health check failed: ${API_URL}/health" >&2
+          exit 1
 
       - name: Summary
         run: |

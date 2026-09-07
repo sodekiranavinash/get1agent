@@ -28,8 +28,19 @@ echo "Instance: $INSTANCE_ID"
 echo "Building control_plane Docker image..."
 
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${ECR_URL%/*}"
-docker build -t "$ECR_URL:latest" "$ROOT/control_plane"
-docker push "$ECR_URL:latest"
+
+# EC2 is t4g (ARM64). GitHub/Intel Mac runners build amd64 by default — use buildx.
+if ! docker buildx inspect get1agent-builder >/dev/null 2>&1; then
+  docker buildx create --name get1agent-builder --use >/dev/null
+else
+  docker buildx use get1agent-builder
+fi
+
+docker buildx build \
+  --platform linux/arm64 \
+  -t "$ECR_URL:latest" \
+  --push \
+  "$ROOT/control_plane"
 
 echo "Deploying on EC2 via SSM..."
 COMMAND_ID="$(aws ssm send-command \

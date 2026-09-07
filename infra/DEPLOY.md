@@ -117,6 +117,56 @@ Test connection → Finish.
 
 ---
 
+## Troubleshooting: `/health` not reachable
+
+**Symptom:** `curl http://<app-ip>:8000/health` → *connection refused* or timeout.
+
+| Symptom | Likely cause |
+|---------|----------------|
+| Connection **refused** | EC2 is up, but nothing listens on 8000 (container crashed or never started) |
+| **Timeout** | Security group or wrong IP — check port 8000 inbound and Elastic IP |
+
+### Step 1 — Confirm the IP
+
+```bash
+cd infra/terraform/envs/dev && terraform init
+terraform output api_base_url
+```
+
+Use that IP in your browser/curl.
+
+### Step 2 — Connect to EC2 (no SSH key needed)
+
+AWS Console → **EC2** → select the app instance → **Connect** → **Session Manager** → **Connect**.
+
+### Step 3 — Check if the container is running
+
+```bash
+sudo docker ps -a
+sudo docker logs get1agent-api --tail 50
+curl -s localhost:8000/health
+```
+
+**If logs show `exec format error`:** the image was built for the wrong CPU (amd64 on ARM t4g). Re-run deploy after the ARM64 build fix:
+
+```bash
+bash infra/aws/deploy-control-plane.sh
+```
+
+Or re-run the **Deploy control_plane** GitHub Action.
+
+**If container is missing:** run deploy manually on the instance:
+
+```bash
+sudo /opt/get1agent/deploy-api.sh
+```
+
+### Step 4 — Check security group (only if timeout, not refused)
+
+EC2 → instance → **Security** tab → inbound rules must include **TCP 8000** from your network (default `0.0.0.0/0`).
+
+---
+
 ## Local development
 
 Uses password auth (not IAM):
