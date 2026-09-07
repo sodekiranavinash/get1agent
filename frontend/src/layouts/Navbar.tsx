@@ -13,7 +13,7 @@ export function Navbar() {
         <img
           src={logoSrc}
           alt="OneAgent"
-          className="h-14 w-[14rem] object-contain object-left"
+          className="h-14 w-[14rem] object-contain object-center"
         />
       </Link>
       <div className="flex items-center gap-3">

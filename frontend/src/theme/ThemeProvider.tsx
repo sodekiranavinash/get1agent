@@ -24,8 +24,19 @@ const readStoredTheme = (): Theme => {
   return stored === 'light' || stored === 'dark' ? stored : 'dark'
 }
 
+const FAVICON = {
+  light: '/favicon-light.png',
+  dark: '/favicon-dark.png',
+} as const
+
+const applyFavicon = (theme: Theme) => {
+  const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"][data-app-favicon]')
+  if (icon) icon.href = FAVICON[theme]
+}
+
 const applyTheme = (theme: Theme) => {
   document.documentElement.setAttribute('data-theme', theme)
+  applyFavicon(theme)
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
