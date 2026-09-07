@@ -2,14 +2,6 @@ name: Deploy control_plane
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "control_plane/**"
-      - "infra/aws/sync-ec2-api.sh"
-      - "infra/aws/render-deploy-api.sh"
-      - "infra/terraform/modules/data_plane/**"
-      - ".github/workflows/deploy-control-plane.yml"
 
 concurrency:
   group: deploy-control-plane
