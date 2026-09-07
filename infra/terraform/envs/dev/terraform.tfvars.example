@@ -1,2 +1,9 @@
 aws_region   = "us-east-1"
 package_path = "../../../../tools/challan-extractor/dist/function.zip"
+
+# GitHub Actions writes this file automatically when DATA_PLANE_SSH_CIDR secret is set.
+# Local apply: copy this file to terraform.tfvars and uncomment:
+#
+# enable_data_plane          = true
+# data_plane_ssh_cidr_blocks = ["YOUR.PUBLIC.IP/32"]
+# data_plane_api_cidr_blocks = ["0.0.0.0/0"]

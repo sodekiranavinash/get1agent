@@ -6,8 +6,10 @@ Monorepo for get1agent.
 
 ```
 .
-├── frontend/    # React + TypeScript + Tailwind (Vite)
-├── .gitignore
+├── frontend/       # React + TypeScript + Tailwind (Vite)
+├── control_plane/  # FastAPI backend (monolith)
+├── infra/          # Terraform + deploy scripts
+├── tools/          # Lambda tools
 └── README.md
 ```
 

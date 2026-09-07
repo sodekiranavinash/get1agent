@@ -13,7 +13,7 @@ export function Auth0ProviderWithNavigate({
   const navigate = useNavigate()
 
   const onRedirectCallback = (appState?: AppState) => {
-    navigate(appState?.returnTo || '/', { replace: true })
+    navigate(appState?.returnTo || '/dashboard', { replace: true })
   }
 
   return (

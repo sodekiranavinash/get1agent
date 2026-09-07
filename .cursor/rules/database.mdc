@@ -1,0 +1,9 @@
+---
+alwaysApply: false
+---
+# UI Rules
+
+## overview 
+- we will use postgreSQL db as our primary db
+- Use SQLAlchemy as ORM, and also use async postgres driver.
+- 

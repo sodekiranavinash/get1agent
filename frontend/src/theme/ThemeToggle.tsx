@@ -1,3 +1,4 @@
+import { NavControlButton } from '../components/NavControlButton'
 import { useTheme } from './ThemeProvider'
 
 export function ThemeToggle() {
@@ -5,14 +6,12 @@ export function ThemeToggle() {
   const isDark = theme === 'dark'
 
   return (
-    <button
-      type="button"
+    <NavControlButton
       onClick={toggleTheme}
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-muted transition-colors hover:bg-raised hover:text-foreground"
     >
       {isDark ? <SunIcon /> : <MoonIcon />}
-    </button>
+    </NavControlButton>
   )
 }
 
@@ -23,7 +22,7 @@ function SunIcon() {
       className="h-[18px] w-[18px]"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.75"
+      strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -41,7 +40,7 @@ function MoonIcon() {
       className="h-[18px] w-[18px]"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.75"
+      strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

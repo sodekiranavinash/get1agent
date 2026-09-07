@@ -19,7 +19,7 @@ export function LoginPage() {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/dashboard" replace />
   }
 
   return <AuthStatusScreen>Redirecting to sign in…</AuthStatusScreen>

@@ -1,0 +1,45 @@
+---
+description: Project instructions that apply to every request
+alwaysApply: false
+---
+# UI Rules
+UI code is at /frontend, dont look elsewhere
+
+## Do
+- Whenever creating react components, make sure they are always scalable and reusable.
+- Always use es6 syntax for javascript code.
+- If your not sure about something or cannot assuem safely  always ask user.
+
+## Do not
+- DO NOT chnage entire code block for single or minor line changes please use context well.
+- DO NOT make uncessary or unwanted changes for any request, always stick to what user has asked.
+
+#UI structure
+
+##theme
+- i want modern dark/white theme which effects all pages, all UI compoenents to be supported by theme.
+- When creating any page or component you cannot just use vanilla theme , you must always go above and beyond to get modern clean themes and colors and also stylish compoenets, you can also use prebuit compoenest fromn tailwind css.
+
+Pages
+1)DashBoard page which shows summary of your created agents, workflows, tokens burdened, amount spent in ai credits, scheduled workflows if running, or already ran scheduled workflow.
+2)Agent Builder page where user can create custom agents uisng prompts, selecting model, reasoning effort and default tools to be attached.
+3)Workflow builder page where user can create workflow using already created agents and attach them in order or attach all to host agent, where user can see live evenst and agent execution.
+4)Chat page where user can sleect credted agnets, provide main system prompt for host agent and ask questions directly in chat interface here aso we need to show same live venst whe each agnets get executed in A2A protocol.
+5)Scheduler page where user can pick his saved workflows and add it to scheduler which will run that time on its own.
+6)Agent Store page where user created agents and also publicly published agents will be there and user will be able to add his agents list these public agents if he wants to use them
+7)Workflow store page where user can see his workflows and also other people can share there workflows and explain how it  works also
+8)Administration page where user can add his own model keys(openrouter for now), see his token usuage and billing info.
+9)Tools page where we show web search, ai web search & code interpreter and also they can connect there MCP tools here
+10)settings page where user can set his prefernces if we support any.
+
+## Page names to be like below 
+
+Dashboard
+Agent Builder
+Workflow Builder
+Agent Store
+Workflow Store
+Scheduled Jobs
+Administration
+Tools
+Setting (no need of sidebar , we will keep in it in user logo dropdown above logout )
