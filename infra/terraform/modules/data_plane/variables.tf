@@ -21,10 +21,10 @@ variable "allowed_ssh_cidr_blocks" {
   }
 }
 
-variable "allowed_http_cidr_blocks" {
+variable "extra_http_cidr_blocks" {
   type        = list(string)
-  default     = ["0.0.0.0/0"]
-  description = "CIDR blocks allowed to reach nginx on port 80 (Cloudflare proxied api subdomain)"
+  default     = []
+  description = "Extra IPv4 CIDRs allowed on port 80 in addition to Cloudflare and SSH admin IPs"
 }
 
 variable "allowed_api_cidr_blocks" {

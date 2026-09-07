@@ -53,7 +53,13 @@ nginx on EC2 listens on **port 80** and proxies to FastAPI on **localhost:8000**
 | 3 | Cloudflare SSL/TLS → **Flexible** (same as www S3 site) |
 | 4 | `bash infra/aws/deploy-control-plane.sh` (syncs nginx + app) |
 
-Terraform opens **port 80** on the app security group. Port **8000** is not exposed publicly (FastAPI binds to localhost only).
+Terraform opens **port 80** to [Cloudflare IPs](https://www.cloudflare.com/ips/) plus your **admin IP** (`DATA_PLANE_SSH_CIDR`). Port **8000** is not exposed publicly (FastAPI binds to localhost only).
+
+| Port | Who can connect |
+|------|-----------------|
+| **22** | Your IP only (`DATA_PLANE_SSH_CIDR`) |
+| **80** | Cloudflare IPs + your IP |
+| **8000** | localhost only (nginx proxy) |
 
 ---
 
@@ -187,7 +193,7 @@ sudo /opt/get1agent/deploy-api.sh
 
 ### Step 4 — Check security group (only if timeout, not refused)
 
-EC2 → instance → **Security** tab → inbound rules must include **TCP 80** from your network (default `0.0.0.0/0`).
+EC2 → instance → **Security** tab → inbound **TCP 80** from Cloudflare IPs and your admin IP only.
 
 ---
 

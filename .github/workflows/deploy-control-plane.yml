@@ -47,6 +47,7 @@ jobs:
           echo "ecr=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
           echo "instance=$(terraform output -raw app_instance_id)" >> "$GITHUB_OUTPUT"
           echo "api_url=$(terraform output -raw api_base_url)" >> "$GITHUB_OUTPUT"
+          echo "api_hostname=$(terraform output -raw api_public_hostname)" >> "$GITHUB_OUTPUT"
 
       - name: Login to Amazon ECR
         id: ecr
@@ -70,10 +71,10 @@ jobs:
 
       - name: Verify health endpoint
         env:
-          API_URL: ${{ steps.targets.outputs.api_url }}
+          API_HOSTNAME: ${{ steps.targets.outputs.api_hostname }}
         run: |
           for attempt in 1 2 3 4 5 6; do
-            if curl -sf "${API_URL}/health"; then
+            if curl -sf "https://${API_HOSTNAME}/health"; then
               echo ""
               echo "Health check passed on attempt ${attempt}"
               exit 0
@@ -81,12 +82,12 @@ jobs:
             echo "Waiting for API (attempt ${attempt}/6)..."
             sleep 10
           done
-          echo "Health check failed: ${API_URL}/health" >&2
+          echo "Health check failed: https://${API_HOSTNAME}/health" >&2
           exit 1
 
       - name: Summary
         run: |
           echo "## control_plane deployed (IAM DB auth)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Health: ${{ steps.targets.outputs.api_url }}/health" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Ready (DB via IAM): ${{ steps.targets.outputs.api_url }}/ready" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Docs: ${{ steps.targets.outputs.api_url }}/docs" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Health: https://${{ steps.targets.outputs.api_hostname }}/health" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Ready (DB via IAM): https://${{ steps.targets.outputs.api_hostname }}/ready" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Docs: https://${{ steps.targets.outputs.api_hostname }}/docs" >> "$GITHUB_STEP_SUMMARY"
