@@ -1,6 +1,6 @@
 resource "aws_security_group" "app" {
   name        = "${var.name_prefix}-app"
-  description = "FastAPI app server (HTTP API via nginx)"
+  description = "FastAPI app server (SSH admin + HTTP API)"
   vpc_id      = aws_vpc.main.id
 
   egress {
@@ -14,12 +14,16 @@ resource "aws_security_group" "app" {
   tags = {
     Name = "${var.name_prefix}-app-sg"
   }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_security_group_rule" "app_http" {
   type              = "ingress"
   security_group_id = aws_security_group.app.id
-  description       = "nginx HTTP Cloudflare and admin IPs"
+  description       = "nginx HTTP Cloudflare"
   from_port         = 80
   to_port           = 80
   protocol          = "tcp"
@@ -44,14 +48,6 @@ resource "aws_security_group" "postgres" {
   description = "PostgreSQL reachable only from the app EC2"
   vpc_id      = aws_vpc.main.id
 
-  ingress {
-    description     = "PostgreSQL from app server"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.app.id]
-  }
-
   egress {
     description = "All outbound"
     from_port   = 0
@@ -63,4 +59,18 @@ resource "aws_security_group" "postgres" {
   tags = {
     Name = "${var.name_prefix}-postgres-sg"
   }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group_rule" "postgres_from_app" {
+  type                     = "ingress"
+  security_group_id        = aws_security_group.postgres.id
+  description              = "PostgreSQL from app server"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.app.id
 }
