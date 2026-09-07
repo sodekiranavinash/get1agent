@@ -96,6 +96,8 @@ bash infra/aws/db-tunnel.sh --show-creds
 bash infra/aws/db-tunnel.sh
 ```
 
+Default local port is **15432** (avoids conflict with a local Postgres on 5432).
+
 ### 3) DBeaver connection
 
 **Main tab**
@@ -103,12 +105,12 @@ bash infra/aws/db-tunnel.sh
 | Field | Value |
 |-------|--------|
 | Host | `localhost` |
-| Port | `5432` |
+| Port | `15432` (same as tunnel; use `--port` if you changed it) |
 | Database | `get1agent` |
 | Username | `get1agent` (master) |
 | Password | from `--show-creds` |
 
-**SSL** → enable, mode `require`
+**SSL** → try `require` first; if you see *"The server does not support SSL"*, you may be on the wrong port (local Postgres on 5432) — use **15432**, or disable SSL for the tunneled dev connection.
 
 **SSH tab** → **disabled** (do not use SSH tunnel in DBeaver)
 

@@ -2,16 +2,16 @@
 # SSM port forward to dev RDS (for DBeaver). No SSH key or home IP required.
 #
 # Usage:
-#   bash infra/aws/db-tunnel.sh              # tunnel on localhost:5432
+#   bash infra/aws/db-tunnel.sh              # tunnel on localhost:15432
 #   bash infra/aws/db-tunnel.sh --show-creds # print DBeaver credentials
-#   bash infra/aws/db-tunnel.sh --port 15432 # custom local port
+#   bash infra/aws/db-tunnel.sh --port 5432  # only if 15432 is taken
 #
 # Requires: AWS CLI, Session Manager plugin (brew install --cask session-manager-plugin)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_DIR="$ROOT/infra/terraform/envs/dev"
-LOCAL_PORT="${LOCAL_PORT:-5432}"
+LOCAL_PORT="${LOCAL_PORT:-15432}"
 MODE="tunnel"
 
 while [[ $# -gt 0 ]]; do
@@ -55,7 +55,8 @@ echo "RDS host: $RDS_HOST"
 echo "Local port: $LOCAL_PORT"
 echo "Credentials: bash infra/aws/db-tunnel.sh --show-creds"
 echo ""
-echo "DBeaver: host localhost, port $LOCAL_PORT, SSH tab OFF, SSL require"
+echo "DBeaver: host localhost, port $LOCAL_PORT, SSH tab OFF"
+echo "         SSL require (or disable if DBeaver says server does not support SSL)"
 echo ""
 echo "Starting SSM tunnel (Ctrl+C to stop)…"
 exec aws ssm start-session \
