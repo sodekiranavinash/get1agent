@@ -1,4 +1,4 @@
-name: Deploy Backend
+name: Deploy control_plane
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     branches: [main]
     paths:
       - "control_plane/**"
-      - ".github/workflows/deploy-backend.yml"
+      - ".github/workflows/deploy-control-plane.yml"
 
 concurrency:
   group: deploy-control-plane

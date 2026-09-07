@@ -19,7 +19,7 @@ output "app_ssh_key_secret_arn" {
 }
 
 output "api_base_url" {
-  description = "FastAPI base URL after deploy-backend workflow runs"
+  description = "FastAPI base URL after deploy-control-plane workflow runs"
   value       = "http://${aws_eip.app.public_ip}:${var.api_port}"
 }
 

@@ -121,7 +121,7 @@ jobs:
           echo "- API URL: $(terraform output -raw api_base_url)" >> "$GITHUB_STEP_SUMMARY"
           echo "- App IP (DBeaver SSH): $(terraform output -raw app_public_ip)" >> "$GITHUB_STEP_SUMMARY"
           echo "- RDS host (DBeaver main tab): $(terraform output -raw postgres_endpoint)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Next: run **Deploy Backend** workflow, then connect DBeaver (infra/DEPLOY.md)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Next: run **Deploy control_plane** workflow, then connect DBeaver (infra/DEPLOY.md)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Terraform plans
         if: inputs.apply != true

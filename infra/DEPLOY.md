@@ -49,7 +49,7 @@ curl -s http://<app-ip>:8000/ready    # DB via IAM — should show database: ok
 ### Workflows
 
 1. **Infra** — Terraform (EC2 + RDS + ECR)
-2. **Deploy Backend** — builds `control_plane/` → ECR → EC2
+2. **Deploy control_plane** — builds `control_plane/` → ECR → EC2
 
 ---
 
