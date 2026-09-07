@@ -29,7 +29,7 @@ resource "aws_security_group_rule" "app_ssh" {
 resource "aws_security_group_rule" "app_http" {
   type              = "ingress"
   security_group_id = aws_security_group.app.id
-  description       = "nginx HTTP (Cloudflare -> api subdomain)"
+  description       = "nginx HTTP for Cloudflare api subdomain"
   from_port         = 80
   to_port           = 80
   protocol          = "tcp"
