@@ -174,6 +174,25 @@ bash infra/aws/deploy-control-plane.sh
 
 ---
 
+## Troubleshooting: Terraform Infra job
+
+### Stuck on "Acquiring state lock"
+
+A previous run left the lock file in S3. Cancel the stuck job, then:
+
+```bash
+cd infra/terraform/envs/dev
+terraform init
+terraform force-unlock <LOCK_ID>
+# or: aws s3 rm s3://get1agent-terraform-state-us-east-1/envs/dev/terraform.tfstate.tflock
+```
+
+### Duplicate security group rule
+
+If apply fails with `InvalidPermission.Duplicate` on postgres port 5432, pull latest `main` — postgres ingress is managed inline on the SG, not as a separate rule.
+
+---
+
 ## Local development
 
 Uses password auth (not IAM):

@@ -64,6 +64,10 @@ resource "aws_instance" "app" {
     Name = "${var.name_prefix}-app"
   }
 
+  lifecycle {
+    ignore_changes = [key_name]
+  }
+
   depends_on = [
     aws_secretsmanager_secret_version.db_credentials,
     aws_db_instance.postgres,
