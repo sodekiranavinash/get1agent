@@ -1,3 +1,15 @@
+variable "aws_region" {
+  type        = string
+  default     = "us-east-1"
+  description = "AWS region for dev resources"
+}
+
+variable "package_path" {
+  type        = string
+  description = "Path to function.zip, relative to infra/terraform/envs/dev"
+  default     = "../../../../tools/challan-extractor/dist/function.zip"
+}
+
 variable "enable_data_plane" {
   type        = bool
   default     = false
