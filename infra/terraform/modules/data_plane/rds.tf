@@ -1,6 +1,7 @@
 data "aws_rds_engine_version" "postgres" {
   engine  = "postgres"
   version = var.postgres_engine_version
+  latest  = true
 }
 
 resource "random_password" "db_master" {

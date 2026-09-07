@@ -44,7 +44,7 @@ curl -s http://<app-ip>:8000/ready    # DB via IAM — should show database: ok
 |--------|---------|
 | `AWS_ACCESS_KEY_ID` | `AKIA...` |
 | `AWS_SECRET_ACCESS_KEY` | `...` |
-| `DATA_PLANE_SSH_CIDR` | `203.0.113.10/32` |
+| `DATA_PLANE_SSH_CIDR` | `203.0.113.10` or `203.0.113.10/32` (your public IP) |
 
 ### Workflows
 

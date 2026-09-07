@@ -59,18 +59,36 @@ jobs:
           SSH_CIDR: ${{ secrets.DATA_PLANE_SSH_CIDR }}
           API_CIDR: ${{ secrets.DATA_PLANE_API_CIDR }}
         run: |
+          normalize_cidr() {
+            local value="$1"
+            value="$(echo "$value" | tr -d '[:space:]')"
+            if [[ -z "$value" ]]; then
+              return 1
+            fi
+            if [[ "$value" != */* ]]; then
+              value="${value}/32"
+            fi
+            if ! python3 -c "import ipaddress; ipaddress.ip_network('$value', strict=False)" 2>/dev/null; then
+              echo "Invalid CIDR: $value (use YOUR.PUBLIC.IP/32)" >&2
+              exit 1
+            fi
+            echo "$value"
+          }
+
           TFVARS=infra/terraform/envs/dev/terraform.tfvars
           cat > "$TFVARS" <<EOF
           aws_region   = "us-east-1"
           package_path = "../../../../tools/challan-extractor/dist/function.zip"
           EOF
           if [[ -n "$SSH_CIDR" ]]; then
+            SSH_CIDR_NORM="$(normalize_cidr "$SSH_CIDR")"
             cat >> "$TFVARS" <<EOF
           enable_data_plane          = true
-          data_plane_ssh_cidr_blocks = ["$SSH_CIDR"]
+          data_plane_ssh_cidr_blocks = ["$SSH_CIDR_NORM"]
           EOF
             if [[ -n "$API_CIDR" ]]; then
-              echo "data_plane_api_cidr_blocks = [\"$API_CIDR\"]" >> "$TFVARS"
+              API_CIDR_NORM="$(normalize_cidr "$API_CIDR")"
+              echo "data_plane_api_cidr_blocks = [\"$API_CIDR_NORM\"]" >> "$TFVARS"
             fi
           else
             cat >> "$TFVARS" <<'EOF'

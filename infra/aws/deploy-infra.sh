@@ -25,13 +25,22 @@ if [[ -z "${DATA_PLANE_SSH_CIDR:-}" && ! -f "$ROOT/infra/terraform/envs/dev/terr
 fi
 
 if [[ -n "${DATA_PLANE_SSH_CIDR:-}" ]]; then
+  normalize_cidr() {
+    local value="$1"
+    value="$(echo "$value" | tr -d '[:space:]')"
+    if [[ "$value" != */* ]]; then
+      value="${value}/32"
+    fi
+    echo "$value"
+  }
+  SSH_CIDR_NORM="$(normalize_cidr "$DATA_PLANE_SSH_CIDR")"
   cat >"$ROOT/infra/terraform/envs/dev/terraform.tfvars" <<EOF
 aws_region   = "us-east-1"
 package_path = "../../../../tools/challan-extractor/dist/function.zip"
 enable_data_plane          = true
-data_plane_ssh_cidr_blocks = ["${DATA_PLANE_SSH_CIDR}"]
+data_plane_ssh_cidr_blocks = ["${SSH_CIDR_NORM}"]
 EOF
-  echo "Wrote terraform.tfvars with DATA_PLANE_SSH_CIDR=${DATA_PLANE_SSH_CIDR}"
+  echo "Wrote terraform.tfvars with data_plane_ssh_cidr_blocks=[\"${SSH_CIDR_NORM}\"]"
 fi
 
 if [[ ! -s "$ROOT/tools/challan-extractor/dist/function.zip" ]]; then

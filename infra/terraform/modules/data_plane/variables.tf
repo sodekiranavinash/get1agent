@@ -12,6 +12,13 @@ variable "vpc_cidr" {
 variable "allowed_ssh_cidr_blocks" {
   type        = list(string)
   description = "CIDR blocks allowed to SSH to the app EC2 (use your public IP/32 for DBeaver)"
+
+  validation {
+    condition = alltrue([
+      for c in var.allowed_ssh_cidr_blocks : can(cidrhost(c, 0))
+    ])
+    error_message = "Each allowed_ssh_cidr_blocks entry must be a valid CIDR, e.g. 203.0.113.10/32"
+  }
 }
 
 variable "allowed_api_cidr_blocks" {
