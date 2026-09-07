@@ -8,16 +8,16 @@ alwaysApply: false
 - UI: S3 + Cloudflare (`infra/terraform/envs/web`)
 - Backend: `control_plane/` on EC2 + nginx (:80 → :8000) + RDS PostgreSQL (`infra/terraform/modules/data_plane`)
 - API domain: `api.get1agent.com` → Cloudflare A record → EC2 Elastic IP
-- EC2 port 80: Cloudflare IPs + admin IP (`DATA_PLANE_SSH_CIDR`) only
-- App → DB: **IAM auth** (no password). DBeaver → master password + SSH tunnel.
+- EC2 port 80: Cloudflare IPs only. No SSH (port 22).
+- App → DB: **IAM auth** (no password). DBeaver → SSM tunnel (`infra/aws/db-tunnel.sh`).
 
 ## Deploy scripts
 - `infra/aws/deploy-all.sh` — infra + app
 - `infra/aws/deploy-infra.sh` — Terraform only
-- `infra/aws/deploy-control-plane.sh` — Docker → ECR → EC2
+- `infra/aws/deploy-control-plane.sh` — Docker → ECR → EC2 via SSM
+- `infra/aws/db-tunnel.sh` — SSM port forward to RDS for DBeaver
 
 Full guide: **`infra/DEPLOY.md`**
 
 ## GitHub secrets
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
-- `DATA_PLANE_SSH_CIDR` — your public IP/32

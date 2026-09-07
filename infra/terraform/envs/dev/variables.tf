@@ -13,13 +13,7 @@ variable "package_path" {
 variable "enable_data_plane" {
   type        = bool
   default     = false
-  description = "Create VPC, bastion EC2, and RDS PostgreSQL (free-tier sized)"
-}
-
-variable "data_plane_ssh_cidr_blocks" {
-  type        = list(string)
-  default     = []
-  description = "Your public IP as x.x.x.x/32 for SSH to the bastion. Required when enable_data_plane is true."
+  description = "Create VPC, app EC2, and RDS PostgreSQL (free-tier sized)"
 }
 
 variable "data_plane_db_name" {

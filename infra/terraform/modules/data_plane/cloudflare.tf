@@ -28,10 +28,8 @@ locals {
     "2c0f:f248::/32",
   ]
 
-  # Port 80: Cloudflare proxy + your admin IP (same as SSH) for direct IP debugging.
   allowed_http_ipv4_cidr_blocks = distinct(concat(
     local.cloudflare_ipv4_cidrs,
-    var.allowed_ssh_cidr_blocks,
     var.extra_http_cidr_blocks,
   ))
 }

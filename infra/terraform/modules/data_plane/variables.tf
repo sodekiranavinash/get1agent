@@ -9,22 +9,10 @@ variable "vpc_cidr" {
   description = "VPC CIDR block"
 }
 
-variable "allowed_ssh_cidr_blocks" {
-  type        = list(string)
-  description = "CIDR blocks allowed to SSH to the app EC2 (use your public IP/32 for DBeaver)"
-
-  validation {
-    condition = alltrue([
-      for c in var.allowed_ssh_cidr_blocks : can(cidrhost(c, 0))
-    ])
-    error_message = "Each allowed_ssh_cidr_blocks entry must be a valid CIDR, e.g. 203.0.113.10/32"
-  }
-}
-
 variable "extra_http_cidr_blocks" {
   type        = list(string)
   default     = []
-  description = "Extra IPv4 CIDRs allowed on port 80 in addition to Cloudflare and SSH admin IPs"
+  description = "Optional extra IPv4 CIDRs on port 80 in addition to Cloudflare"
 }
 
 variable "allowed_api_cidr_blocks" {

@@ -1,6 +1,6 @@
 # Deploy get1agent on AWS
 
-**EC2** runs `control_plane` (FastAPI). **RDS** is private. The app connects with **IAM** (no DB password). Master password is **DBeaver / tunnel only**.
+**EC2** runs `control_plane` (FastAPI). **RDS** is private. The app connects with **IAM** (no DB password). Master password is **DBeaver / SSM tunnel only**.
 
 ---
 
@@ -10,31 +10,23 @@
 
 ```bash
 aws configure
-# Get your IP:
-curl -s ifconfig.me
+brew install --cask session-manager-plugin   # for DBeaver DB tunnel
 ```
 
 ### 2) Deploy everything
 
 ```bash
-DATA_PLANE_SSH_CIDR=YOUR.IP/32 bash infra/aws/deploy-all.sh
+bash infra/aws/deploy-all.sh
 ```
 
 Or step by step:
 
 ```bash
-DATA_PLANE_SSH_CIDR=YOUR.IP/32 bash infra/aws/deploy-infra.sh apply
+bash infra/aws/deploy-infra.sh apply
 bash infra/aws/deploy-control-plane.sh
 ```
 
 ### 3) Verify
-
-```bash
-curl -s http://<app-ip>/health
-curl -s http://<app-ip>/ready    # DB via IAM — should show database: ok
-```
-
-After Cloudflare DNS (`api` A record → app IP, proxied):
 
 ```bash
 curl -s https://api.get1agent.com/health
@@ -53,13 +45,15 @@ nginx on EC2 listens on **port 80** and proxies to FastAPI on **localhost:8000**
 | 3 | Cloudflare SSL/TLS → **Flexible** (same as www S3 site) |
 | 4 | `bash infra/aws/deploy-control-plane.sh` (syncs nginx + app) |
 
-Terraform opens **port 80** to [Cloudflare IPs](https://www.cloudflare.com/ips/) plus your **admin IP** (`DATA_PLANE_SSH_CIDR`). Port **8000** is not exposed publicly (FastAPI binds to localhost only).
+Terraform opens **port 80** to [Cloudflare IPs](https://www.cloudflare.com/ips/) only. Port **22 (SSH) is closed**. Port **8000** is localhost only.
 
 | Port | Who can connect |
 |------|-----------------|
-| **22** | Your IP only (`DATA_PLANE_SSH_CIDR`) |
-| **80** | Cloudflare IPs + your IP |
+| **80** | Cloudflare IPs only |
 | **8000** | localhost only (nginx proxy) |
+| **5432** | EC2 only (RDS private) |
+
+Admin access to EC2 and RDS uses **AWS SSM** (no SSH keys, no home IP allowlist).
 
 ---
 
@@ -71,12 +65,11 @@ Terraform opens **port 80** to [Cloudflare IPs](https://www.cloudflare.com/ips/)
 |--------|---------|
 | `AWS_ACCESS_KEY_ID` | `AKIA...` |
 | `AWS_SECRET_ACCESS_KEY` | `...` |
-| `DATA_PLANE_SSH_CIDR` | `203.0.113.10` or `203.0.113.10/32` (your public IP) |
 
 ### Workflows
 
 1. **Infra** — Terraform (EC2 + RDS + ECR)
-2. **Deploy control_plane** — builds `control_plane/` → ECR → EC2
+2. **Deploy control_plane** — builds `control_plane/` → ECR → EC2 via SSM
 
 ---
 
@@ -85,77 +78,49 @@ Terraform opens **port 80** to [Cloudflare IPs](https://www.cloudflare.com/ips/)
 | Who | How it connects to Postgres |
 |-----|----------------------------|
 | **control_plane on EC2** | IAM role → `rds-db:connect` → user `get1agent_app` (no password) |
-| **DBeaver / you** | SSH tunnel via EC2 → master user `get1agent` + password from Secrets Manager |
+| **DBeaver / you** | SSM tunnel → master user `get1agent` + password from Secrets Manager |
 
 ---
 
-## DBeaver setup
+## DBeaver setup (SSM tunnel)
 
-### Save SSH key (once)
-
-```bash
-cd infra/terraform/envs/dev && terraform init
-bash ../../../aws/fetch-app-ssh-key.sh
-```
-
-### Get DB password (master user — not used by the app)
+### 1) Get DB credentials
 
 ```bash
 bash infra/aws/db-tunnel.sh --show-creds
 ```
 
-### DBeaver connection
-
-**Main tab**
-
-| Field | Value |
-|-------|--------|
-| Host | RDS host from secret |
-| Port | `5432` |
-| Database | `get1agent` |
-| Username | `get1agent` (master) |
-| Password | from secret |
-
-**SSL** → enable, mode `require`
-
-**SSH tab**
-
-| Field | Value |
-|-------|--------|
-| Use SSH Tunnel | ✓ |
-| Host | App EC2 public IP (`terraform output app_public_ip`) — **not** `api.get1agent.com` |
-| Port | `22` |
-| User | `ec2-user` |
-| Private key | `~/.ssh/get1agent-dev-app.pem` |
-
-Test connection → Finish.
-
-### SSH tunnel timeout in DBeaver
-
-Cloudflare only proxies **HTTP (port 80)** for `api.get1agent.com`. **SSH (port 22) does not go through Cloudflare.**
-
-| Mistake | Fix |
-|---------|-----|
-| SSH host = `api.get1agent.com` | Use EC2 IP: `terraform output -raw app_public_ip` |
-| Your IP changed | `bash infra/aws/update-admin-ip.sh` then retry DBeaver |
-| Unsure if IP matches | `bash infra/aws/check-admin-ip.sh` |
-
-### Alternative: SSM tunnel (no SSH port, no DBeaver SSH tab)
-
-Works even when port 22 is blocked — uses AWS SSM instead of SSH:
+### 2) Start the tunnel (keep terminal open)
 
 ```bash
 bash infra/aws/db-tunnel.sh
 ```
 
-Leave that running. In DBeaver **Main tab only** (disable SSH tab):
+### 3) DBeaver connection
+
+**Main tab**
 
 | Field | Value |
 |-------|--------|
 | Host | `localhost` |
 | Port | `5432` |
-| Database / user / password | from `bash infra/aws/db-tunnel.sh --show-creds` |
-| SSL | require |
+| Database | `get1agent` |
+| Username | `get1agent` (master) |
+| Password | from `--show-creds` |
+
+**SSL** → enable, mode `require`
+
+**SSH tab** → **disabled** (do not use SSH tunnel in DBeaver)
+
+Test connection → Finish.
+
+### Session Manager plugin
+
+If `db-tunnel.sh` fails with a plugin error:
+
+```bash
+brew install --cask session-manager-plugin
+```
 
 ---
 
@@ -164,40 +129,28 @@ Leave that running. In DBeaver **Main tab only** (disable SSH tab):
 | Script | Purpose |
 |--------|---------|
 | `infra/aws/deploy-infra.sh` | Terraform: EC2 + RDS + ECR |
-| `infra/aws/deploy-control-plane.sh` | Docker build → ECR → EC2 (nginx + API via SSM) |
+| `infra/aws/deploy-control-plane.sh` | Docker build → ECR → EC2 (via SSM) |
 | `infra/aws/sync-ec2-api.sh` | Upload nginx/deploy scripts and restart API on EC2 |
 | `infra/aws/deploy-all.sh` | Both in one command |
+| `infra/aws/db-tunnel.sh` | SSM tunnel to RDS for DBeaver |
 | `infra/aws/db-tunnel.sh --show-creds` | Print DBeaver credentials |
-| `infra/aws/db-tunnel.sh` | SSM tunnel to RDS (no SSH key) |
-| `infra/aws/check-admin-ip.sh` | Check if your IP is allowed for SSH/HTTP |
-| `infra/aws/update-admin-ip.sh` | Re-allow your current IP and apply infra |
-| `infra/aws/fetch-app-ssh-key.sh` | Save SSH key for DBeaver |
 
 ---
 
 ## Troubleshooting: `/health` not reachable
 
-**Symptom:** `curl http://<app-ip>/health` → *connection refused* or timeout.
+**Symptom:** `curl https://api.get1agent.com/health` → timeout.
 
 | Symptom | Likely cause |
 |---------|----------------|
 | Connection **refused** | nginx or container not running |
-| **Timeout** | Security group — check port **80** inbound and Elastic IP |
+| **Timeout** | Cloudflare DNS or security group port **80** |
 
-### Step 1 — Confirm the IP
-
-```bash
-cd infra/terraform/envs/dev && terraform init
-terraform output api_base_url
-```
-
-Use that IP in your browser/curl.
-
-### Step 2 — Connect to EC2 (no SSH key needed)
+### Step 1 — Connect to EC2 via Session Manager
 
 AWS Console → **EC2** → select the app instance → **Connect** → **Session Manager** → **Connect**.
 
-### Step 3 — Check if the container is running
+### Step 2 — Check if the container is running
 
 ```bash
 sudo docker ps -a
@@ -207,23 +160,17 @@ curl -s localhost:8000/health
 curl -s localhost/health
 ```
 
-**If logs show `exec format error`:** the image was built for the wrong CPU (amd64 on ARM t4g). Re-run deploy after the ARM64 build fix:
-
-```bash
-bash infra/aws/deploy-control-plane.sh
-```
-
-Or re-run the **Deploy control_plane** GitHub Action.
-
-**If container is missing:** run deploy manually on the instance:
+**If container is missing:**
 
 ```bash
 sudo /opt/get1agent/deploy-api.sh
 ```
 
-### Step 4 — Check security group (only if timeout, not refused)
+Or re-run:
 
-EC2 → instance → **Security** tab → inbound **TCP 80** from Cloudflare IPs and your admin IP only.
+```bash
+bash infra/aws/deploy-control-plane.sh
+```
 
 ---
 

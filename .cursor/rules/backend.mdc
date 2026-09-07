@@ -10,7 +10,7 @@ alwaysApply: false
 ## Database auth
 - **Production (EC2):** `DATABASE_USE_IAM=true` — IAM role + `rds-db:connect`, user `get1agent_app`, no password.
 - **Local dev:** `DATABASE_USE_IAM=false` + `DATABASE_URL` with password.
-- **DBeaver:** master user/password from Secrets Manager + SSH tunnel only.
+- **DBeaver:** master user/password from Secrets Manager + `bash infra/aws/db-tunnel.sh` (SSM).
 
 ## Layout
 - `app/main.py` — app factory
@@ -22,6 +22,5 @@ alwaysApply: false
 
 ## Deploy
 ```bash
-DATA_PLANE_SSH_CIDR=YOUR.IP/32 bash infra/aws/deploy-all.sh
-# or: deploy-infra.sh + deploy-control-plane.sh
+bash infra/aws/deploy-all.sh
 ```

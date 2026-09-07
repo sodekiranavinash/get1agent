@@ -1,18 +1,3 @@
-output "bastion_public_ip" {
-  description = "Deprecated alias — use app_public_ip"
-  value       = try(module.data_plane[0].app_public_ip, null)
-}
-
-output "bastion_instance_id" {
-  description = "Deprecated alias — use app_instance_id"
-  value       = try(module.data_plane[0].app_instance_id, null)
-}
-
-output "bastion_ssh_key_secret_arn" {
-  description = "Deprecated alias — use app_ssh_key_secret_arn"
-  value       = try(module.data_plane[0].app_ssh_key_secret_arn, null)
-}
-
 output "app_public_ip" {
   description = "App EC2 Elastic IP"
   value       = try(module.data_plane[0].app_public_ip, null)
@@ -21,11 +6,6 @@ output "app_public_ip" {
 output "app_instance_id" {
   description = "App EC2 instance ID"
   value       = try(module.data_plane[0].app_instance_id, null)
-}
-
-output "app_ssh_key_secret_arn" {
-  description = "Secrets Manager ARN with SSH private key for DBeaver"
-  value       = try(module.data_plane[0].app_ssh_key_secret_arn, null)
 }
 
 output "api_base_url" {
@@ -53,18 +33,11 @@ output "postgres_connection_secret_arn" {
   value       = try(module.data_plane[0].postgres_connection_secret_arn, null)
 }
 
-output "ssh_tunnel_command" {
-  value = try(module.data_plane[0].ssh_tunnel_command, null)
+output "db_tunnel_command" {
+  description = "SSM tunnel to RDS for DBeaver"
+  value       = try(module.data_plane[0].db_tunnel_command, null)
 }
 
 output "ssm_tunnel_command" {
   value = try(module.data_plane[0].ssm_tunnel_command, null)
-}
-
-output "dbeaver_ssh_host" {
-  value = try(module.data_plane[0].dbeaver_ssh_host, null)
-}
-
-output "dbeaver_postgres_host" {
-  value = try(module.data_plane[0].dbeaver_postgres_host, null)
 }

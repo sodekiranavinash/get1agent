@@ -1,27 +1,3 @@
-resource "tls_private_key" "app" {
-  algorithm = "ED25519"
-}
-
-resource "aws_key_pair" "app" {
-  key_name   = "${var.name_prefix}-app"
-  public_key = tls_private_key.app.public_key_openssh
-
-  tags = {
-    Name = "${var.name_prefix}-app"
-  }
-}
-
-resource "aws_secretsmanager_secret" "app_ssh_key" {
-  name                    = "${var.name_prefix}/app-ssh-private-key"
-  description             = "Private SSH key for ${var.name_prefix} app EC2 (DBeaver + admin SSH)"
-  recovery_window_in_days = 7
-}
-
-resource "aws_secretsmanager_secret_version" "app_ssh_key" {
-  secret_id     = aws_secretsmanager_secret.app_ssh_key.id
-  secret_string = tls_private_key.app.private_key_openssh
-}
-
 resource "aws_iam_role" "app" {
   name = "${var.name_prefix}-app"
 
@@ -56,7 +32,6 @@ resource "aws_instance" "app" {
   instance_type          = var.ec2_instance_type
   subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.app.id]
-  key_name               = aws_key_pair.app.key_name
   iam_instance_profile   = aws_iam_instance_profile.app.name
 
   metadata_options {

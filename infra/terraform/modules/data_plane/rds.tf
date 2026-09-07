@@ -11,7 +11,7 @@ resource "random_password" "db_master" {
 
 resource "aws_secretsmanager_secret" "db_credentials" {
   name                    = "${var.name_prefix}/postgres-credentials"
-  description             = "Master PostgreSQL credentials for DBeaver / SSH tunnel only (not used by the app)"
+  description             = "Master PostgreSQL credentials for DBeaver / SSM tunnel only (not used by the app)"
   recovery_window_in_days = 7
 }
 
@@ -80,6 +80,6 @@ resource "aws_secretsmanager_secret_version" "db_connection" {
     sslmode      = "require"
     iam_user     = var.db_iam_username
     app_auth     = "iam-via-ec2-instance-role"
-    dbeaver_note = "Use SSH tab via app EC2; main tab uses host/username/password above"
+    dbeaver_note = "Run bash infra/aws/db-tunnel.sh then connect DBeaver to localhost:5432"
   })
 }

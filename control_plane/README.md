@@ -25,7 +25,7 @@ uvicorn app.main:app --reload --port 8000
 ## Deploy to AWS
 
 ```bash
-DATA_PLANE_SSH_CIDR=YOUR.IP/32 bash infra/aws/deploy-all.sh
+bash infra/aws/deploy-all.sh
 ```
 
 Or see `infra/DEPLOY.md`.

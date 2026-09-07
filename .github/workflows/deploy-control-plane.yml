@@ -41,7 +41,7 @@ jobs:
         run: |
           terraform init -input=false -no-color
           if ! terraform output -raw ecr_repository_url >/dev/null 2>&1; then
-            echo "Data plane not deployed. Run Infra workflow with DATA_PLANE_SSH_CIDR secret first." >&2
+            echo "Data plane not deployed. Run: bash infra/aws/deploy-infra.sh apply" >&2
             exit 1
           fi
           echo "ecr=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"

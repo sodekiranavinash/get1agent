@@ -5,29 +5,23 @@
 #   bash infra/aws/deploy-infra.sh plan
 #   bash infra/aws/deploy-infra.sh apply
 #
-# Requires:
-#   - AWS CLI configured
-#   - DATA_PLANE_SSH_CIDR in environment OR infra/terraform/envs/dev/terraform.tfvars
+# Requires AWS CLI configured.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MODE="${1:-apply}"
+TFVARS="$ROOT/infra/terraform/envs/dev/terraform.tfvars"
 
 if [[ "$MODE" != "plan" && "$MODE" != "apply" ]]; then
   echo "usage: $0 <plan|apply>" >&2
   exit 2
 fi
 
-if [[ -z "${DATA_PLANE_SSH_CIDR:-}" && ! -f "$ROOT/infra/terraform/envs/dev/terraform.tfvars" ]]; then
-  echo "Set DATA_PLANE_SSH_CIDR or create infra/terraform/envs/dev/terraform.tfvars" >&2
-  echo "Example: DATA_PLANE_SSH_CIDR=203.0.113.10/32 $0 apply" >&2
-  exit 1
-fi
-
-if [[ -n "${DATA_PLANE_SSH_CIDR:-}" ]]; then
-  mapfile -t ALLOWED < <(bash "$ROOT/infra/aws/tfvars-ssh-cidr.sh" "$DATA_PLANE_SSH_CIDR")
-  echo "Updated terraform.tfvars admin IPs: ${ALLOWED[*]}"
-fi
+cat >"$TFVARS" <<EOF
+aws_region   = "us-east-1"
+package_path = "../../../../tools/challan-extractor/dist/function.zip"
+enable_data_plane = true
+EOF
 
 if [[ ! -s "$ROOT/tools/challan-extractor/dist/function.zip" ]]; then
   echo "Packaging challan-extractor Lambda zip..."
@@ -47,6 +41,7 @@ if [[ "$MODE" == "apply" ]]; then
   echo "API URL:     $(terraform output -raw api_base_url 2>/dev/null || echo n/a)"
   echo "API domain:  $(terraform output -raw api_public_hostname 2>/dev/null || echo n/a)"
   echo "RDS host:    $(terraform output -raw postgres_endpoint 2>/dev/null || echo n/a)"
+  echo "DB tunnel:   bash infra/aws/db-tunnel.sh"
   echo ""
   echo "Next: bash infra/aws/deploy-control-plane.sh"
 fi

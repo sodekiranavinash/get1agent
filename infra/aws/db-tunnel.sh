@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# Open a local tunnel to dev RDS via the app EC2.
+# SSM port forward to dev RDS (for DBeaver). No SSH key or home IP required.
+#
+# Usage:
+#   bash infra/aws/db-tunnel.sh              # tunnel on localhost:5432
+#   bash infra/aws/db-tunnel.sh --show-creds # print DBeaver credentials
+#   bash infra/aws/db-tunnel.sh --port 15432 # custom local port
+#
+# Requires: AWS CLI, Session Manager plugin (brew install --cask session-manager-plugin)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_DIR="$ROOT/infra/terraform/envs/dev"
 LOCAL_PORT="${LOCAL_PORT:-5432}"
-MODE="ssm"
+MODE="tunnel"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --ssh) MODE="ssh"; shift ;;
     --show-creds) MODE="creds"; shift ;;
     --port)
       LOCAL_PORT="$2"
@@ -29,7 +35,7 @@ done
 cd "$ENV_DIR"
 
 if ! terraform output -raw app_instance_id &>/dev/null; then
-  echo "Data plane not found. Run the Infra GitHub Action with DATA_PLANE_SSH_CIDR set." >&2
+  echo "Data plane not found. Run: bash infra/aws/deploy-infra.sh apply" >&2
   exit 1
 fi
 
@@ -49,23 +55,8 @@ echo "RDS host: $RDS_HOST"
 echo "Local port: $LOCAL_PORT"
 echo "Credentials: bash infra/aws/db-tunnel.sh --show-creds"
 echo ""
-
-if [[ "$MODE" == "ssh" ]]; then
-  APP_IP="$(terraform output -raw app_public_ip)"
-  KEY_PATH="${HOME}/.ssh/get1agent-dev-app.pem"
-
-  if [[ ! -f "$KEY_PATH" ]]; then
-    bash "$ROOT/infra/aws/fetch-app-ssh-key.sh" "$KEY_PATH"
-  fi
-
-  echo "Starting SSH tunnel (Ctrl+C to stop)…"
-  exec ssh -i "$KEY_PATH" \
-    -o StrictHostKeyChecking=accept-new \
-    -L "${LOCAL_PORT}:${RDS_HOST}:5432" \
-    "ec2-user@${APP_IP}" \
-    -N
-fi
-
+echo "DBeaver: host localhost, port $LOCAL_PORT, SSH tab OFF, SSL require"
+echo ""
 echo "Starting SSM tunnel (Ctrl+C to stop)…"
 exec aws ssm start-session \
   --target "$INSTANCE_ID" \

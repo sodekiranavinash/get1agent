@@ -1,6 +1,6 @@
 resource "aws_security_group" "app" {
   name        = "${var.name_prefix}-app"
-  description = "FastAPI app server (SSH admin + HTTP API)"
+  description = "FastAPI app server (HTTP API via nginx)"
   vpc_id      = aws_vpc.main.id
 
   egress {
@@ -14,16 +14,6 @@ resource "aws_security_group" "app" {
   tags = {
     Name = "${var.name_prefix}-app-sg"
   }
-}
-
-resource "aws_security_group_rule" "app_ssh" {
-  type              = "ingress"
-  security_group_id = aws_security_group.app.id
-  description       = "SSH admin access (DBeaver tunnel, deploy debugging)"
-  from_port         = 22
-  to_port           = 22
-  protocol          = "tcp"
-  cidr_blocks       = var.allowed_ssh_cidr_blocks
 }
 
 resource "aws_security_group_rule" "app_http" {

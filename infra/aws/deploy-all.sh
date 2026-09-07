@@ -2,7 +2,7 @@
 # Full first-time deploy: infra + control_plane app.
 #
 # Usage:
-#   DATA_PLANE_SSH_CIDR=YOUR.IP/32 bash infra/aws/deploy-all.sh
+#   bash infra/aws/deploy-all.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
