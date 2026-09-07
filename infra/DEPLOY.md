@@ -123,12 +123,39 @@ bash infra/aws/db-tunnel.sh --show-creds
 | Field | Value |
 |-------|--------|
 | Use SSH Tunnel | ✓ |
-| Host | App EC2 public IP |
+| Host | App EC2 public IP (`terraform output app_public_ip`) — **not** `api.get1agent.com` |
 | Port | `22` |
 | User | `ec2-user` |
 | Private key | `~/.ssh/get1agent-dev-app.pem` |
 
 Test connection → Finish.
+
+### SSH tunnel timeout in DBeaver
+
+Cloudflare only proxies **HTTP (port 80)** for `api.get1agent.com`. **SSH (port 22) does not go through Cloudflare.**
+
+| Mistake | Fix |
+|---------|-----|
+| SSH host = `api.get1agent.com` | Use EC2 IP: `terraform output -raw app_public_ip` |
+| Your IP changed | `bash infra/aws/update-admin-ip.sh` then retry DBeaver |
+| Unsure if IP matches | `bash infra/aws/check-admin-ip.sh` |
+
+### Alternative: SSM tunnel (no SSH port, no DBeaver SSH tab)
+
+Works even when port 22 is blocked — uses AWS SSM instead of SSH:
+
+```bash
+bash infra/aws/db-tunnel.sh
+```
+
+Leave that running. In DBeaver **Main tab only** (disable SSH tab):
+
+| Field | Value |
+|-------|--------|
+| Host | `localhost` |
+| Port | `5432` |
+| Database / user / password | from `bash infra/aws/db-tunnel.sh --show-creds` |
+| SSL | require |
 
 ---
 
@@ -141,6 +168,9 @@ Test connection → Finish.
 | `infra/aws/sync-ec2-api.sh` | Upload nginx/deploy scripts and restart API on EC2 |
 | `infra/aws/deploy-all.sh` | Both in one command |
 | `infra/aws/db-tunnel.sh --show-creds` | Print DBeaver credentials |
+| `infra/aws/db-tunnel.sh` | SSM tunnel to RDS (no SSH key) |
+| `infra/aws/check-admin-ip.sh` | Check if your IP is allowed for SSH/HTTP |
+| `infra/aws/update-admin-ip.sh` | Re-allow your current IP and apply infra |
 | `infra/aws/fetch-app-ssh-key.sh` | Save SSH key for DBeaver |
 
 ---
