@@ -4,7 +4,7 @@ type ComingSoonProps = {
 
 export function ComingSoon({ title }: ComingSoonProps) {
   return (
-    <div className="relative flex min-h-[calc(100vh-4rem)] items-center justify-center overflow-hidden p-8">
+    <div className="relative flex flex-1 items-center justify-center overflow-hidden p-8">
       <div
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(155,138,251,0.16),transparent_55%)]"
         aria-hidden="true"

@@ -8,7 +8,7 @@ type PageShellProps = {
 
 export function PageShell({ children, className = '' }: PageShellProps) {
   return (
-    <div className={`relative min-h-[calc(100vh-4rem)] app-mesh-bg ${className}`}>
+    <div className={`relative flex flex-1 flex-col app-mesh-bg ${className}`}>
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}

@@ -22,7 +22,7 @@ const liveEvents = [
 export function ChatPage() {
   return (
     <PageShell className="!py-0">
-      <div className="flex h-[calc(100vh-4rem)]">
+      <div className="flex min-h-0 flex-1">
         <div className="flex flex-1 flex-col">
           <div className="border-b border-border px-6 py-5 lg:px-8">
             <PageHeader

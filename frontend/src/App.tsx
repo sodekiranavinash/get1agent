@@ -11,6 +11,7 @@ import { LoginPage } from './pages/LoginPage'
 import { LogoutPage } from './pages/LogoutPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { ScheduledJobsPage } from './pages/ScheduledJobsPage'
+import { PrivacyPage } from './pages/PrivacyPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ToolsPage } from './pages/ToolsPage'
 import { WorkflowBuilderPage } from './pages/WorkflowBuilderPage'
@@ -35,6 +36,7 @@ function App() {
           <Route path="/administration" element={<AdministrationPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
         </Route>
       </Route>
       <Route path="*" element={<NotFoundPage />} />
