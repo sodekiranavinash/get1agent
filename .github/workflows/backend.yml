@@ -3,16 +3,8 @@ name: Backend
 on:
   workflow_dispatch:
     inputs:
-      deploy:
-        description: Upload to Lambda (uncheck for package/test only)
-        type: boolean
-        default: true
-      force:
-        description: Upload even if zip SHA already matches live function
-        type: boolean
-        default: false
       health_check:
-        description: backend/health-check (get1agent-prod-health-check)
+        description: Deploy health-check
         type: boolean
         default: true
 
@@ -42,7 +34,7 @@ jobs:
           SELECT_HEALTH_CHECK: ${{ inputs.health_check }}
         run: |
           include="$(bash infra/aws/build-backend-matrix.sh)"
-          echo "Selected: $include"
+          echo "Deploying: $include"
           {
             echo "include<<EOF"
             echo "$include"
@@ -66,50 +58,30 @@ jobs:
         with:
           node-version: 22
 
-      - name: Test and package
+      - name: Package
         run: make package
         working-directory: ${{ matrix.lambda_dir }}
 
-      - name: Upload zip artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.function_name }}-zip
-          path: ${{ matrix.lambda_dir }}/dist/function.zip
-
       - name: Configure AWS credentials
-        if: inputs.deploy
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Update Lambda code
-        if: inputs.deploy
+      - name: Deploy Lambda
         env:
           FUNCTION_NAME: ${{ matrix.function_name }}
           ZIP: ${{ matrix.lambda_dir }}/dist/function.zip
-          FORCE: ${{ inputs.force }}
         run: |
           if ! aws lambda get-function --function-name "$FUNCTION_NAME" >/dev/null; then
             echo "Function $FUNCTION_NAME does not exist. Run Infra with Prod checked first." >&2
             exit 1
           fi
-
-          local_sha="$(python3 -c "import base64,hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(base64.b64encode(hashlib.sha256(p.read_bytes()).digest()).decode())" "$ZIP")"
-          remote_sha="$(aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --query CodeSha256 --output text)"
-          echo "local  CodeSha256=$local_sha"
-          echo "remote CodeSha256=$remote_sha"
-
-          if [[ "$FORCE" != "true" && "$local_sha" == "$remote_sha" ]]; then
-            echo "Zip matches live function; skipping upload."
-            exit 0
-          fi
-
           aws lambda update-function-code \
             --function-name "$FUNCTION_NAME" \
             --zip-file "fileb://$ZIP"
           aws lambda wait function-updated --function-name "$FUNCTION_NAME"
           aws lambda get-function --function-name "$FUNCTION_NAME" \
-            --query 'Configuration.{FunctionName:FunctionName,LastModified:LastModified,CodeSize:CodeSize,CodeSha256:CodeSha256}' \
+            --query 'Configuration.{FunctionName:FunctionName,LastModified:LastModified,CodeSize:CodeSize}' \
             --output table

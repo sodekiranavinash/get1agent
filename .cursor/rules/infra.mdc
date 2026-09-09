@@ -15,8 +15,8 @@ alwaysApply: false
 
 ## GitHub Actions
 - **Infra** — bootstrap / web / frontend / prod (checkboxes)
-- **Backend** — backend Lambdas from `backend/registry.json` (checkboxes)
-- **Tools** — tool Lambdas from `tools/registry.json` (checkboxes)
+- **Backend** — one checkbox per Lambda = deploy
+- **Tools** — one checkbox per tool = deploy
 
 ## Deploy scripts
 - `infra/aws/deploy-all.sh` — full infra apply

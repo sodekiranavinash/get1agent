@@ -104,7 +104,7 @@ make -C backend/health-check package
 bash infra/aws/deploy-backend.sh health-check deploy
 ```
 
-GitHub Actions: **Backend** workflow — check `health-check`, uncheck **Deploy** for package-only.
+GitHub Actions: **Backend** workflow — check `health-check` to deploy.
 
 ---
 
@@ -160,8 +160,8 @@ Three workflows — each has checkboxes to run only what you need:
 | Workflow | Components (checkboxes) |
 |----------|-------------------------|
 | **Infra** | Bootstrap, Web, Frontend, Prod · Apply vs plan |
-| **Backend** | `health-check` · Deploy vs package-only · Force upload |
-| **Tools** | `challan-extractor` · Deploy vs package-only · Force upload |
+| **Backend** | `health-check` — one checkbox = deploy that Lambda |
+| **Tools** | `challan-extractor` — one checkbox = deploy that Lambda |
 
 Push to `main` under `frontend/**` auto-runs **Infra** with Frontend only.
 

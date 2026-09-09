@@ -8,23 +8,23 @@ on:
   workflow_dispatch:
     inputs:
       apply:
-        description: Apply changes (uncheck for plan only)
+        description: Apply (uncheck for plan only)
         type: boolean
         default: true
       bootstrap:
-        description: Terraform bootstrap (S3 state bucket)
+        description: Bootstrap - S3 state bucket
         type: boolean
         default: true
       web:
-        description: Terraform web (S3 website bucket)
+        description: Web - S3 website bucket
         type: boolean
         default: true
       frontend:
-        description: Build + sync frontend to S3
+        description: Frontend - build and sync to S3
         type: boolean
         default: false
       prod:
-        description: Terraform prod (API Gateway, VPC/RDS, Lambdas)
+        description: Prod - API Gateway, VPC/RDS, Lambdas
         type: boolean
         default: true
 
@@ -50,72 +50,53 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Resolve components
-        id: pick
-        env:
-          EVENT: ${{ github.event_name }}
-          INPUT_BOOTSTRAP: ${{ inputs.bootstrap }}
-          INPUT_WEB: ${{ inputs.web }}
-          INPUT_FRONTEND: ${{ inputs.frontend }}
-          INPUT_PROD: ${{ inputs.prod }}
-          INPUT_APPLY: ${{ inputs.apply }}
+      - name: Require at least one component
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          inputs.bootstrap == false &&
+          inputs.web == false &&
+          inputs.frontend == false &&
+          inputs.prod == false
         run: |
-          if [[ "$EVENT" == "push" ]]; then
-            echo "bootstrap=false" >> "$GITHUB_OUTPUT"
-            echo "web=false" >> "$GITHUB_OUTPUT"
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-            echo "prod=false" >> "$GITHUB_OUTPUT"
-            echo "mode=apply" >> "$GITHUB_OUTPUT"
-          else
-            echo "bootstrap=$INPUT_BOOTSTRAP" >> "$GITHUB_OUTPUT"
-            echo "web=$INPUT_WEB" >> "$GITHUB_OUTPUT"
-            echo "frontend=$INPUT_FRONTEND" >> "$GITHUB_OUTPUT"
-            echo "prod=$INPUT_PROD" >> "$GITHUB_OUTPUT"
-            if [[ "$INPUT_APPLY" == "true" ]]; then
-              echo "mode=apply" >> "$GITHUB_OUTPUT"
-            else
-              echo "mode=plan" >> "$GITHUB_OUTPUT"
-            fi
-          fi
-
-          if [[ "$(grep -E '=true' "$GITHUB_OUTPUT" | grep -v mode || true)" == "" ]]; then
-            echo "Select at least one component." >&2
-            exit 1
-          fi
+          echo "Select at least one component (Bootstrap, Web, Frontend, or Prod)." >&2
+          exit 1
 
       - name: Read Terraform version
-        if: steps.pick.outputs.bootstrap == 'true' || steps.pick.outputs.web == 'true' || steps.pick.outputs.prod == 'true'
+        if: >-
+          (github.event_name == 'workflow_dispatch' && (inputs.bootstrap || inputs.web || inputs.prod)) ||
+          github.event_name == 'push'
         id: tfver
         run: echo "version=$(tr -d '[:space:]' < infra/terraform/.terraform-version)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Terraform
-        if: steps.pick.outputs.bootstrap == 'true' || steps.pick.outputs.web == 'true' || steps.pick.outputs.prod == 'true'
+        if: >-
+          github.event_name == 'workflow_dispatch' && (inputs.bootstrap || inputs.web || inputs.prod)
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ steps.tfver.outputs.version }}
           terraform_wrapper: false
 
       - name: Setup Go
-        if: steps.pick.outputs.prod == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.prod
         uses: actions/setup-go@v5
         with:
           go-version-file: tools/challan-extractor/go.mod
           cache-dependency-path: tools/challan-extractor/go.sum
 
       - name: Setup Node.js
-        if: steps.pick.outputs.frontend == 'true' || steps.pick.outputs.prod == 'true'
+        if: >-
+          github.event_name == 'push' ||
+          (github.event_name == 'workflow_dispatch' && (inputs.frontend || inputs.prod))
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Terraform fmt
-        if: steps.pick.outputs.bootstrap == 'true' || steps.pick.outputs.web == 'true' || steps.pick.outputs.prod == 'true'
-        run: terraform fmt -check -recursive -diff infra/terraform
+        if: github.event_name == 'workflow_dispatch' && (inputs.bootstrap || inputs.web || inputs.prod)
+        run: terraform fmt -check -recursive infra/terraform
 
       - name: Write prod terraform.tfvars
-        if: steps.pick.outputs.prod == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.prod
         run: |
           cat > infra/terraform/envs/prod/terraform.tfvars <<'EOF'
           aws_region               = "us-east-1"
@@ -125,17 +106,17 @@ jobs:
           EOF
 
       - name: Package challan-extractor zip
-        if: steps.pick.outputs.prod == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.prod
         run: make package
         working-directory: tools/challan-extractor
 
       - name: Package backend health-check zip
-        if: steps.pick.outputs.prod == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.prod
         run: make package
         working-directory: backend/health-check
 
       - name: Verify Lambda zips
-        if: steps.pick.outputs.prod == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.prod
         run: |
           test -s tools/challan-extractor/dist/function.zip
           unzip -l tools/challan-extractor/dist/function.zip | grep bootstrap
@@ -143,41 +124,59 @@ jobs:
           unzip -l backend/health-check/dist/function.zip | grep index.js
 
       - name: Terraform validate
-        if: steps.pick.outputs.prod == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.prod
         working-directory: infra/terraform/envs/prod
         run: |
           terraform init -backend=false -input=false
           terraform validate
 
       - name: Configure AWS credentials
-        if: steps.pick.outputs.bootstrap == 'true' || steps.pick.outputs.web == 'true' || steps.pick.outputs.frontend == 'true' || steps.pick.outputs.prod == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Bootstrap (S3 Terraform state)
-        if: steps.pick.outputs.bootstrap == 'true'
-        run: bash infra/aws/run-terraform.sh bootstrap "${{ steps.pick.outputs.mode }}"
+      - name: Bootstrap
+        if: github.event_name == 'workflow_dispatch' && inputs.bootstrap
+        run: |
+          if [[ "${{ inputs.apply }}" == "true" ]]; then
+            bash infra/aws/run-terraform.sh bootstrap apply
+          else
+            bash infra/aws/run-terraform.sh bootstrap plan
+          fi
 
-      - name: Web (S3 website)
-        if: steps.pick.outputs.web == 'true'
-        run: bash infra/aws/run-terraform.sh web "${{ steps.pick.outputs.mode }}"
+      - name: Web
+        if: github.event_name == 'workflow_dispatch' && inputs.web
+        run: |
+          if [[ "${{ inputs.apply }}" == "true" ]]; then
+            bash infra/aws/run-terraform.sh web apply
+          else
+            bash infra/aws/run-terraform.sh web plan
+          fi
 
-      - name: Prod (API Gateway + VPC/RDS)
-        if: steps.pick.outputs.prod == 'true'
-        run: bash infra/aws/run-terraform.sh prod "${{ steps.pick.outputs.mode }}"
+      - name: Prod
+        if: github.event_name == 'workflow_dispatch' && inputs.prod
+        run: |
+          if [[ "${{ inputs.apply }}" == "true" ]]; then
+            bash infra/aws/run-terraform.sh prod apply
+          else
+            bash infra/aws/run-terraform.sh prod plan
+          fi
 
       - name: Build frontend
-        if: steps.pick.outputs.frontend == 'true'
+        if: >-
+          github.event_name == 'push' ||
+          (github.event_name == 'workflow_dispatch' && inputs.frontend)
         working-directory: frontend
         run: |
           npm ci
           npm run build
 
       - name: Deploy frontend to S3
-        if: steps.pick.outputs.frontend == 'true' && steps.pick.outputs.mode == 'apply'
+        if: >-
+          github.event_name == 'push' ||
+          (github.event_name == 'workflow_dispatch' && inputs.frontend && inputs.apply)
         run: |
           if ! aws s3api head-bucket --bucket "$SITE_BUCKET"; then
             echo "Bucket $SITE_BUCKET does not exist. Run Infra with Web checked first." >&2
@@ -190,9 +189,10 @@ jobs:
           aws s3 cp frontend/dist/index.html "s3://$SITE_BUCKET/index.html" \
             --content-type "text/html" \
             --cache-control "no-cache"
+          echo "- Frontend: https://www.get1agent.com" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Print outputs
-        if: steps.pick.outputs.prod == 'true' && steps.pick.outputs.mode == 'apply'
+      - name: Print prod outputs
+        if: github.event_name == 'workflow_dispatch' && inputs.prod && inputs.apply
         working-directory: infra/terraform/envs/prod
         run: |
           terraform init -input=false -no-color
@@ -205,17 +205,13 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "## VPC/RDS" >> "$GITHUB_STEP_SUMMARY"
           echo "- Jumpbox: $(terraform output -raw jumpbox_instance_id) (stopped after apply)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Local DB: \`bash infra/aws/db-access.sh\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Local DB: bash infra/aws/db-access.sh" >> "$GITHUB_STEP_SUMMARY"
           echo "- API CNAME: $(terraform output -raw api_gateway_cname_target)" >> "$GITHUB_STEP_SUMMARY"
           JUMPBOX_ID="$(terraform output -raw jumpbox_instance_id)"
           aws ec2 stop-instances --region "$AWS_REGION" --instance-ids "$JUMPBOX_ID" >/dev/null 2>&1 || true
 
-      - name: Frontend summary
-        if: steps.pick.outputs.frontend == 'true' && steps.pick.outputs.mode == 'apply'
-        run: echo "- Frontend: https://www.get1agent.com" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Upload Terraform plans
-        if: steps.pick.outputs.mode == 'plan'
+        if: github.event_name == 'workflow_dispatch' && inputs.apply == false && (inputs.bootstrap || inputs.web || inputs.prod)
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plans
