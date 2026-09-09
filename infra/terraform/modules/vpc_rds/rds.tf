@@ -9,26 +9,22 @@ resource "random_password" "db_master" {
   special = false
 }
 
-resource "aws_secretsmanager_secret" "db_credentials" {
-  name                    = "${var.name_prefix}/postgres-credentials"
-  description             = "Master PostgreSQL credentials for DBeaver / SSM tunnel only"
-  recovery_window_in_days = 7
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "aws_secretsmanager_secret_version" "db_credentials" {
-  secret_id = aws_secretsmanager_secret.db_credentials.id
-  secret_string = jsonencode({
+resource "aws_ssm_parameter" "db_credentials" {
+  name        = "/${var.name_prefix}/postgres/credentials"
+  description = "Master PostgreSQL credentials (SecureString)"
+  type        = "SecureString"
+  value = jsonencode({
     username = var.db_username
     password = random_password.db_master.result
     dbname   = var.db_name
     engine   = "postgres"
     port     = 5432
-    purpose  = "dbeaver-and-admin-tunnel-only"
+    purpose  = "admin-only"
   })
+
+  tags = {
+    Name = "${var.name_prefix}-postgres-credentials"
+  }
 }
 
 resource "aws_db_instance" "postgres" {
@@ -72,26 +68,22 @@ resource "aws_db_instance" "postgres" {
   }
 }
 
-resource "aws_secretsmanager_secret" "db_connection" {
-  name                    = "${var.name_prefix}/postgres-connection"
-  description             = "DBeaver connection details (master user + password)"
-  recovery_window_in_days = 7
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "aws_secretsmanager_secret_version" "db_connection" {
-  secret_id = aws_secretsmanager_secret.db_connection.id
-  secret_string = jsonencode({
-    host         = aws_db_instance.postgres.address
-    port         = aws_db_instance.postgres.port
-    dbname       = var.db_name
-    username     = var.db_username
-    password     = random_password.db_master.result
-    sslmode      = "require"
-    iam_user     = var.db_iam_username
-    dbeaver_note = "Run bash infra/aws/db-tunnel.sh then connect DBeaver to localhost:15432"
+resource "aws_ssm_parameter" "db_connection" {
+  name        = "/${var.name_prefix}/postgres/connection"
+  description = "PostgreSQL connection details (master user + password)"
+  type        = "SecureString"
+  value = jsonencode({
+    host     = aws_db_instance.postgres.address
+    port     = aws_db_instance.postgres.port
+    dbname   = var.db_name
+    username = var.db_username
+    password = random_password.db_master.result
+    sslmode  = "require"
+    iam_user = var.db_iam_username
+    note     = "RDS is private; reach from jumpbox EC2 or VPC Lambdas only"
   })
+
+  tags = {
+    Name = "${var.name_prefix}-postgres-connection"
+  }
 }

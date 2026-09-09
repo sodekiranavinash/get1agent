@@ -12,7 +12,7 @@ module "api_gateway" {
     "http://localhost:5173",
   ]
 
-  lambda_routes = var.enable_data_plane ? {
+  lambda_routes = var.enable_vpc_rds ? {
     health_db = {
       method               = "GET"
       path                 = "/health/db"

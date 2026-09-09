@@ -29,44 +29,43 @@ output "auth0_audience" {
 }
 
 output "jumpbox_instance_id" {
-  description = "SSM jumpbox EC2 instance ID"
-  value       = try(module.data_plane[0].jumpbox_instance_id, null)
+  description = "On-demand jumpbox EC2 (stop when idle to avoid public IPv4 charges)"
+  value       = try(module.vpc_rds[0].jumpbox_instance_id, null)
+}
+
+output "db_access_command" {
+  description = "Start jumpbox, tunnel to RDS, stop on exit (minimal IPv4 cost)"
+  value       = try(module.vpc_rds[0].db_access_command, null)
 }
 
 output "app_instance_id" {
-  description = "Alias for jumpbox_instance_id (db tunnel scripts)"
-  value       = try(module.data_plane[0].app_instance_id, null)
+  description = "Alias for jumpbox_instance_id"
+  value       = try(module.vpc_rds[0].app_instance_id, null)
 }
 
 output "postgres_endpoint" {
   description = "RDS hostname (private)"
-  value       = try(module.data_plane[0].postgres_endpoint, null)
+  value       = try(module.vpc_rds[0].postgres_endpoint, null)
 }
 
 output "postgres_db_name" {
-  value = try(module.data_plane[0].postgres_db_name, null)
+  value = try(module.vpc_rds[0].postgres_db_name, null)
 }
 
 output "postgres_username" {
-  value = try(module.data_plane[0].postgres_username, null)
+  value = try(module.vpc_rds[0].postgres_username, null)
 }
 
 output "db_iam_username" {
-  value = try(module.data_plane[0].db_iam_username, null)
+  value = try(module.vpc_rds[0].db_iam_username, null)
 }
 
-output "postgres_credentials_secret_arn" {
-  value = try(module.data_plane[0].postgres_credentials_secret_arn, null)
+output "postgres_credentials_parameter_name" {
+  description = "SSM path for master DB credentials (SecureString)"
+  value       = try(module.vpc_rds[0].postgres_credentials_parameter_name, null)
 }
 
-output "postgres_connection_secret_arn" {
-  value = try(module.data_plane[0].postgres_connection_secret_arn, null)
-}
-
-output "db_tunnel_command" {
-  value = try(module.data_plane[0].db_tunnel_command, null)
-}
-
-output "ssm_tunnel_command" {
-  value = try(module.data_plane[0].ssm_tunnel_command, null)
+output "postgres_connection_parameter_name" {
+  description = "SSM path for connection JSON (SecureString)"
+  value       = try(module.vpc_rds[0].postgres_connection_parameter_name, null)
 }

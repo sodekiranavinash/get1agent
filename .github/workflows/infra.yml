@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       apply:
-        description: Apply bootstrap, web, prod (Lambda + optional data plane EC2/RDS)
+        description: Apply bootstrap, web, prod (Lambda + optional VPC/RDS EC2)
         type: boolean
         default: true
 
@@ -48,25 +48,12 @@ jobs:
       - name: Terraform fmt
         run: terraform fmt -check -recursive -diff infra/terraform
 
-      - name: Terraform validate
-        working-directory: infra/terraform/envs/prod
-        run: |
-          terraform init -backend=false -input=false
-          terraform validate
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
       - name: Write prod terraform.tfvars
         run: |
           cat > infra/terraform/envs/prod/terraform.tfvars <<'EOF'
           aws_region               = "us-east-1"
           package_path             = "../../../../tools/challan-extractor/dist/function.zip"
-          enable_data_plane        = true
+          enable_vpc_rds           = true
           enable_api_custom_domain = true
           EOF
 
@@ -90,6 +77,19 @@ jobs:
           test -s backend/health-check/dist/function.zip
           unzip -l backend/health-check/dist/function.zip | grep index.js
 
+      - name: Terraform validate
+        working-directory: infra/terraform/envs/prod
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Decide plan vs apply
         id: mode
         run: |
@@ -105,7 +105,7 @@ jobs:
       - name: Web (S3 website)
         run: bash infra/aws/run-terraform.sh web "${{ steps.mode.outputs.mode }}"
 
-      - name: Prod (Lambda + data plane)
+      - name: Prod (Lambda + VPC/RDS)
         run: bash infra/aws/run-terraform.sh prod "${{ steps.mode.outputs.mode }}"
 
       - name: Print outputs
@@ -120,9 +120,12 @@ jobs:
           echo "- DB health: ${API_URL}health/db" >> "$GITHUB_STEP_SUMMARY"
           echo "- Auth0 audience: $(terraform output -raw auth0_audience)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "## Data plane (jumpbox + RDS)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- DB tunnel: \`bash infra/aws/db-tunnel.sh\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "## VPC/RDS (jumpbox + PostgreSQL)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Jumpbox: $(terraform output -raw jumpbox_instance_id) (stopped after apply — no idle IPv4 cost)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Local DB access: \`bash infra/aws/db-access.sh\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- API CNAME target: $(terraform output -raw api_gateway_cname_target)" >> "$GITHUB_STEP_SUMMARY"
+          JUMPBOX_ID="$(terraform output -raw jumpbox_instance_id)"
+          aws ec2 stop-instances --region "$AWS_REGION" --instance-ids "$JUMPBOX_ID" >/dev/null 2>&1 || true
 
       - name: Upload Terraform plans
         if: inputs.apply != true

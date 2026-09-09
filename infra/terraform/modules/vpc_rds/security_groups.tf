@@ -1,10 +1,10 @@
 resource "aws_security_group" "jumpbox" {
   name        = "${var.name_prefix}-jumpbox"
-  description = "SSM jumpbox for RDS tunneling (no inbound ports)"
+  description = "On-demand jumpbox: SSM from laptop, egress to RDS only (no inbound ports)"
   vpc_id      = aws_vpc.main.id
 
   egress {
-    description = "All outbound"
+    description = "SSM and package updates (public IP only while instance is running)"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -23,7 +23,7 @@ resource "aws_security_group" "jumpbox" {
 
 resource "aws_security_group" "postgres" {
   name        = "${var.name_prefix}-postgres"
-  description = "PostgreSQL reachable only from the app EC2"
+  description = "PostgreSQL reachable from jumpbox EC2 and VPC Lambdas"
   vpc_id      = aws_vpc.main.id
 
   egress {

@@ -8,7 +8,7 @@ alwaysApply: false
 - UI: S3 + Cloudflare (`infra/terraform/envs/web`)
 - API: **AWS API Gateway HTTP API** (`infra/terraform/modules/api_gateway`) + Auth0 JWT
 - API domain: `api.get1agent.com` → Cloudflare CNAME → API Gateway
-- Data: RDS PostgreSQL + **SSM jumpbox EC2** (`infra/terraform/modules/data_plane`) for DB tunnel only
+- Data: RDS PostgreSQL + on-demand **jumpbox EC2** (`infra/terraform/modules/vpc_rds`); public IPv4 only while `db-access.sh` runs
 - Tool Lambdas: `infra/terraform/modules/lambda_tool` (Go tools in `tools/`)
 - Backend Lambdas: `infra/terraform/modules/lambda_rds` (TypeScript in `backend/`, registry in `backend/registry.json`)
 - API routes: `infra/terraform/envs/prod/api_gateway.tf`
@@ -16,7 +16,8 @@ alwaysApply: false
 ## Deploy scripts
 - `infra/aws/deploy-all.sh` — full infra apply
 - `infra/aws/deploy-infra.sh` — Terraform only
-- `infra/aws/db-tunnel.sh` — SSM port forward to RDS for DBeaver
+- `infra/aws/db-access.sh` — start jumpbox, SSM tunnel to RDS, stop on exit (minimal IPv4 cost)
+- `infra/aws/cleanup-legacy-aws.sh` — remove Kong-era EIPs, SGs, Secrets Manager secrets
 - `infra/aws/deploy-backend.sh` — package/deploy backend/* Lambdas
 
 Full guide: **`infra/DEPLOY.md`**

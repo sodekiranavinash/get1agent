@@ -1,6 +1,6 @@
 # Deploy get1agent on AWS
 
-**API Gateway HTTP API** handles `api.get1agent.com` with Auth0 JWT, CORS, and throttling. **EC2 jumpbox** is SSM-only for RDS tunneling. **Lambdas** are added as API routes in Terraform.
+**API Gateway HTTP API** handles `api.get1agent.com` with Auth0 JWT, CORS, and throttling. **On-demand EC2 jumpbox** gets a public IPv4 only while you use `db-access.sh` (stopped when idle). **Lambdas** are added as API routes in Terraform.
 
 ---
 
@@ -62,14 +62,14 @@ curl -s https://api.get1agent.com/health/db
 ## Architecture
 
 ```
-Browser → Cloudflare → API Gateway (JWT) → Lambda functions
-DBeaver → SSM tunnel → EC2 jumpbox → RDS PostgreSQL (private)
+Browser → Cloudflare → API Gateway (JWT) → Lambda functions → RDS PostgreSQL (private VPC)
+EC2 jumpbox (on-demand, public IPv4 only while running) → RDS PostgreSQL
 ```
 
 | Component | Role |
 |-----------|------|
 | **API Gateway** | Auth0 JWT, CORS, per-route + stage throttling, access logs |
-| **EC2 jumpbox** | SSM only — no public ports, no Kong |
+| **EC2 jumpbox** | Started by `db-access.sh`; SSM tunnel to RDS; **stopped on exit** (no IPv4 bill while idle) |
 | **RDS** | `get1agent` database for app/Lambdas |
 
 ---
@@ -130,14 +130,26 @@ Lambdas must handle **API Gateway HTTP API v2** events (not raw JSON).
 
 ---
 
-## DBeaver (SSM tunnel)
+## Local DB access (on-demand, minimal cost)
+
+Public IPv4 costs **~$0.005/hr only while the jumpbox is running**. The script stops EC2 when you exit (releases the IP).
 
 ```bash
-bash infra/aws/db-tunnel.sh --show-creds
-bash infra/aws/db-tunnel.sh
+# Credentials (no EC2 start)
+bash infra/aws/db-access.sh --show-creds
+
+# Start jumpbox → tunnel localhost:15432 → RDS → stop jumpbox on Ctrl+C
+bash infra/aws/db-access.sh
 ```
 
-Connect DBeaver to `localhost:15432` (master user from Secrets Manager).
+**DBeaver:** host `localhost`, port `15432`, SSH tab **OFF**, SSL require.
+
+```bash
+# Stop jumpbox manually if needed
+bash infra/aws/db-access.sh --stop
+```
+
+RDS is **private** — reachable from VPC Lambdas and the jumpbox while it is running.
 
 ---
 
@@ -158,11 +170,25 @@ Connect DBeaver to `localhost:15432` (master user from Secrets Manager).
 |---------|-----------|
 | API Gateway HTTP API | 1M requests/month (12 months) |
 | Lambda | 1M requests/month |
-| EC2 `t4g.micro` | 750 hours/month |
+| EC2 `t4g.micro` (stop when idle via `db-access.sh`) | 750 hours/month |
 | RDS `db.t4g.micro` | 750 hours/month |
+| Public IPv4 | ~$0.005/hr **only while jumpbox is running** |
 | CloudWatch logs | 5 GB ingestion |
+| SSM Parameter Store (SecureString) | Standard parameters are free |
 
 No WAF by default (adds ~$5/month if needed later).
+
+DB credentials live in **SSM Parameter Store** (not Secrets Manager — saves ~$0.80/month).
+
+### Remove Kong-era leftovers
+
+After migrating from Kong, run once:
+
+```bash
+bash infra/aws/cleanup-legacy-aws.sh
+```
+
+Removes orphaned Kong security groups, Elastic IPs, and old Secrets Manager secrets.
 
 ---
 

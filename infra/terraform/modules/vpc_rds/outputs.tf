@@ -19,12 +19,17 @@ output "postgres_resource_id" {
 }
 
 output "jumpbox_instance_id" {
-  description = "EC2 jumpbox instance ID (SSM DB tunnel)"
+  description = "On-demand jumpbox EC2 (stop when idle to avoid public IPv4 charges)"
   value       = aws_instance.jumpbox.id
 }
 
+output "db_access_command" {
+  description = "Start jumpbox, SSM tunnel to RDS, stop on exit"
+  value       = "bash infra/aws/db-access.sh"
+}
+
 output "postgres_endpoint" {
-  description = "RDS hostname (private; reach via SSM tunnel)"
+  description = "RDS hostname (private VPC only)"
   value       = aws_db_instance.postgres.address
 }
 
@@ -44,20 +49,14 @@ output "postgres_username" {
   value = var.db_username
 }
 
-output "postgres_credentials_secret_arn" {
-  value = aws_secretsmanager_secret.db_credentials.arn
+output "postgres_credentials_parameter_name" {
+  description = "SSM Parameter Store path for master DB username/password"
+  value       = aws_ssm_parameter.db_credentials.name
 }
 
-output "postgres_connection_secret_arn" {
-  value = aws_secretsmanager_secret.db_connection.arn
-}
-
-output "db_tunnel_command" {
-  value = "bash infra/aws/db-tunnel.sh"
-}
-
-output "ssm_tunnel_command" {
-  value = "aws ssm start-session --target ${aws_instance.jumpbox.id} --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters '{\"host\":[\"${aws_db_instance.postgres.address}\"],\"portNumber\":[\"5432\"],\"localPortNumber\":[\"5432\"]}'"
+output "postgres_connection_parameter_name" {
+  description = "SSM Parameter Store path for full connection JSON"
+  value       = aws_ssm_parameter.db_connection.name
 }
 
 # Backward-compatible alias for scripts still using app_instance_id.

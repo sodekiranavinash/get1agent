@@ -18,7 +18,7 @@ fi
 cat >"$TFVARS" <<EOF
 aws_region               = "us-east-1"
 package_path             = "../../../../tools/challan-extractor/dist/function.zip"
-enable_data_plane        = true
+enable_vpc_rds           = true
 enable_api_custom_domain = true
 EOF
 
@@ -44,7 +44,11 @@ if [[ "$MODE" == "apply" ]]; then
   echo "API URL:     $(terraform output -raw api_url 2>/dev/null || echo n/a)"
   echo "API CNAME:   $(terraform output -raw api_gateway_cname_target 2>/dev/null || echo n/a)"
   echo "RDS host:    $(terraform output -raw postgres_endpoint 2>/dev/null || echo n/a)"
-  echo "DB tunnel:   bash infra/aws/db-tunnel.sh"
+  echo "DB access:   bash infra/aws/db-access.sh  (starts jumpbox only while in use)"
+  JUMPBOX_ID="$(terraform output -raw jumpbox_instance_id 2>/dev/null || true)"
+  if [[ -n "$JUMPBOX_ID" ]]; then
+    aws ec2 stop-instances --region us-east-1 --instance-ids "$JUMPBOX_ID" >/dev/null 2>&1 || true
+  fi
   echo ""
   echo "Auth0 API identifier: https://api.get1agent.com"
 fi

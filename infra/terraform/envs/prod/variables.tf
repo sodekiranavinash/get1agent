@@ -10,25 +10,25 @@ variable "package_path" {
   default     = "../../../../tools/challan-extractor/dist/function.zip"
 }
 
-variable "enable_data_plane" {
+variable "enable_vpc_rds" {
   type        = bool
   default     = false
   description = "Create VPC, SSM jumpbox EC2, and RDS PostgreSQL"
 }
 
-variable "data_plane_db_name" {
+variable "vpc_rds_db_name" {
   type        = string
   default     = "get1agent"
   description = "PostgreSQL app database name"
 }
 
-variable "data_plane_db_username" {
+variable "vpc_rds_db_username" {
   type        = string
   default     = "get1agent"
   description = "PostgreSQL master username"
 }
 
-variable "data_plane_db_iam_username" {
+variable "vpc_rds_db_iam_username" {
   type        = string
   default     = "get1agent_app"
   description = "PostgreSQL IAM user for serverless services"
