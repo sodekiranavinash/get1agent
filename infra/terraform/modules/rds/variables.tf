@@ -20,31 +20,31 @@ variable "db_instance_class" {
 }
 
 variable "db_name" {
-  type        = string
-  default     = "get1agent"
+  type    = string
+  default = "get1agent"
 }
 
 variable "db_username" {
-  type        = string
-  default     = "get1agent"
+  type    = string
+  default = "get1agent"
 }
 
 variable "db_iam_username" {
-  type        = string
-  default     = "get1agent_app"
+  type    = string
+  default = "get1agent_app"
 }
 
 variable "postgres_engine_version" {
-  type        = string
-  default     = "16"
+  type    = string
+  default = "16"
 }
 
 variable "allocated_storage_gb" {
-  type        = number
-  default     = 20
+  type    = number
+  default = 20
 }
 
 variable "backup_retention_days" {
-  type        = number
-  default     = 1
+  type    = number
+  default = 1
 }
