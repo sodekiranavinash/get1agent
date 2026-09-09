@@ -37,6 +37,11 @@ init_s3() {
   terraform init -input=false -no-color -reconfigure
 }
 
+# moved.tf renames (data_plane/vpc_rds → network+rds) must run without -target.
+state_needs_move_migration() {
+  terraform state list 2>/dev/null | grep -qE 'module\.(vpc_rds|data_plane)\['
+}
+
 # First-time bootstrap: S3 backend cannot init until the bucket exists.
 # Override to local, create the bucket, then migrate state onto S3.
 enable_local_backend_override() {
@@ -134,8 +139,14 @@ run_env() {
     fi
 
     if [[ "$env_name" == "prod" && -n "${PROD_TARGETS:-}" ]]; then
-      read -ra TARGET_ARR <<<"$PROD_TARGETS"
-      terraform apply -input=false -no-color -auto-approve -lock-timeout=5m "${TARGET_ARR[@]}"
+      if state_needs_move_migration; then
+        echo "Legacy module addresses (vpc_rds/data_plane) found in state."
+        echo "Running a full apply first to complete moved-block migration; -target is skipped for this run."
+        terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
+      else
+        read -ra TARGET_ARR <<<"$PROD_TARGETS"
+        terraform apply -input=false -no-color -auto-approve -lock-timeout=5m "${TARGET_ARR[@]}"
+      fi
     else
       terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
     fi
