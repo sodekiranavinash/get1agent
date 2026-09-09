@@ -104,7 +104,7 @@ make -C backend/health-check package
 bash infra/aws/deploy-backend.sh health-check deploy
 ```
 
-GitHub Actions: **Backend — deploy Lambda** workflow (`lambda_name`: `health-check`, `get1agent-prod-health-check`, or `all`).
+GitHub Actions: **Backend** workflow — check `health-check`, uncheck **Deploy** for package-only.
 
 ---
 
@@ -155,12 +155,15 @@ RDS is **private** — reachable from VPC Lambdas and the jumpbox while it is ru
 
 ## GitHub Actions
 
-| Workflow | Purpose |
-|----------|---------|
-| **Infra** | Terraform: API Gateway + jumpbox + RDS + Lambdas |
-| **Backend — deploy Lambda** | Package + upload `backend/*` Lambdas |
-| **Tools — deploy Lambda** | Package + upload `tools/*` Lambdas |
-| **Deploy frontend** | S3 static site |
+Three workflows — each has checkboxes to run only what you need:
+
+| Workflow | Components (checkboxes) |
+|----------|-------------------------|
+| **Infra** | Bootstrap, Web, Frontend, Prod · Apply vs plan |
+| **Backend** | `health-check` · Deploy vs package-only · Force upload |
+| **Tools** | `challan-extractor` · Deploy vs package-only · Force upload |
+
+Push to `main` under `frontend/**` auto-runs **Infra** with Frontend only.
 
 ---
 

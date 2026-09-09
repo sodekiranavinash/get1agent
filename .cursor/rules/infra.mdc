@@ -13,6 +13,11 @@ alwaysApply: false
 - Backend Lambdas: `infra/terraform/modules/lambda_rds` (TypeScript in `backend/`, registry in `backend/registry.json`)
 - API routes: `infra/terraform/envs/prod/api_gateway.tf`
 
+## GitHub Actions
+- **Infra** — bootstrap / web / frontend / prod (checkboxes)
+- **Backend** — backend Lambdas from `backend/registry.json` (checkboxes)
+- **Tools** — tool Lambdas from `tools/registry.json` (checkboxes)
+
 ## Deploy scripts
 - `infra/aws/deploy-all.sh` — full infra apply
 - `infra/aws/deploy-infra.sh` — Terraform only
