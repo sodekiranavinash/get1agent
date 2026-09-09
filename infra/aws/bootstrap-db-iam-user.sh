@@ -100,7 +100,8 @@ PY
 
 export PGSSLMODE=require
 # Avoid DO $$ blocks: remote bash expands $$ to its PID before psql runs.
-psql -v ON_ERROR_STOP=0 -c "CREATE USER ${IAM_USER};"
+# psql exits 1 on SQL errors even with ON_ERROR_STOP=0; ignore duplicate user.
+psql -c "CREATE USER ${IAM_USER};" || true
 psql -v ON_ERROR_STOP=1 -c "GRANT rds_iam TO ${IAM_USER};"
 psql -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE ${DB_NAME} TO ${IAM_USER};"
 
