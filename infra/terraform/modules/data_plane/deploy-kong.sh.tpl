@@ -20,6 +20,8 @@ PG_PASSWORD="$(aws rds generate-db-auth-token \
   --username "$KONG_IAM_USER" \
   --region "$REGION")"
 
+docker pull "$KONG_IMAGE"
+
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
 # Bootstrap migrations (idempotent)

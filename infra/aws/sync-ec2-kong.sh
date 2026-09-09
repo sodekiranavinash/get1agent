@@ -4,63 +4,42 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_DIR="$ROOT/infra/terraform/envs/dev"
-MODULE_DIR="$ROOT/infra/terraform/modules/data_plane"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
 cd "$ENV_DIR"
 terraform init -input=false >/dev/null
 
 INSTANCE_ID="$(terraform output -raw app_instance_id)"
-API_HOSTNAME="$(terraform output -raw api_public_hostname)"
-KONG_UI_HOSTNAME="$(terraform output -raw kong_ui_hostname)"
-KONG_ADMIN_SECRET_ARN="$(terraform output -raw kong_admin_credentials_secret_arn)"
-DB_CREDS_SECRET_ARN="$(terraform output -raw postgres_credentials_secret_arn)"
-DB_HOST="$(terraform output -raw postgres_endpoint)"
 
-# Render deploy script with current Terraform outputs
-DEPLOY_SCRIPT="$(sed \
-  -e "s|__REGION__|${AWS_REGION}|g" \
-  -e "s|__KONG_IMAGE__|kong:3.8|g" \
-  -e "s|__DB_HOST__|${DB_HOST}|g" \
-  -e "s|__KONG_DB_NAME__|kong|g" \
-  -e "s|__KONG_IAM_USER__|kong_app|g" \
-  -e "s|__API_HOSTNAME__|${API_HOSTNAME}|g" \
-  -e "s|__KONG_UI_HOSTNAME__|${KONG_UI_HOSTNAME}|g" \
-  "$MODULE_DIR/deploy-kong.sh.tpl")"
+# shellcheck source=/dev/null
+source "$ROOT/infra/aws/render-kong-scripts.sh"
 
-BOOTSTRAP_DB="$(sed \
-  -e "s|__REGION__|${AWS_REGION}|g" \
-  -e "s|__DB_CREDENTIALS_SECRET_ARN__|${DB_CREDS_SECRET_ARN}|g" \
-  -e "s|__DB_HOST__|${DB_HOST}|g" \
-  -e "s|__DB_NAME__|get1agent|g" \
-  -e "s|__DB_MASTER_USER__|get1agent|g" \
-  -e "s|__DB_IAM_USER__|get1agent_app|g" \
-  -e "s|__KONG_DB_NAME__|kong|g" \
-  -e "s|__KONG_IAM_USER__|kong_app|g" \
-  "$MODULE_DIR/bootstrap-db.sh")"
+PARAMS_FILE="$(mktemp)"
+trap 'rm -f "$PARAMS_FILE"' EXIT
 
-BOOTSTRAP_ADMIN="$(sed \
-  -e "s|__REGION__|${AWS_REGION}|g" \
-  -e "s|__KONG_ADMIN_SECRET_ARN__|${KONG_ADMIN_SECRET_ARN}|g" \
-  -e "s|__KONG_UI_HOSTNAME__|${KONG_UI_HOSTNAME}|g" \
-  "$MODULE_DIR/bootstrap-kong-admin.sh")"
-
-# Base64-encode scripts for SSM
-DEPLOY_B64="$(printf '%s' "$DEPLOY_SCRIPT" | base64)"
-BOOTSTRAP_DB_B64="$(printf '%s' "$BOOTSTRAP_DB" | base64)"
-BOOTSTRAP_ADMIN_B64="$(printf '%s' "$BOOTSTRAP_ADMIN" | base64)"
+jq -n \
+  --arg deploy_b64 "$(printf '%s' "$RENDER_DEPLOY_SCRIPT" | base64 | tr -d '\n')" \
+  --arg bootstrap_db_b64 "$(printf '%s' "$RENDER_BOOTSTRAP_DB_SCRIPT" | base64 | tr -d '\n')" \
+  --arg bootstrap_admin_b64 "$(printf '%s' "$RENDER_BOOTSTRAP_ADMIN_SCRIPT" | base64 | tr -d '\n')" \
+  '{
+    commands: [
+      "mkdir -p /opt/get1agent",
+      ("echo " + $deploy_b64 + " | base64 -d > /opt/get1agent/deploy-kong.sh"),
+      "chmod +x /opt/get1agent/deploy-kong.sh",
+      ("echo " + $bootstrap_db_b64 + " | base64 -d > /opt/get1agent/bootstrap-db.sh"),
+      "chmod +x /opt/get1agent/bootstrap-db.sh",
+      ("echo " + $bootstrap_admin_b64 + " | base64 -d > /opt/get1agent/bootstrap-kong-admin.sh"),
+      "chmod +x /opt/get1agent/bootstrap-kong-admin.sh",
+      "rm -f /opt/get1agent/.kong_admin_bootstrapped",
+      "systemctl restart get1agent-kong.service"
+    ]
+  }' >"$PARAMS_FILE"
 
 CMD_ID="$(aws ssm send-command \
   --region "$AWS_REGION" \
   --instance-ids "$INSTANCE_ID" \
   --document-name "AWS-RunShellScript" \
-  --parameters "commands=[
-    \"echo '${DEPLOY_B64}' | base64 -d > /opt/get1agent/deploy-kong.sh && chmod +x /opt/get1agent/deploy-kong.sh\",
-    \"echo '${BOOTSTRAP_DB_B64}' | base64 -d > /opt/get1agent/bootstrap-db.sh && chmod +x /opt/get1agent/bootstrap-db.sh\",
-    \"echo '${BOOTSTRAP_ADMIN_B64}' | base64 -d > /opt/get1agent/bootstrap-kong-admin.sh && chmod +x /opt/get1agent/bootstrap-kong-admin.sh\",
-    \"rm -f /opt/get1agent/.kong_admin_bootstrapped\",
-    \"systemctl restart get1agent-kong.service\"
-  ]" \
+  --parameters "file://$PARAMS_FILE" \
   --query "Command.CommandId" \
   --output text)"
 

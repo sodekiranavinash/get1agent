@@ -34,8 +34,8 @@ curl -sf -X POST "$ADMIN_API/consumers" \
   -d "username=${ADMIN_USER}" >/dev/null 2>&1 || true
 
 curl -sf -X POST "$ADMIN_API/consumers/${ADMIN_USER}/basic-auth" \
-  -d "username=${ADMIN_USER}" \
-  -d "password=${ADMIN_PASS}" >/dev/null 2>&1 || true
+  --data-urlencode "username=${ADMIN_USER}" \
+  --data-urlencode "password=${ADMIN_PASS}" >/dev/null 2>&1 || true
 
 # Route kong.get1agent.com -> Kong Manager (localhost:8002)
 curl -sf -X POST "$ADMIN_API/services" \

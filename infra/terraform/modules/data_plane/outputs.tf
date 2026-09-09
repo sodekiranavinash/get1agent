@@ -53,6 +53,21 @@ output "kong_db_name" {
   value       = var.kong_db_name
 }
 
+output "kong_db_iam_username" {
+  description = "PostgreSQL IAM user for Kong"
+  value       = var.kong_db_iam_username
+}
+
+output "db_iam_username" {
+  description = "PostgreSQL IAM user for future serverless services"
+  value       = var.db_iam_username
+}
+
+output "kong_image" {
+  description = "Kong Gateway Docker image"
+  value       = var.kong_image
+}
+
 output "postgres_username" {
   description = "Master database username"
   value       = var.db_username

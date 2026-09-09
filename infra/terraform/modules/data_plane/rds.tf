@@ -11,7 +11,7 @@ resource "random_password" "db_master" {
 
 resource "random_password" "kong_admin" {
   length  = 24
-  special = true
+  special = false
 }
 
 resource "aws_secretsmanager_secret" "db_credentials" {

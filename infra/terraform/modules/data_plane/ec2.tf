@@ -41,7 +41,7 @@ resource "aws_instance" "app" {
 
   root_block_device {
     volume_type = "gp3"
-    volume_size = 16
+    volume_size = 12
     encrypted   = true
   }
 
@@ -76,6 +76,7 @@ resource "aws_instance" "app" {
     aws_secretsmanager_secret_version.db_credentials,
     aws_secretsmanager_secret_version.kong_admin_credentials,
     aws_db_instance.postgres,
+    aws_security_group_rule.postgres_from_app,
   ]
 }
 

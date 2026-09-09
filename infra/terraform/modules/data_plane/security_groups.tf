@@ -17,6 +17,7 @@ resource "aws_security_group" "app" {
 
   lifecycle {
     create_before_destroy = true
+    ignore_changes        = [description]
   }
 }
 
@@ -33,7 +34,6 @@ resource "aws_security_group_rule" "app_http" {
 
 resource "aws_security_group" "postgres" {
   name        = "${var.name_prefix}-postgres"
-  # Keep original description — changing it forces SG replacement and hits Duplicate name errors.
   description = "PostgreSQL reachable only from the app EC2"
   vpc_id      = aws_vpc.main.id
 
@@ -51,6 +51,8 @@ resource "aws_security_group" "postgres" {
 
   lifecycle {
     create_before_destroy = true
+    # Description changes force SG replacement; AWS rejects duplicate names in the VPC.
+    ignore_changes = [description]
   }
 }
 

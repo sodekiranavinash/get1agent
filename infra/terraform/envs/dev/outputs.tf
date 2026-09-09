@@ -33,6 +33,36 @@ output "postgres_endpoint" {
   value       = try(module.data_plane[0].postgres_endpoint, null)
 }
 
+output "postgres_db_name" {
+  description = "App database name"
+  value       = try(module.data_plane[0].postgres_db_name, null)
+}
+
+output "postgres_username" {
+  description = "Master database username"
+  value       = try(module.data_plane[0].postgres_username, null)
+}
+
+output "kong_db_name" {
+  description = "Kong configuration database name"
+  value       = try(module.data_plane[0].kong_db_name, null)
+}
+
+output "kong_db_iam_username" {
+  description = "PostgreSQL IAM user for Kong"
+  value       = try(module.data_plane[0].kong_db_iam_username, null)
+}
+
+output "db_iam_username" {
+  description = "PostgreSQL IAM user for future serverless services"
+  value       = try(module.data_plane[0].db_iam_username, null)
+}
+
+output "kong_image" {
+  description = "Kong Gateway Docker image"
+  value       = try(module.data_plane[0].kong_image, null)
+}
+
 output "postgres_credentials_secret_arn" {
   description = "Secrets Manager ARN with master DB username/password"
   value       = try(module.data_plane[0].postgres_credentials_secret_arn, null)

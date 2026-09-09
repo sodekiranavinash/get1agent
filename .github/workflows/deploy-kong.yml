@@ -22,6 +22,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Read Terraform version
+        id: tfver
+        run: echo "version=$(tr -d '[:space:]' < infra/terraform/.terraform-version)" >> "$GITHUB_OUTPUT"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -32,7 +36,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: "1.15.0"
+          terraform_version: ${{ steps.tfver.outputs.version }}
           terraform_wrapper: false
 
       - name: Read targets
@@ -47,6 +51,7 @@ jobs:
           echo "instance=$(terraform output -raw app_instance_id)" >> "$GITHUB_OUTPUT"
           echo "api_hostname=$(terraform output -raw api_public_hostname)" >> "$GITHUB_OUTPUT"
           echo "kong_ui=$(terraform output -raw kong_ui_hostname)" >> "$GITHUB_OUTPUT"
+          echo "kong_admin_secret=$(terraform output -raw kong_admin_credentials_secret_arn)" >> "$GITHUB_OUTPUT"
 
       - name: Deploy Kong via SSM
         run: bash infra/aws/deploy-kong.sh
@@ -56,4 +61,4 @@ jobs:
           echo "## Kong deployed" >> "$GITHUB_STEP_SUMMARY"
           echo "- API proxy: https://${{ steps.targets.outputs.api_hostname }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Kong Manager: https://${{ steps.targets.outputs.kong_ui }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Admin creds: \`bash infra/aws/kong-admin-creds.sh\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Admin creds: Secrets Manager \`${{ steps.targets.outputs.kong_admin_secret }}\`" >> "$GITHUB_STEP_SUMMARY"
