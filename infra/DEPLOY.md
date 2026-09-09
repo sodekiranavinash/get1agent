@@ -109,7 +109,8 @@ Registry: `backend/registry.json` — lists **layers** and **lambdas** (with `la
 Handler zips contain **only** `handler.py`. Dependencies ship in Lambda layers.
 
 ```bash
-# Build data layer + handler zip locally (layer build needs Docker for arm64)
+# Build data layer + handler zip locally
+# Layer build: native on Linux arm64; otherwise Docker + public.ecr.aws/lambda/python:3.14 (QEMU on x86_64)
 bash infra/aws/build-backend-layers.sh
 make -C backend/health-check package
 

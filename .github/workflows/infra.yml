@@ -89,6 +89,10 @@ jobs:
         run: make package
         working-directory: tools/challan-extractor
 
+      - name: Set up QEMU
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        uses: docker/setup-qemu-action@v3
+
       - name: Build backend data layer
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: bash infra/aws/build-backend-layers.sh
