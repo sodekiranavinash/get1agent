@@ -9,9 +9,14 @@ resource "random_password" "db_master" {
   special = false
 }
 
+resource "random_password" "kong_admin" {
+  length  = 24
+  special = true
+}
+
 resource "aws_secretsmanager_secret" "db_credentials" {
   name                    = "${var.name_prefix}/postgres-credentials"
-  description             = "Master PostgreSQL credentials for DBeaver / SSM tunnel only (not used by the app)"
+  description             = "Master PostgreSQL credentials for DBeaver / SSM tunnel only"
   recovery_window_in_days = 7
 }
 
@@ -24,6 +29,22 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
     engine   = "postgres"
     port     = 5432
     purpose  = "dbeaver-and-admin-tunnel-only"
+  })
+}
+
+resource "aws_secretsmanager_secret" "kong_admin_credentials" {
+  name                    = "${var.name_prefix}/kong-admin-credentials"
+  description             = "Kong Manager UI login (basic-auth in front of kong.get1agent.com)"
+  recovery_window_in_days = 7
+}
+
+resource "aws_secretsmanager_secret_version" "kong_admin_credentials" {
+  secret_id = aws_secretsmanager_secret.kong_admin_credentials.id
+  secret_string = jsonencode({
+    username = "admin"
+    password = random_password.kong_admin.result
+    ui_url   = "https://${var.kong_ui_hostname}"
+    note     = "Retrieve with: aws secretsmanager get-secret-value --secret-id ${var.name_prefix}/kong-admin-credentials"
   })
 }
 
@@ -65,21 +86,22 @@ resource "aws_db_instance" "postgres" {
 
 resource "aws_secretsmanager_secret" "db_connection" {
   name                    = "${var.name_prefix}/postgres-connection"
-  description             = "DBeaver connection details (master user + password). App uses IAM instead."
+  description             = "DBeaver connection details (master user + password)"
   recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "db_connection" {
   secret_id = aws_secretsmanager_secret.db_connection.id
   secret_string = jsonencode({
-    host         = aws_db_instance.postgres.address
-    port         = aws_db_instance.postgres.port
-    dbname       = var.db_name
-    username     = var.db_username
-    password     = random_password.db_master.result
-    sslmode      = "require"
-    iam_user     = var.db_iam_username
-    app_auth     = "iam-via-ec2-instance-role"
-    dbeaver_note = "Run bash infra/aws/db-tunnel.sh then connect DBeaver to localhost:5432"
+    host          = aws_db_instance.postgres.address
+    port          = aws_db_instance.postgres.port
+    dbname        = var.db_name
+    username      = var.db_username
+    password      = random_password.db_master.result
+    sslmode       = "require"
+    iam_user      = var.db_iam_username
+    kong_db       = var.kong_db_name
+    kong_iam_user = var.kong_db_iam_username
+    dbeaver_note  = "Run bash infra/aws/db-tunnel.sh then connect DBeaver to localhost:15432"
   })
 }

@@ -1,6 +1,6 @@
 resource "aws_security_group" "app" {
-  name        = "${var.name_prefix}-app"
-  description = "FastAPI app server (SSH admin + HTTP API)"
+  name        = "${var.name_prefix}-kong"
+  description = "Kong API Gateway (HTTP proxy on :80)"
   vpc_id      = aws_vpc.main.id
 
   egress {
@@ -12,7 +12,7 @@ resource "aws_security_group" "app" {
   }
 
   tags = {
-    Name = "${var.name_prefix}-app-sg"
+    Name = "${var.name_prefix}-kong-sg"
   }
 
   lifecycle {
@@ -23,7 +23,7 @@ resource "aws_security_group" "app" {
 resource "aws_security_group_rule" "app_http" {
   type              = "ingress"
   security_group_id = aws_security_group.app.id
-  description       = "nginx HTTP Cloudflare"
+  description       = "Kong proxy HTTP (Cloudflare)"
   from_port         = 80
   to_port           = 80
   protocol          = "tcp"
@@ -31,25 +31,13 @@ resource "aws_security_group_rule" "app_http" {
   ipv6_cidr_blocks  = local.cloudflare_ipv6_cidrs
 }
 
-resource "aws_security_group_rule" "app_api" {
-  count = length(var.allowed_api_cidr_blocks) > 0 ? 1 : 0
-
-  type              = "ingress"
-  security_group_id = aws_security_group.app.id
-  description       = "Direct FastAPI access (optional; default is nginx-only)"
-  from_port         = var.api_port
-  to_port           = var.api_port
-  protocol          = "tcp"
-  cidr_blocks       = var.allowed_api_cidr_blocks
-}
-
 resource "aws_security_group" "postgres" {
   name        = "${var.name_prefix}-postgres"
-  description = "PostgreSQL reachable only from the app EC2"
+  description = "PostgreSQL reachable only from the Kong EC2 instance"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description     = "PostgreSQL from app server"
+    description     = "PostgreSQL from Kong server"
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy AWS infrastructure (Terraform): bootstrap + web + dev (EC2, RDS, ECR).
+# Deploy AWS infrastructure (Terraform): bootstrap + web + dev (Kong EC2, RDS).
 #
 # Usage:
 #   bash infra/aws/deploy-infra.sh plan
@@ -37,11 +37,16 @@ if [[ "$MODE" == "apply" ]]; then
   terraform init -input=false >/dev/null
   echo ""
   echo "=== Infra deployed ==="
-  echo "App IP:      $(terraform output -raw app_public_ip 2>/dev/null || echo n/a)"
-  echo "API URL:     $(terraform output -raw api_base_url 2>/dev/null || echo n/a)"
+  echo "Kong IP:     $(terraform output -raw app_public_ip 2>/dev/null || echo n/a)"
   echo "API domain:  $(terraform output -raw api_public_hostname 2>/dev/null || echo n/a)"
+  echo "Kong UI:     $(terraform output -raw kong_ui_hostname 2>/dev/null || echo n/a)"
   echo "RDS host:    $(terraform output -raw postgres_endpoint 2>/dev/null || echo n/a)"
   echo "DB tunnel:   bash infra/aws/db-tunnel.sh"
   echo ""
-  echo "Next: bash infra/aws/deploy-control-plane.sh"
+  echo "Cloudflare DNS (both proxied A records -> Kong IP above):"
+  echo "  api  -> api.get1agent.com"
+  echo "  kong -> kong.get1agent.com"
+  echo ""
+  echo "Kong admin:  bash infra/aws/kong-admin-creds.sh"
+  echo "Next:        bash infra/aws/deploy-kong.sh"
 fi

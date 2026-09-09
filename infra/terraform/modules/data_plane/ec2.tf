@@ -1,5 +1,5 @@
 resource "aws_iam_role" "app" {
-  name = "${var.name_prefix}-app"
+  name = "${var.name_prefix}-kong"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -19,7 +19,7 @@ resource "aws_iam_role_policy_attachment" "app_ssm" {
 }
 
 resource "aws_iam_instance_profile" "app" {
-  name = "${var.name_prefix}-app"
+  name = "${var.name_prefix}-kong"
   role = aws_iam_role.app.name
 }
 
@@ -41,27 +41,31 @@ resource "aws_instance" "app" {
 
   root_block_device {
     volume_type = "gp3"
-    volume_size = 12
+    volume_size = 16
     encrypted   = true
   }
 
   user_data = templatefile("${path.module}/app_user_data.sh", {
-    aws_region                = data.aws_region.current.name
-    ecr_repository_url        = aws_ecr_repository.api.repository_url
-    api_port                  = var.api_port
-    api_hostname              = var.api_hostname
-    name_prefix               = var.name_prefix
-    db_credentials_secret_arn = aws_secretsmanager_secret.db_credentials.arn
-    db_host                   = aws_db_instance.postgres.address
-    db_name                   = var.db_name
-    db_master_username        = var.db_username
-    db_iam_username           = var.db_iam_username
-    setup_nginx_script        = file("${path.module}/setup-nginx.sh")
-    deploy_api_script         = file("${path.module}/deploy-api.sh.tpl")
+    aws_region                  = data.aws_region.current.name
+    api_hostname                = var.api_hostname
+    kong_ui_hostname            = var.kong_ui_hostname
+    kong_image                  = var.kong_image
+    name_prefix                 = var.name_prefix
+    db_credentials_secret_arn   = aws_secretsmanager_secret.db_credentials.arn
+    kong_admin_secret_arn       = aws_secretsmanager_secret.kong_admin_credentials.arn
+    db_host                     = aws_db_instance.postgres.address
+    db_name                     = var.db_name
+    db_master_username          = var.db_username
+    db_iam_username             = var.db_iam_username
+    kong_db_name                = var.kong_db_name
+    kong_db_iam_username        = var.kong_db_iam_username
+    bootstrap_db_script         = file("${path.module}/bootstrap-db.sh")
+    deploy_kong_script          = file("${path.module}/deploy-kong.sh.tpl")
+    bootstrap_kong_admin_script = file("${path.module}/bootstrap-kong-admin.sh")
   })
 
   tags = {
-    Name = "${var.name_prefix}-app"
+    Name = "${var.name_prefix}-kong"
   }
 
   lifecycle {
@@ -70,8 +74,8 @@ resource "aws_instance" "app" {
 
   depends_on = [
     aws_secretsmanager_secret_version.db_credentials,
+    aws_secretsmanager_secret_version.kong_admin_credentials,
     aws_db_instance.postgres,
-    aws_ecr_repository.api,
   ]
 }
 
@@ -81,7 +85,7 @@ resource "aws_eip" "app" {
   domain = "vpc"
 
   tags = {
-    Name = "${var.name_prefix}-app-eip"
+    Name = "${var.name_prefix}-kong-eip"
   }
 }
 

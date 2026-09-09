@@ -98,11 +98,13 @@ jobs:
             echo "Data plane not deployed." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          echo "## Data plane" >> "$GITHUB_STEP_SUMMARY"
-          echo "- API URL: $(terraform output -raw api_base_url)" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Data plane (Kong + RDS)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Kong IP: $(terraform output -raw app_public_ip)" >> "$GITHUB_STEP_SUMMARY"
           echo "- API domain: $(terraform output -raw api_public_hostname)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Kong UI: $(terraform output -raw kong_ui_hostname)" >> "$GITHUB_STEP_SUMMARY"
           echo "- DB tunnel: \`bash infra/aws/db-tunnel.sh\` (SSM, no SSH)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Next: run **Deploy control_plane** workflow" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Cloudflare: A records \`api\` and \`kong\` -> Kong IP above" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Next: run **Deploy Kong** workflow" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Terraform plans
         if: inputs.apply != true

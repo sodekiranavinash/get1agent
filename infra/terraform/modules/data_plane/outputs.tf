@@ -4,7 +4,7 @@ output "vpc_id" {
 }
 
 output "app_public_ip" {
-  description = "Elastic IP of the app EC2 instance"
+  description = "Elastic IP of the Kong EC2 instance"
   value       = aws_eip.app.public_ip
 }
 
@@ -14,7 +14,7 @@ output "app_instance_id" {
 }
 
 output "api_base_url" {
-  description = "API base URL via nginx on port 80 (point api.<domain> A record here in Cloudflare)"
+  description = "Kong proxy URL on port 80 (point api.<domain> A record here in Cloudflare)"
   value       = "http://${aws_eip.app.public_ip}"
 }
 
@@ -23,9 +23,14 @@ output "api_public_hostname" {
   value       = var.api_hostname
 }
 
-output "ecr_repository_url" {
-  description = "ECR repository URL for the FastAPI image"
-  value       = aws_ecr_repository.api.repository_url
+output "kong_ui_hostname" {
+  description = "Cloudflare DNS: proxied A record kong -> app_public_ip"
+  value       = var.kong_ui_hostname
+}
+
+output "kong_admin_credentials_secret_arn" {
+  description = "Secrets Manager ARN with Kong Manager UI admin username/password"
+  value       = aws_secretsmanager_secret.kong_admin_credentials.arn
 }
 
 output "postgres_endpoint" {
@@ -39,8 +44,13 @@ output "postgres_port" {
 }
 
 output "postgres_db_name" {
-  description = "Initial database name"
+  description = "App database name"
   value       = var.db_name
+}
+
+output "kong_db_name" {
+  description = "Kong configuration database name"
+  value       = var.kong_db_name
 }
 
 output "postgres_username" {

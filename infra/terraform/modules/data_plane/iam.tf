@@ -1,23 +1,20 @@
 resource "aws_iam_role_policy" "app_runtime" {
-  name = "${var.name_prefix}-app-runtime"
+  name = "${var.name_prefix}-kong-runtime"
   role = aws_iam_role.app.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "PullApiImage"
+        Sid    = "ConnectToPostgresWithIamKong"
         Effect = "Allow"
         Action = [
-          "ecr:GetAuthorizationToken",
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:BatchGetImage",
+          "rds-db:connect",
         ]
-        Resource = "*"
+        Resource = "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${aws_db_instance.postgres.resource_id}/${var.kong_db_iam_username}"
       },
       {
-        Sid    = "ConnectToPostgresWithIam"
+        Sid    = "ConnectToPostgresWithIamApp"
         Effect = "Allow"
         Action = [
           "rds-db:connect",
@@ -29,19 +26,20 @@ resource "aws_iam_role_policy" "app_runtime" {
 }
 
 resource "aws_iam_role_policy" "app_bootstrap_db" {
-  name = "${var.name_prefix}-app-bootstrap-db"
+  name = "${var.name_prefix}-kong-bootstrap-db"
   role = aws_iam_role.app.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Sid    = "ReadMasterDbSecretForIamUserBootstrap"
+      Sid    = "ReadDbSecretsForBootstrap"
       Effect = "Allow"
       Action = [
         "secretsmanager:GetSecretValue",
       ]
       Resource = [
         aws_secretsmanager_secret.db_credentials.arn,
+        aws_secretsmanager_secret.kong_admin_credentials.arn,
       ]
     }]
   })

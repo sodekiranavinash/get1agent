@@ -6,15 +6,17 @@ alwaysApply: false
 
 ## Overview
 - UI: S3 + Cloudflare (`infra/terraform/envs/web`)
-- Backend: `control_plane/` on EC2 + nginx (:80 → :8000) + RDS PostgreSQL (`infra/terraform/modules/data_plane`)
-- API domain: `api.get1agent.com` → Cloudflare A record → EC2 Elastic IP
-- EC2 port 80: Cloudflare IPs only. No SSH (port 22).
-- App → DB: **IAM auth** (no password). DBeaver → SSM tunnel (`infra/aws/db-tunnel.sh`).
+- API Gateway: **Kong OSS** on EC2 (`infra/terraform/modules/data_plane`) — no nginx
+- API domain: `api.get1agent.com` → Cloudflare A record → Kong proxy :80
+- Kong UI: `kong.get1agent.com` → Kong Manager OSS (basic-auth protected)
+- RDS PostgreSQL: databases `get1agent` (app/lambdas) + `kong` (Kong config)
+- Kong → DB: **IAM auth** (user `kong_app`). DBeaver → SSM tunnel (`infra/aws/db-tunnel.sh`).
 
 ## Deploy scripts
-- `infra/aws/deploy-all.sh` — infra + app
+- `infra/aws/deploy-all.sh` — infra + Kong
 - `infra/aws/deploy-infra.sh` — Terraform only
-- `infra/aws/deploy-control-plane.sh` — Docker → ECR → EC2 via SSM
+- `infra/aws/deploy-kong.sh` — sync scripts + restart Kong on EC2 via SSM
+- `infra/aws/kong-admin-creds.sh` — Kong Manager UI password
 - `infra/aws/db-tunnel.sh` — SSM port forward to RDS for DBeaver
 
 Full guide: **`infra/DEPLOY.md`**

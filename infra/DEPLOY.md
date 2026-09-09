@@ -1,6 +1,6 @@
 # Deploy get1agent on AWS
 
-**EC2** runs `control_plane` (FastAPI). **RDS** is private. The app connects with **IAM** (no DB password). Master password is **DBeaver / SSM tunnel only**.
+**Kong Gateway OSS** runs on EC2 and routes traffic from `api.get1agent.com` to backend services (Lambdas added later). **RDS** is private. Kong connects to Postgres with **IAM auth** (user `kong_app`, database `kong`). Master password is **DBeaver / SSM tunnel only**.
 
 ---
 
@@ -23,35 +23,48 @@ Or step by step:
 
 ```bash
 bash infra/aws/deploy-infra.sh apply
-bash infra/aws/deploy-control-plane.sh
+bash infra/aws/deploy-kong.sh
 ```
 
-### 3) Verify
+### 3) Cloudflare DNS
+
+Point both records to the Kong EC2 Elastic IP (`terraform output app_public_ip`):
+
+| Record | Type | Target | Proxied |
+|--------|------|--------|---------|
+| `api` | A | Kong EC2 IP | Yes (orange cloud) |
+| `kong` | A | Kong EC2 IP | Yes (orange cloud) |
+
+Cloudflare SSL/TLS → **Flexible** (same as www S3 site).
+
+### 4) Get Kong Manager UI credentials
 
 ```bash
-curl -s https://api.get1agent.com/health
+bash infra/aws/kong-admin-creds.sh
 ```
+
+Open **https://kong.get1agent.com** and sign in with the `admin` username and password from Secrets Manager.
 
 ---
 
-## API domain (Cloudflare)
+## Architecture
 
-nginx on EC2 listens on **port 80** and proxies to FastAPI on **localhost:8000**.
-
-| Step | Action |
-|------|--------|
-| 1 | `terraform output app_public_ip` |
-| 2 | Cloudflare DNS: **A** record `api` → that IP, **Proxied** (orange cloud) |
-| 3 | Cloudflare SSL/TLS → **Flexible** (same as www S3 site) |
-| 4 | `bash infra/aws/deploy-control-plane.sh` (syncs nginx + app) |
-
-Terraform opens **port 80** to [Cloudflare IPs](https://www.cloudflare.com/ips/) only. Port **22 (SSH) is closed**. Port **8000** is localhost only.
+```
+Internet
+  → Cloudflare (api.get1agent.com, kong.get1agent.com)
+  → EC2 Elastic IP (port 80, Cloudflare IPs only)
+  → Kong Gateway OSS (:80 proxy, :8001 admin, :8002 manager)
+  → RDS PostgreSQL (private, databases: get1agent + kong)
+```
 
 | Port | Who can connect |
 |------|-----------------|
-| **80** | Cloudflare IPs only |
-| **8000** | localhost only (nginx proxy) |
+| **80** | Cloudflare IPs only (Kong proxy) |
+| **8001** | localhost only (Kong Admin API) |
+| **8002** | localhost only (Kong Manager; exposed via route on kong.get1agent.com) |
 | **5432** | EC2 only (RDS private) |
+
+No nginx. Kong listens on port 80 directly.
 
 Admin access to EC2 and RDS uses **AWS SSM** (no SSH keys, no home IP allowlist).
 
@@ -68,8 +81,8 @@ Admin access to EC2 and RDS uses **AWS SSM** (no SSH keys, no home IP allowlist)
 
 ### Workflows
 
-1. **Infra** — Terraform (EC2 + RDS + ECR)
-2. **Deploy control_plane** — builds `control_plane/` → ECR → EC2 via SSM
+1. **Infra** — Terraform (Kong EC2 + RDS)
+2. **Deploy Kong** — sync scripts and restart Kong on EC2 via SSM
 
 ---
 
@@ -77,8 +90,11 @@ Admin access to EC2 and RDS uses **AWS SSM** (no SSH keys, no home IP allowlist)
 
 | Who | How it connects to Postgres |
 |-----|----------------------------|
-| **control_plane on EC2** | IAM role → `rds-db:connect` → user `get1agent_app` (no password) |
+| **Kong on EC2** | IAM role → `rds-db:connect` → user `kong_app` on database `kong` |
+| **Future Lambdas** | IAM → `rds-db:connect` → user `get1agent_app` on database `get1agent` |
 | **DBeaver / you** | SSM tunnel → master user `get1agent` + password from Secrets Manager |
+
+Kong Manager UI is protected with **basic-auth** (credentials in `get1agent-dev/kong-admin-credentials`).
 
 ---
 
@@ -96,33 +112,19 @@ bash infra/aws/db-tunnel.sh --show-creds
 bash infra/aws/db-tunnel.sh
 ```
 
-Default local port is **15432** (avoids conflict with a local Postgres on 5432).
+Default local port is **15432**.
 
 ### 3) DBeaver connection
-
-**Main tab**
 
 | Field | Value |
 |-------|--------|
 | Host | `localhost` |
-| Port | `15432` (same as tunnel; use `--port` if you changed it) |
-| Database | `get1agent` |
+| Port | `15432` |
+| Database | `get1agent` or `kong` |
 | Username | `get1agent` (master) |
 | Password | from `--show-creds` |
 
-**SSL** → try `require` first; if you see *"The server does not support SSL"*, you may be on the wrong port (local Postgres on 5432) — use **15432**, or disable SSL for the tunneled dev connection.
-
-**SSH tab** → **disabled** (do not use SSH tunnel in DBeaver)
-
-Test connection → Finish.
-
-### Session Manager plugin
-
-If `db-tunnel.sh` fails with a plugin error:
-
-```bash
-brew install --cask session-manager-plugin
-```
+**SSH tab** → disabled. **SSL** → `require`.
 
 ---
 
@@ -130,78 +132,44 @@ brew install --cask session-manager-plugin
 
 | Script | Purpose |
 |--------|---------|
-| `infra/aws/deploy-infra.sh` | Terraform: EC2 + RDS + ECR |
-| `infra/aws/deploy-control-plane.sh` | Docker build → ECR → EC2 (via SSM) |
-| `infra/aws/sync-ec2-api.sh` | Upload nginx/deploy scripts and restart API on EC2 |
+| `infra/aws/deploy-infra.sh` | Terraform: Kong EC2 + RDS |
+| `infra/aws/deploy-kong.sh` | Sync Kong scripts and restart on EC2 |
 | `infra/aws/deploy-all.sh` | Both in one command |
+| `infra/aws/kong-admin-creds.sh` | Print Kong Manager UI login |
 | `infra/aws/db-tunnel.sh` | SSM tunnel to RDS for DBeaver |
-| `infra/aws/db-tunnel.sh --show-creds` | Print DBeaver credentials |
 
 ---
 
-## Troubleshooting: `/health` not reachable
+## Adding API routes (later)
 
-**Symptom:** `curl https://api.get1agent.com/health` → timeout.
+Configure services and routes in **Kong Manager** at https://kong.get1agent.com, or via the Admin API on the EC2 instance (`curl http://127.0.0.1:8001/...` via SSM).
 
-| Symptom | Likely cause |
-|---------|----------------|
-| Connection **refused** | nginx or container not running |
-| **Timeout** | Cloudflare DNS or security group port **80** |
+Example: route `api.get1agent.com/my-service` → Lambda function URL or ALB.
 
-### Step 1 — Connect to EC2 via Session Manager
+---
 
-AWS Console → **EC2** → select the app instance → **Connect** → **Session Manager** → **Connect**.
+## Troubleshooting
 
-### Step 2 — Check if the container is running
+### Kong not reachable
 
 ```bash
+# SSM into EC2, then:
 sudo docker ps -a
-sudo docker logs get1agent-api --tail 50
-sudo systemctl status nginx
-curl -s localhost:8000/health
-curl -s localhost/health
+sudo docker logs get1agent-kong --tail 50
+curl -s http://127.0.0.1:8001/status
+sudo systemctl status get1agent-kong
 ```
 
-**If container is missing:**
+Restart:
 
 ```bash
-sudo /opt/get1agent/deploy-api.sh
+bash infra/aws/deploy-kong.sh
 ```
 
-Or re-run:
-
-```bash
-bash infra/aws/deploy-control-plane.sh
-```
-
----
-
-## Troubleshooting: Terraform Infra job
-
-### Stuck on "Acquiring state lock"
-
-A previous run left the lock file in S3. Cancel the stuck job, then:
+### Terraform stuck on state lock
 
 ```bash
 cd infra/terraform/envs/dev
 terraform init
 terraform force-unlock <LOCK_ID>
-# or: aws s3 rm s3://get1agent-terraform-state-us-east-1/envs/dev/terraform.tfstate.tflock
-```
-
-### Duplicate security group rule
-
-If apply fails with `InvalidPermission.Duplicate` on postgres port 5432, pull latest `main` — postgres ingress is managed inline on the SG, not as a separate rule.
-
----
-
-## Local development
-
-Uses password auth (not IAM):
-
-```bash
-cd control_plane
-cp .env.example .env
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
 ```

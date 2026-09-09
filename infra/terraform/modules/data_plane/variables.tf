@@ -15,28 +15,28 @@ variable "extra_http_cidr_blocks" {
   description = "Optional extra IPv4 CIDRs on port 80 in addition to Cloudflare"
 }
 
-variable "allowed_api_cidr_blocks" {
-  type        = list(string)
-  default     = []
-  description = "Optional direct FastAPI port access; leave empty so only nginx on :80 is public"
-}
-
 variable "api_hostname" {
   type        = string
   default     = "api.get1agent.com"
-  description = "Public API hostname for nginx server_name (Cloudflare A record)"
+  description = "Public API hostname (Cloudflare A record -> Kong proxy on :80)"
 }
 
-variable "api_port" {
-  type        = number
-  default     = 8000
-  description = "FastAPI listen port on the app EC2"
+variable "kong_ui_hostname" {
+  type        = string
+  default     = "kong.get1agent.com"
+  description = "Kong Manager UI hostname (Cloudflare A record -> Kong proxy on :80)"
+}
+
+variable "kong_image" {
+  type        = string
+  default     = "kong:3.8"
+  description = "Kong Gateway OSS Docker image"
 }
 
 variable "ec2_instance_type" {
   type        = string
   default     = "t4g.micro"
-  description = "Free-tier eligible Graviton instance"
+  description = "Free-tier eligible Graviton instance for Kong Gateway + SSM DB tunnel"
 }
 
 variable "db_instance_class" {
@@ -48,7 +48,7 @@ variable "db_instance_class" {
 variable "db_name" {
   type        = string
   default     = "get1agent"
-  description = "Initial PostgreSQL database name"
+  description = "Initial PostgreSQL database name (app data; lambdas later)"
 }
 
 variable "db_username" {
@@ -60,7 +60,19 @@ variable "db_username" {
 variable "db_iam_username" {
   type        = string
   default     = "get1agent_app"
-  description = "PostgreSQL IAM user for the control_plane app on EC2"
+  description = "PostgreSQL IAM user for future serverless services"
+}
+
+variable "kong_db_name" {
+  type        = string
+  default     = "kong"
+  description = "PostgreSQL database for Kong configuration"
+}
+
+variable "kong_db_iam_username" {
+  type        = string
+  default     = "kong_app"
+  description = "PostgreSQL IAM user for Kong Gateway"
 }
 
 variable "postgres_engine_version" {
