@@ -5,22 +5,25 @@ alwaysApply: false
 # Infra rules
 
 ## Overview
-- UI: S3 + Cloudflare (`infra/terraform/envs/web`)
+- UI: S3 + Cloudflare (`infra/terraform/envs/web`) — deploy via **Frontend** workflow
 - API: **AWS API Gateway HTTP API** (`infra/terraform/modules/api_gateway`) + Auth0 JWT
 - API domain: `api.get1agent.com` → Cloudflare CNAME → API Gateway
-- Data: RDS PostgreSQL + on-demand **jumpbox EC2** (`infra/terraform/modules/vpc_rds`); public IPv4 only while `db-access.sh` runs
+- Network: VPC + jumpbox (`infra/terraform/modules/network`); public IPv4 only while `db-access.sh` runs
+- Data: RDS PostgreSQL (`infra/terraform/modules/rds`) + SSM Parameter Store credentials
 - Tool Lambdas: `infra/terraform/modules/lambda_tool` (Go tools in `tools/`)
 - Backend Lambdas: `infra/terraform/modules/lambda_rds` (TypeScript in `backend/`, registry in `backend/registry.json`)
 - API routes: `infra/terraform/envs/prod/api_gateway.tf`
 
 ## GitHub Actions
-- **Infra** — bootstrap / web / frontend / prod (checkboxes)
-- **Backend** — one checkbox per Lambda = deploy
-- **Tools** — one checkbox per tool = deploy
+- **Infra** — bootstrap / web / vpc / rds / api_gateway / lambdas (always apply; checkboxes pick components)
+- **Frontend** — build + sync to S3 (separate from Infra)
+- **Backend** — one checkbox per Lambda = deploy code
+- **Tools** — one checkbox per tool = deploy code
 
 ## Deploy scripts
 - `infra/aws/deploy-all.sh` — full infra apply
-- `infra/aws/deploy-infra.sh` — Terraform only
+- `infra/aws/deploy-infra.sh` — Terraform only (bootstrap + web + full prod)
+- `infra/aws/apply-prod.sh` — targeted prod apply (used by Infra workflow)
 - `infra/aws/db-access.sh` — start jumpbox, SSM tunnel to RDS, stop on exit (minimal IPv4 cost)
 - `infra/aws/cleanup-legacy-aws.sh` — remove Kong-era EIPs, SGs, Secrets Manager secrets
 - `infra/aws/deploy-backend.sh` — package/deploy backend/* Lambdas

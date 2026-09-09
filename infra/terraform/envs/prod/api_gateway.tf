@@ -1,4 +1,5 @@
 module "api_gateway" {
+  count  = var.enable_api_gateway ? 1 : 0
   source = "../../modules/api_gateway"
 
   name_prefix          = "get1agent-prod"
@@ -12,7 +13,7 @@ module "api_gateway" {
     "http://localhost:5173",
   ]
 
-  lambda_routes = var.enable_vpc_rds ? {
+  lambda_routes = var.enable_backend_lambdas && var.enable_rds ? {
     health_db = {
       method               = "GET"
       path                 = "/health/db"

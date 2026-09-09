@@ -155,15 +155,18 @@ RDS is **private** — reachable from VPC Lambdas and the jumpbox while it is ru
 
 ## GitHub Actions
 
-Three workflows — each has checkboxes to run only what you need:
+Four workflows — each has checkboxes to run only what you need:
 
 | Workflow | Components (checkboxes) |
 |----------|-------------------------|
-| **Infra** | Bootstrap, Web, Frontend, Prod · Apply vs plan |
-| **Backend** | `health-check` — one checkbox = deploy that Lambda |
-| **Tools** | `challan-extractor` — one checkbox = deploy that Lambda |
+| **Infra** | Bootstrap (state S3), Web (site S3), VPC, RDS, API Gateway, Lambdas (Terraform) — always apply |
+| **Frontend** | Build + sync to S3 (separate from Infra) |
+| **Backend** | `health-check` — one checkbox = deploy Lambda **code** |
+| **Tools** | `challan-extractor` — one checkbox = deploy Lambda **code** |
 
-Push to `main` under `frontend/**` auto-runs **Infra** with Frontend only.
+Push to `main` under `frontend/**` auto-runs **Frontend**.
+
+**Bootstrap** vs **Web**: two different S3 buckets — bootstrap holds Terraform state; web holds the static site (`www.get1agent.com`).
 
 ---
 

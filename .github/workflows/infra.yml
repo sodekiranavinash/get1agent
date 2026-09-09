@@ -1,32 +1,32 @@
 name: Infra
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - frontend/**
   workflow_dispatch:
     inputs:
-      apply:
-        description: Apply (uncheck for plan only)
-        type: boolean
-        default: true
       bootstrap:
-        description: Bootstrap - S3 state bucket
-        type: boolean
-        default: true
-      web:
-        description: Web - S3 website bucket
-        type: boolean
-        default: true
-      frontend:
-        description: Frontend - build and sync to S3
+        description: Bootstrap - Terraform state S3 bucket
         type: boolean
         default: false
-      prod:
-        description: Prod - API Gateway, VPC/RDS, Lambdas
+      web:
+        description: Web - S3 static site bucket (www.get1agent.com)
         type: boolean
-        default: true
+        default: false
+      vpc:
+        description: VPC - network, subnets, jumpbox
+        type: boolean
+        default: false
+      rds:
+        description: RDS - PostgreSQL + SSM credentials
+        type: boolean
+        default: false
+      api_gateway:
+        description: API Gateway - HTTP API + Auth0 JWT + custom domain
+        type: boolean
+        default: false
+      lambdas:
+        description: Lambdas - Terraform for health-check + challan-extractor
+        type: boolean
+        default: false
 
 concurrency:
   group: infra-prod
@@ -39,7 +39,6 @@ env:
   AWS_REGION: us-east-1
   TF_IN_AUTOMATION: "true"
   TF_STATE_BUCKET: get1agent-terraform-state-us-east-1
-  SITE_BUCKET: www.get1agent.com
 
 jobs:
   infra:
@@ -52,71 +51,61 @@ jobs:
 
       - name: Require at least one component
         if: >-
-          github.event_name == 'workflow_dispatch' &&
           inputs.bootstrap == false &&
           inputs.web == false &&
-          inputs.frontend == false &&
-          inputs.prod == false
+          inputs.vpc == false &&
+          inputs.rds == false &&
+          inputs.api_gateway == false &&
+          inputs.lambdas == false
         run: |
-          echo "Select at least one component (Bootstrap, Web, Frontend, or Prod)." >&2
+          echo "Select at least one component." >&2
           exit 1
 
       - name: Read Terraform version
-        if: >-
-          (github.event_name == 'workflow_dispatch' && (inputs.bootstrap || inputs.web || inputs.prod)) ||
-          github.event_name == 'push'
+        if: inputs.bootstrap || inputs.web || inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         id: tfver
         run: echo "version=$(tr -d '[:space:]' < infra/terraform/.terraform-version)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Terraform
-        if: >-
-          github.event_name == 'workflow_dispatch' && (inputs.bootstrap || inputs.web || inputs.prod)
+        if: inputs.bootstrap || inputs.web || inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ steps.tfver.outputs.version }}
           terraform_wrapper: false
 
       - name: Setup Go
-        if: github.event_name == 'workflow_dispatch' && inputs.prod
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         uses: actions/setup-go@v5
         with:
           go-version-file: tools/challan-extractor/go.mod
           cache-dependency-path: tools/challan-extractor/go.sum
 
       - name: Setup Node.js
-        if: >-
-          github.event_name == 'push' ||
-          (github.event_name == 'workflow_dispatch' && (inputs.frontend || inputs.prod))
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Terraform fmt
-        if: github.event_name == 'workflow_dispatch' && (inputs.bootstrap || inputs.web || inputs.prod)
+        if: inputs.bootstrap || inputs.web || inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: terraform fmt -check -recursive infra/terraform
 
       - name: Write prod terraform.tfvars
-        if: github.event_name == 'workflow_dispatch' && inputs.prod
-        run: |
-          cat > infra/terraform/envs/prod/terraform.tfvars <<'EOF'
-          aws_region               = "us-east-1"
-          package_path             = "../../../../tools/challan-extractor/dist/function.zip"
-          enable_vpc_rds           = true
-          enable_api_custom_domain = true
-          EOF
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        run: bash infra/aws/write-prod-tfvars.sh
 
       - name: Package challan-extractor zip
-        if: github.event_name == 'workflow_dispatch' && inputs.prod
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: tools/challan-extractor
 
       - name: Package backend health-check zip
-        if: github.event_name == 'workflow_dispatch' && inputs.prod
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/health-check
 
       - name: Verify Lambda zips
-        if: github.event_name == 'workflow_dispatch' && inputs.prod
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: |
           test -s tools/challan-extractor/dist/function.zip
           unzip -l tools/challan-extractor/dist/function.zip | grep bootstrap
@@ -124,7 +113,7 @@ jobs:
           unzip -l backend/health-check/dist/function.zip | grep index.js
 
       - name: Terraform validate
-        if: github.event_name == 'workflow_dispatch' && inputs.prod
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         working-directory: infra/terraform/envs/prod
         run: |
           terraform init -backend=false -input=false
@@ -138,85 +127,40 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Bootstrap
-        if: github.event_name == 'workflow_dispatch' && inputs.bootstrap
-        run: |
-          if [[ "${{ inputs.apply }}" == "true" ]]; then
-            bash infra/aws/run-terraform.sh bootstrap apply
-          else
-            bash infra/aws/run-terraform.sh bootstrap plan
-          fi
+        if: inputs.bootstrap
+        run: bash infra/aws/run-terraform.sh bootstrap apply
 
       - name: Web
-        if: github.event_name == 'workflow_dispatch' && inputs.web
-        run: |
-          if [[ "${{ inputs.apply }}" == "true" ]]; then
-            bash infra/aws/run-terraform.sh web apply
-          else
-            bash infra/aws/run-terraform.sh web plan
-          fi
+        if: inputs.web
+        run: bash infra/aws/run-terraform.sh web apply
 
       - name: Prod
-        if: github.event_name == 'workflow_dispatch' && inputs.prod
-        run: |
-          if [[ "${{ inputs.apply }}" == "true" ]]; then
-            bash infra/aws/run-terraform.sh prod apply
-          else
-            bash infra/aws/run-terraform.sh prod plan
-          fi
-
-      - name: Build frontend
-        if: >-
-          github.event_name == 'push' ||
-          (github.event_name == 'workflow_dispatch' && inputs.frontend)
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
-
-      - name: Deploy frontend to S3
-        if: >-
-          github.event_name == 'push' ||
-          (github.event_name == 'workflow_dispatch' && inputs.frontend && inputs.apply)
-        run: |
-          if ! aws s3api head-bucket --bucket "$SITE_BUCKET"; then
-            echo "Bucket $SITE_BUCKET does not exist. Run Infra with Web checked first." >&2
-            exit 1
-          fi
-          aws s3 sync frontend/dist "s3://$SITE_BUCKET" \
-            --delete \
-            --exclude "index.html" \
-            --cache-control "public,max-age=31536000,immutable"
-          aws s3 cp frontend/dist/index.html "s3://$SITE_BUCKET/index.html" \
-            --content-type "text/html" \
-            --cache-control "no-cache"
-          echo "- Frontend: https://www.get1agent.com" >> "$GITHUB_STEP_SUMMARY"
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        env:
+          APPLY_NETWORK: ${{ inputs.vpc }}
+          APPLY_RDS: ${{ inputs.rds }}
+          APPLY_API_GATEWAY: ${{ inputs.api_gateway }}
+          APPLY_BACKEND_LAMBDAS: ${{ inputs.lambdas }}
+          APPLY_TOOL_LAMBDAS: ${{ inputs.lambdas }}
+        run: bash infra/aws/apply-prod.sh
 
       - name: Print prod outputs
-        if: github.event_name == 'workflow_dispatch' && inputs.prod && inputs.apply
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         working-directory: infra/terraform/envs/prod
         run: |
           terraform init -input=false -no-color
-          API_URL="$(terraform output -raw api_url)"
-          echo "## API Gateway" >> "$GITHUB_STEP_SUMMARY"
-          echo "- API URL: ${API_URL}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Health: ${API_URL}health" >> "$GITHUB_STEP_SUMMARY"
-          echo "- DB health: ${API_URL}health/db" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Auth0 audience: $(terraform output -raw auth0_audience)" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "## VPC/RDS" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Jumpbox: $(terraform output -raw jumpbox_instance_id) (stopped after apply)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Local DB: bash infra/aws/db-access.sh" >> "$GITHUB_STEP_SUMMARY"
-          echo "- API CNAME: $(terraform output -raw api_gateway_cname_target)" >> "$GITHUB_STEP_SUMMARY"
-          JUMPBOX_ID="$(terraform output -raw jumpbox_instance_id)"
-          aws ec2 stop-instances --region "$AWS_REGION" --instance-ids "$JUMPBOX_ID" >/dev/null 2>&1 || true
-
-      - name: Upload Terraform plans
-        if: github.event_name == 'workflow_dispatch' && inputs.apply == false && (inputs.bootstrap || inputs.web || inputs.prod)
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-plans
-          if-no-files-found: ignore
-          path: |
-            infra/terraform/bootstrap/tfplan
-            infra/terraform/envs/web/tfplan
-            infra/terraform/envs/prod/tfplan
+          if terraform output -raw api_url >/dev/null 2>&1; then
+            API_URL="$(terraform output -raw api_url)"
+            echo "## API Gateway" >> "$GITHUB_STEP_SUMMARY"
+            echo "- API URL: ${API_URL}" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Health: ${API_URL}health" >> "$GITHUB_STEP_SUMMARY"
+            echo "- DB health: ${API_URL}health/db" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Auth0 audience: $(terraform output -raw auth0_audience)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if terraform output -raw jumpbox_instance_id >/dev/null 2>&1; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "## Network / RDS" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Jumpbox: $(terraform output -raw jumpbox_instance_id) (stopped after apply)" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Local DB: bash infra/aws/db-access.sh" >> "$GITHUB_STEP_SUMMARY"
+            echo "- API CNAME: $(terraform output -raw api_gateway_cname_target 2>/dev/null || echo n/a)" >> "$GITHUB_STEP_SUMMARY"
+          fi

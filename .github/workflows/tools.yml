@@ -76,7 +76,7 @@ jobs:
           ZIP: ${{ matrix.tool_dir }}/dist/function.zip
         run: |
           if ! aws lambda get-function --function-name "$FUNCTION_NAME" >/dev/null; then
-            echo "Function $FUNCTION_NAME does not exist. Run Infra with Prod checked first." >&2
+            echo "Function $FUNCTION_NAME does not exist. Run Infra with Lambdas checked first." >&2
             exit 1
           fi
           aws lambda update-function-code \

@@ -4,12 +4,13 @@ locals {
 
 check "lambda_zip_exists" {
   assert {
-    condition     = fileexists(local.package_abs)
-    error_message = "Lambda zip not found at ${local.package_abs}. The Infra workflow must run make package in tools/challan-extractor first."
+    condition     = !var.enable_tool_lambdas || fileexists(local.package_abs)
+    error_message = "Lambda zip not found at ${local.package_abs}. Run: make -C tools/challan-extractor package"
   }
 }
 
 module "challan_extractor" {
+  count  = var.enable_tool_lambdas ? 1 : 0
   source = "../../modules/lambda_tool"
 
   name             = "get1agent-prod-challan-extractor"

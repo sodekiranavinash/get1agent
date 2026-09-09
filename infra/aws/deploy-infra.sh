@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy AWS infrastructure (Terraform): bootstrap + web + prod.
+# Deploy AWS infrastructure (Terraform): bootstrap + web + full prod.
 #
 # Usage:
 #   bash infra/aws/deploy-infra.sh plan
@@ -8,19 +8,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MODE="${1:-apply}"
-TFVARS="$ROOT/infra/terraform/envs/prod/terraform.tfvars"
 
 if [[ "$MODE" != "plan" && "$MODE" != "apply" ]]; then
   echo "usage: $0 <plan|apply>" >&2
   exit 2
 fi
 
-cat >"$TFVARS" <<EOF
-aws_region               = "us-east-1"
-package_path             = "../../../../tools/challan-extractor/dist/function.zip"
-enable_vpc_rds           = true
-enable_api_custom_domain = true
-EOF
+bash "$ROOT/infra/aws/write-prod-tfvars.sh"
 
 if [[ ! -s "$ROOT/tools/challan-extractor/dist/function.zip" ]]; then
   echo "Packaging challan-extractor Lambda zip..."

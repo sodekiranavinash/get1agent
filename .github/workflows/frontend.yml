@@ -1,0 +1,61 @@
+name: Frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - frontend/**
+  workflow_dispatch:
+
+concurrency:
+  group: frontend-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  SITE_BUCKET: www.get1agent.com
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3
+        run: |
+          if ! aws s3api head-bucket --bucket "$SITE_BUCKET"; then
+            echo "Bucket $SITE_BUCKET does not exist. Run Infra with Web checked first." >&2
+            exit 1
+          fi
+          aws s3 sync frontend/dist "s3://$SITE_BUCKET" \
+            --delete \
+            --exclude "index.html" \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp frontend/dist/index.html "s3://$SITE_BUCKET/index.html" \
+            --content-type "text/html" \
+            --cache-control "no-cache"
+          echo "- Frontend: https://www.get1agent.com" >> "$GITHUB_STEP_SUMMARY"
