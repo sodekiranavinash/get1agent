@@ -33,16 +33,9 @@ resource "aws_security_group_rule" "app_http" {
 
 resource "aws_security_group" "postgres" {
   name        = "${var.name_prefix}-postgres"
-  description = "PostgreSQL reachable only from the Kong EC2 instance"
+  # Keep original description — changing it forces SG replacement and hits Duplicate name errors.
+  description = "PostgreSQL reachable only from the app EC2"
   vpc_id      = aws_vpc.main.id
-
-  ingress {
-    description     = "PostgreSQL from Kong server"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.app.id]
-  }
 
   egress {
     description = "All outbound"
@@ -59,4 +52,14 @@ resource "aws_security_group" "postgres" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+resource "aws_security_group_rule" "postgres_from_app" {
+  type                     = "ingress"
+  security_group_id        = aws_security_group.postgres.id
+  source_security_group_id = aws_security_group.app.id
+  description              = "PostgreSQL from app server"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
 }
