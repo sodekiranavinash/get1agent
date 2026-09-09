@@ -6,11 +6,15 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
 
 const STORAGE_KEY = 'sidebar-collapsed'
+const COMPACT_BREAKPOINT = '(max-width: 1023px)'
 
 type SidebarContextValue = {
   collapsed: boolean
+  effectiveCollapsed: boolean
+  isCompact: boolean
   toggle: () => void
 }
 
@@ -26,6 +30,8 @@ const readCollapsed = (): boolean => {
 
 export function SidebarProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
+  const isCompact = useMediaQuery(COMPACT_BREAKPOINT)
+  const effectiveCollapsed = collapsed || isCompact
 
   const toggle = useCallback(() => {
     setCollapsed((current) => {
@@ -39,7 +45,10 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  const value = useMemo(() => ({ collapsed, toggle }), [collapsed, toggle])
+  const value = useMemo(
+    () => ({ collapsed, effectiveCollapsed, isCompact, toggle }),
+    [collapsed, effectiveCollapsed, isCompact, toggle],
+  )
 
   return (
     <SidebarContext.Provider value={value}>{children}</SidebarContext.Provider>

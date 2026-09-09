@@ -12,7 +12,7 @@ import {
 } from '../navigation/sidebarLinks'
 
 export function Sidebar() {
-  const { collapsed, toggle } = useSidebar()
+  const { effectiveCollapsed, isCompact, toggle } = useSidebar()
   const { theme } = useTheme()
   const logoSrc = theme === 'light' ? '/white_logo.png' : '/dark_logo.png'
 
@@ -20,10 +20,10 @@ export function Sidebar() {
     <nav className="flex h-full flex-col overflow-hidden">
       <div
         className={`shrink-0 border-b border-border/60 ${
-          collapsed ? 'px-2 py-3' : 'px-3 py-3.5'
+          effectiveCollapsed ? 'px-2 py-3' : 'px-3 py-3.5'
         }`}
       >
-        {collapsed ? (
+        {effectiveCollapsed ? (
           <div className="flex flex-col items-center gap-2">
             <Link
               to="/dashboard"
@@ -36,15 +36,17 @@ export function Sidebar() {
                 className="block h-9 w-9 object-cover"
               />
             </Link>
-            <button
-              type="button"
-              onClick={toggle}
-              aria-label="Expand sidebar"
-              title="Expand sidebar"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-subtle transition-colors hover:bg-raised hover:text-foreground"
-            >
-              <PanelLeftOpen className="h-4 w-4" strokeWidth={1.75} />
-            </button>
+            {!isCompact ? (
+              <button
+                type="button"
+                onClick={toggle}
+                aria-label="Expand sidebar"
+                title="Expand sidebar"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-subtle transition-colors hover:bg-raised hover:text-foreground"
+              >
+                <PanelLeftOpen className="h-4 w-4" strokeWidth={1.75} />
+              </button>
+            ) : null}
           </div>
         ) : (
           <div className="grid grid-cols-[1.75rem_1fr_1.75rem] items-center">
@@ -74,14 +76,14 @@ export function Sidebar() {
       </div>
 
       <div className="scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden py-3">
-        <div className={`flex flex-col gap-1 ${collapsed ? 'px-2' : 'px-3'}`}>
+        <div className={`flex flex-col gap-1 ${effectiveCollapsed ? 'px-2' : 'px-3'}`}>
           {sectionOrder.map((sectionKey) => {
             const links = sidebarLinks.filter((link) => link.section === sectionKey)
             if (links.length === 0) return null
 
             return (
               <div key={sectionKey} className="mb-2">
-                {!collapsed ? (
+                {!effectiveCollapsed ? (
                   <p className="mb-2 px-3 text-[10px] font-bold tracking-[0.16em] text-subtle uppercase">
                     {sidebarSections[sectionKey]}
                   </p>
@@ -96,10 +98,10 @@ export function Sidebar() {
                       key={link.to}
                       to={link.to}
                       end={link.to === '/dashboard'}
-                      title={collapsed ? link.label : undefined}
+                      title={effectiveCollapsed ? link.label : undefined}
                       className={({ isActive }) =>
                         `group relative mb-0.5 flex items-center rounded-xl text-sm font-medium no-underline transition-all duration-200 ${
-                          collapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'
+                          effectiveCollapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'
                         } ${
                           isActive
                             ? 'bg-accent-soft text-accent'
@@ -120,7 +122,7 @@ export function Sidebar() {
                             className={`relative z-10 h-[18px] w-[18px] shrink-0 ${isActive ? 'text-accent' : ''}`}
                             strokeWidth={1.75}
                           />
-                          {!collapsed ? (
+                          {!effectiveCollapsed ? (
                             <span className="relative z-10 truncate">{link.label}</span>
                           ) : null}
                         </>
@@ -136,11 +138,11 @@ export function Sidebar() {
 
       <div
         className={`shrink-0 space-y-3 border-t border-border/60 bg-surface/50 py-3 backdrop-blur-sm ${
-          collapsed ? 'flex flex-col items-center px-2' : 'px-3'
+          effectiveCollapsed ? 'flex flex-col items-center px-2' : 'px-3'
         }`}
       >
-        <SidebarThemeSwitcher collapsed={collapsed} />
-        <SidebarUserSection collapsed={collapsed} />
+        <SidebarThemeSwitcher collapsed={effectiveCollapsed} />
+        <SidebarUserSection collapsed={effectiveCollapsed} />
       </div>
     </nav>
   )
