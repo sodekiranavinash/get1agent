@@ -1,0 +1,9 @@
+{
+  "lambdas": [
+    {
+      "name": "health-check",
+      "dir": "backend/health-check",
+      "function_name": "get1agent-prod-health-check"
+    }
+  ]
+}

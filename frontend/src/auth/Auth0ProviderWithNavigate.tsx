@@ -22,6 +22,7 @@ export function Auth0ProviderWithNavigate({
       clientId="dObQEtFUZ1fL4vO9FLOdQEDCmFpt0sjM"
       authorizationParams={{
         redirect_uri: authAbsoluteUrl(AUTH_PATHS.callback),
+        audience: 'https://api.get1agent.com',
       }}
       onRedirectCallback={onRedirectCallback}
       skipRedirectCallback={window.location.pathname !== AUTH_PATHS.callback}

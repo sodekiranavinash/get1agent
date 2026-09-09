@@ -1,6 +1,6 @@
 variable "name" {
   type        = string
-  description = "Lambda function name, e.g. get1agent-dev-challan-extractor"
+  description = "Lambda function name, e.g. get1agent-prod-challan-extractor"
 }
 
 variable "filename" {

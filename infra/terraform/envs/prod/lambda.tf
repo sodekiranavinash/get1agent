@@ -12,7 +12,7 @@ check "lambda_zip_exists" {
 module "challan_extractor" {
   source = "../../modules/lambda_tool"
 
-  name             = "get1agent-dev-challan-extractor"
+  name             = "get1agent-prod-challan-extractor"
   filename         = local.package_abs
   source_code_hash = filebase64sha256(local.package_abs)
 

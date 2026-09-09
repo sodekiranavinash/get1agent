@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       apply:
-        description: Apply bootstrap, web, dev (Lambda + optional data plane EC2/RDS)
+        description: Apply bootstrap, web, prod (Lambda + optional data plane EC2/RDS)
         type: boolean
         default: true
 
 concurrency:
-  group: infra-dev
+  group: infra-prod
   cancel-in-progress: false
 
 permissions:
@@ -22,7 +22,7 @@ env:
 
 jobs:
   terraform:
-    name: Terraform (bootstrap + web + dev)
+    name: Terraform (bootstrap + web + prod)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -49,7 +49,7 @@ jobs:
         run: terraform fmt -check -recursive -diff infra/terraform
 
       - name: Terraform validate
-        working-directory: infra/terraform/envs/dev
+        working-directory: infra/terraform/envs/prod
         run: |
           terraform init -backend=false -input=false
           terraform validate
@@ -61,22 +61,34 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Write dev terraform.tfvars
+      - name: Write prod terraform.tfvars
         run: |
-          cat > infra/terraform/envs/dev/terraform.tfvars <<'EOF'
-          aws_region   = "us-east-1"
-          package_path = "../../../../tools/challan-extractor/dist/function.zip"
-          enable_data_plane = true
+          cat > infra/terraform/envs/prod/terraform.tfvars <<'EOF'
+          aws_region               = "us-east-1"
+          package_path             = "../../../../tools/challan-extractor/dist/function.zip"
+          enable_data_plane        = true
+          enable_api_custom_domain = true
           EOF
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Package challan-extractor zip
         run: make package
         working-directory: tools/challan-extractor
 
-      - name: Verify Lambda zip
+      - name: Package backend health-check zip
+        run: make package
+        working-directory: backend/health-check
+
+      - name: Verify Lambda zips
         run: |
           test -s tools/challan-extractor/dist/function.zip
           unzip -l tools/challan-extractor/dist/function.zip | grep bootstrap
+          test -s backend/health-check/dist/function.zip
+          unzip -l backend/health-check/dist/function.zip | grep index.js
 
       - name: Decide plan vs apply
         id: mode
@@ -93,25 +105,24 @@ jobs:
       - name: Web (S3 website)
         run: bash infra/aws/run-terraform.sh web "${{ steps.mode.outputs.mode }}"
 
-      - name: Dev (Lambda + data plane)
-        run: bash infra/aws/run-terraform.sh dev "${{ steps.mode.outputs.mode }}"
+      - name: Prod (Lambda + data plane)
+        run: bash infra/aws/run-terraform.sh prod "${{ steps.mode.outputs.mode }}"
 
-      - name: Print data plane outputs
+      - name: Print outputs
         if: inputs.apply == true
-        working-directory: infra/terraform/envs/dev
+        working-directory: infra/terraform/envs/prod
         run: |
           terraform init -input=false -no-color
-          if ! terraform output -raw app_public_ip >/dev/null 2>&1; then
-            echo "Data plane not deployed." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "## Data plane (Kong + RDS)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Kong IP: $(terraform output -raw app_public_ip)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- API domain: $(terraform output -raw api_public_hostname)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Kong UI: $(terraform output -raw kong_ui_hostname)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- DB tunnel: \`bash infra/aws/db-tunnel.sh\` (SSM, no SSH)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Cloudflare: A records \`api\` and \`kong\` -> Kong IP above" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Next: run **Deploy Kong** workflow" >> "$GITHUB_STEP_SUMMARY"
+          API_URL="$(terraform output -raw api_url)"
+          echo "## API Gateway" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API URL: ${API_URL}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Health: ${API_URL}health" >> "$GITHUB_STEP_SUMMARY"
+          echo "- DB health: ${API_URL}health/db" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Auth0 audience: $(terraform output -raw auth0_audience)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Data plane (jumpbox + RDS)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- DB tunnel: \`bash infra/aws/db-tunnel.sh\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API CNAME target: $(terraform output -raw api_gateway_cname_target)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Terraform plans
         if: inputs.apply != true
@@ -122,4 +133,4 @@ jobs:
           path: |
             infra/terraform/bootstrap/tfplan
             infra/terraform/envs/web/tfplan
-            infra/terraform/envs/dev/tfplan
+            infra/terraform/envs/prod/tfplan

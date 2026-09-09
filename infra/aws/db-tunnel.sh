@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SSM port forward to dev RDS (for DBeaver). No SSH key or home IP required.
+# SSM port forward to prod RDS (for DBeaver). No SSH key or home IP required.
 #
 # Usage:
 #   bash infra/aws/db-tunnel.sh              # tunnel on localhost:15432
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ENV_DIR="$ROOT/infra/terraform/envs/dev"
+ENV_DIR="$ROOT/infra/terraform/envs/prod"
 LOCAL_PORT="${LOCAL_PORT:-15432}"
 MODE="tunnel"
 

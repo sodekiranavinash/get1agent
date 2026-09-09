@@ -1,188 +1,184 @@
 # Deploy get1agent on AWS
 
-**Kong Gateway OSS** runs on EC2 and routes traffic from `api.get1agent.com` to backend services (Lambdas added later). **RDS** is private. Kong connects to Postgres with **IAM auth** (user `kong_app`, database `kong`). Master password is **DBeaver / SSM tunnel only**.
+**API Gateway HTTP API** handles `api.get1agent.com` with Auth0 JWT, CORS, and throttling. **EC2 jumpbox** is SSM-only for RDS tunneling. **Lambdas** are added as API routes in Terraform.
 
 ---
 
-## Quick start (from your Mac)
-
-### 1) One-time setup
-
-```bash
-aws configure
-brew install --cask session-manager-plugin   # for DBeaver DB tunnel
-```
-
-### 2) Deploy everything
+## Quick start
 
 ```bash
 bash infra/aws/deploy-all.sh
 ```
 
-Or step by step:
+Or via GitHub Actions: run the **Infra** workflow.
+
+---
+
+## One-time setup
+
+### 1) Auth0 API
+
+In Auth0 Dashboard → **APIs** → Create API:
+
+| Field | Value |
+|-------|--------|
+| Name | get1agent API |
+| Identifier | `https://api.get1agent.com` |
+
+This must match `auth0_audience` in Terraform and the frontend `audience` param.
+
+### 2) Cloudflare DNS for API (`api.get1agent.com`)
+
+**No A record needed** — use **CNAME** records only (grey cloud / DNS only).
+
+1. Set `enable_api_custom_domain = true` in `infra/terraform/envs/prod/terraform.tfvars`
+2. Run `terraform apply` (or Infra GitHub Action)
+3. Get DNS values:
 
 ```bash
-bash infra/aws/deploy-infra.sh apply
-bash infra/aws/deploy-kong.sh
+cd infra/terraform/envs/prod
+terraform output acm_validation_records   # step A
+terraform output api_gateway_cname_target # step B
 ```
 
-### 3) Cloudflare DNS
+| Step | Cloudflare record | Notes |
+|------|-------------------|--------|
+| **A** | ACM validation **CNAME** | Copy `name` + `value` from `acm_validation_records` (usually `_xxxx.api` → `_xxxx.acm-validations.aws`) |
+| **B** | `api` **CNAME** → API Gateway target | Copy from `api_gateway_cname_target` (looks like `d-xxxxx.execute-api.us-east-1.amazonaws.com`) |
+| **C** | Delete old records | Remove any `api` **A** record and `kong` **A** record if present |
 
-Point both records to the Kong EC2 Elastic IP (`terraform output app_public_ip`):
-
-| Record | Type | Target | Proxied |
-|--------|------|--------|---------|
-| `api` | A | Kong EC2 IP | Yes (orange cloud) |
-| `kong` | A | Kong EC2 IP | Yes (orange cloud) |
-
-Cloudflare SSL/TLS → **Flexible** (same as www S3 site).
-
-### 4) Get Kong Manager UI credentials
+### 3) Verify
 
 ```bash
-bash infra/aws/kong-admin-creds.sh
-```
+curl -s https://api.get1agent.com/health
+# {"status":"ok","service":"get1agent-api"}
 
-Open **https://kong.get1agent.com** and sign in with the `admin` username and password from Secrets Manager.
+curl -s https://api.get1agent.com/health/db
+# {"status":"ok","database":"get1agent"}
+```
 
 ---
 
 ## Architecture
 
 ```
-Internet
-  → Cloudflare (api.get1agent.com, kong.get1agent.com)
-  → EC2 Elastic IP (port 80, Cloudflare IPs only)
-  → Kong Gateway OSS (:80 proxy, :8001 admin, :8002 manager)
-  → RDS PostgreSQL (private, databases: get1agent + kong)
+Browser → Cloudflare → API Gateway (JWT) → Lambda functions
+DBeaver → SSM tunnel → EC2 jumpbox → RDS PostgreSQL (private)
 ```
 
-| Port | Who can connect |
-|------|-----------------|
-| **80** | Cloudflare IPs only (Kong proxy) |
-| **8001** | localhost only (Kong Admin API) |
-| **8002** | localhost only (Kong Manager; exposed via route on kong.get1agent.com) |
-| **5432** | EC2 only (RDS private) |
-
-No nginx. Kong listens on port 80 directly.
-
-Admin access to EC2 and RDS uses **AWS SSM** (no SSH keys, no home IP allowlist).
+| Component | Role |
+|-----------|------|
+| **API Gateway** | Auth0 JWT, CORS, per-route + stage throttling, access logs |
+| **EC2 jumpbox** | SSM only — no public ports, no Kong |
+| **RDS** | `get1agent` database for app/Lambdas |
 
 ---
 
-## GitHub Actions (alternative)
+## API Gateway features (configured)
 
-### Secrets (Settings → Actions)
-
-| Secret | Example |
-|--------|---------|
-| `AWS_ACCESS_KEY_ID` | `AKIA...` |
-| `AWS_SECRET_ACCESS_KEY` | `...` |
-
-### Workflows
-
-1. **Infra** — Terraform (Kong EC2 + RDS)
-2. **Deploy Kong** — sync scripts and restart Kong on EC2 via SSM
+| Feature | Config |
+|---------|--------|
+| **JWT auth** | Auth0 issuer + audience `https://api.get1agent.com` |
+| **CORS** | `www.get1agent.com`, `localhost:5173` |
+| **Stage throttling** | 50 req/s, burst 100 (adjust in `api_gateway` module) |
+| **Per-route throttling** | Set on each `lambda_routes` entry |
+| **Access logs** | CloudWatch, 7-day retention |
+| **Health** | `GET /health` (no auth) |
+| **DB health** | `GET /health/db` (no auth, RDS IAM check) |
 
 ---
 
-## Auth model
+## Backend Lambdas (TypeScript)
 
-| Who | How it connects to Postgres |
-|-----|----------------------------|
-| **Kong on EC2** | IAM role → `rds-db:connect` → user `kong_app` on database `kong` |
-| **Future Lambdas** | IAM → `rds-db:connect` → user `get1agent_app` on database `get1agent` |
-| **DBeaver / you** | SSM tunnel → master user `get1agent` + password from Secrets Manager |
+Registry: `backend/registry.json`
 
-Kong Manager UI is protected with **basic-auth** (credentials in `get1agent-dev/kong-admin-credentials`).
+| Lambda | Route | Purpose |
+|--------|-------|---------|
+| `health-check` | `GET /health/db` | RDS IAM `SELECT 1` |
+
+```bash
+# Package locally
+make -C backend/health-check package
+
+# Package + upload code (after Infra created the function)
+bash infra/aws/deploy-backend.sh health-check deploy
+```
+
+GitHub Actions: **Backend — deploy Lambda** workflow (`lambda_name`: `health-check`, `get1agent-prod-health-check`, or `all`).
 
 ---
 
-## DBeaver setup (SSM tunnel)
+## Adding Lambda routes
 
-### 1) Get DB credentials
+Edit `infra/terraform/envs/prod/api_gateway.tf`:
+
+```hcl
+lambda_routes = {
+  my_service = {
+    method               = "POST"
+    path                 = "/my-path"
+    lambda_invoke_arn    = module.my_lambda.invoke_arn
+    lambda_function_name = module.my_lambda.function_name
+    authorization_type   = "JWT"
+    throttle_rate_limit  = 10
+    throttle_burst_limit = 20
+  }
+}
+```
+
+Lambdas must handle **API Gateway HTTP API v2** events (not raw JSON).
+
+---
+
+## DBeaver (SSM tunnel)
 
 ```bash
 bash infra/aws/db-tunnel.sh --show-creds
-```
-
-### 2) Start the tunnel (keep terminal open)
-
-```bash
 bash infra/aws/db-tunnel.sh
 ```
 
-Default local port is **15432**.
-
-### 3) DBeaver connection
-
-| Field | Value |
-|-------|--------|
-| Host | `localhost` |
-| Port | `15432` |
-| Database | `get1agent` or `kong` |
-| Username | `get1agent` (master) |
-| Password | from `--show-creds` |
-
-**SSH tab** → disabled. **SSL** → `require`.
+Connect DBeaver to `localhost:15432` (master user from Secrets Manager).
 
 ---
 
-## Scripts
+## GitHub Actions
 
-| Script | Purpose |
-|--------|---------|
-| `infra/aws/deploy-infra.sh` | Terraform: Kong EC2 + RDS |
-| `infra/aws/deploy-kong.sh` | Sync Kong scripts and restart on EC2 |
-| `infra/aws/deploy-all.sh` | Both in one command |
-| `infra/aws/kong-admin-creds.sh` | Print Kong Manager UI login |
-| `infra/aws/db-tunnel.sh` | SSM tunnel to RDS for DBeaver |
+| Workflow | Purpose |
+|----------|---------|
+| **Infra** | Terraform: API Gateway + jumpbox + RDS + Lambdas |
+| **Backend — deploy Lambda** | Package + upload `backend/*` Lambdas |
+| **Tools — deploy Lambda** | Package + upload `tools/*` Lambdas |
+| **Deploy frontend** | S3 static site |
 
 ---
 
-## Adding API routes (later)
+## Cost notes (free tier friendly)
 
-Configure services and routes in **Kong Manager** at https://kong.get1agent.com, or via the Admin API on the EC2 instance (`curl http://127.0.0.1:8001/...` via SSM).
+| Service | Free tier |
+|---------|-----------|
+| API Gateway HTTP API | 1M requests/month (12 months) |
+| Lambda | 1M requests/month |
+| EC2 `t4g.micro` | 750 hours/month |
+| RDS `db.t4g.micro` | 750 hours/month |
+| CloudWatch logs | 5 GB ingestion |
 
-Example: route `api.get1agent.com/my-service` → Lambda function URL or ALB.
+No WAF by default (adds ~$5/month if needed later).
 
 ---
 
 ## Troubleshooting
 
-### Terraform stuck deleting a security group
+### ACM certificate stuck
 
-Renaming security groups (`-app` → `-kong`) leaves the old group referenced by RDS rules. The **Infra** workflow now runs `cleanup-stale-security-groups.sh` before and after apply, then applies twice.
+Add validation CNAME from `terraform output acm_validation_records`, then re-run apply.
 
-If a run was cancelled mid-delete, re-run **Infra** — do not cancel for at least 5 minutes on the security group step.
+### 401 on API routes
 
-Manual cleanup:
+Ensure Auth0 API identifier matches `https://api.get1agent.com` and frontend requests include `Authorization: Bearer <token>` with correct audience.
 
-```bash
-bash infra/aws/cleanup-stale-security-groups.sh
-cd infra/terraform/envs/dev && terraform init && terraform apply
-```
-
-### Kong not reachable
+### Terraform state lock
 
 ```bash
-# SSM into EC2, then:
-sudo docker ps -a
-sudo docker logs get1agent-kong --tail 50
-curl -s http://127.0.0.1:8001/status
-sudo systemctl status get1agent-kong
-```
-
-Restart:
-
-```bash
-bash infra/aws/deploy-kong.sh
-```
-
-### Terraform stuck on state lock
-
-```bash
-cd infra/terraform/envs/dev
-terraform init
+cd infra/terraform/envs/prod
 terraform force-unlock <LOCK_ID>
 ```

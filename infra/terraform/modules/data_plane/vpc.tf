@@ -102,4 +102,8 @@ resource "aws_db_subnet_group" "postgres" {
   tags = {
     Name = "${var.name_prefix}-postgres"
   }
+
+  lifecycle {
+    ignore_changes = [name]
+  }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI / laptop helper. Usage: run-terraform.sh <bootstrap|dev|web> <plan|apply>
+# CI / laptop helper. Usage: run-terraform.sh <bootstrap|prod|web> <plan|apply>
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -7,12 +7,12 @@ STACK="${1:-}"
 MODE="${2:-}"
 BUCKET="${TF_STATE_BUCKET:-get1agent-terraform-state-us-east-1}"
 
-if [[ "$STACK" != "bootstrap" && "$STACK" != "dev" && "$STACK" != "web" ]]; then
-  echo "usage: $0 <bootstrap|dev|web> <plan|apply>" >&2
+if [[ "$STACK" != "bootstrap" && "$STACK" != "prod" && "$STACK" != "web" ]]; then
+  echo "usage: $0 <bootstrap|prod|web> <plan|apply>" >&2
   exit 2
 fi
 if [[ "$MODE" != "plan" && "$MODE" != "apply" ]]; then
-  echo "usage: $0 <bootstrap|dev|web> <plan|apply>" >&2
+  echo "usage: $0 <bootstrap|prod|web> <plan|apply>" >&2
   exit 2
 fi
 
@@ -73,7 +73,7 @@ run_bootstrap() {
 
   if [[ "$MODE" != "apply" ]]; then
     terraform plan -input=false -no-color -out=tfplan
-    echo "Skipping envs/dev until the bootstrap apply creates the state bucket."
+    echo "Skipping envs/prod until the bootstrap apply creates the state bucket."
     disable_local_backend_override
     return
   fi
@@ -99,26 +99,33 @@ run_env() {
     return
   fi
 
-  if [[ "$env_name" == "dev" ]]; then
-    local zip="$ROOT/tools/challan-extractor/dist/function.zip"
-    if [[ ! -s "$zip" ]]; then
-      echo "Lambda zip missing or empty: $zip" >&2
+  if [[ "$env_name" == "prod" ]]; then
+    local tool_zip="$ROOT/tools/challan-extractor/dist/function.zip"
+    local health_zip="$ROOT/backend/health-check/dist/function.zip"
+    if [[ ! -s "$tool_zip" ]]; then
+      echo "Lambda zip missing or empty: $tool_zip" >&2
       echo "Run: make -C tools/challan-extractor package" >&2
       exit 1
     fi
-    echo "Lambda zip: $zip ($(wc -c <"$zip") bytes)"
+    if [[ ! -s "$health_zip" ]]; then
+      echo "Backend health-check zip missing or empty: $health_zip" >&2
+      echo "Run: make -C backend/health-check package" >&2
+      exit 1
+    fi
+    echo "Tool Lambda zip: $tool_zip ($(wc -c <"$tool_zip") bytes)"
+    echo "Health-check zip: $health_zip ($(wc -c <"$health_zip") bytes)"
   fi
 
   init_s3
   if [[ "$MODE" == "apply" ]]; then
-    if [[ "$env_name" == "dev" ]]; then
+    if [[ "$env_name" == "prod" ]]; then
       # Orphaned SG references from past renames block terraform destroy for minutes.
       bash "$ROOT/infra/aws/cleanup-stale-security-groups.sh" || true
     fi
 
     terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
 
-    if [[ "$env_name" == "dev" ]]; then
+    if [[ "$env_name" == "prod" ]]; then
       bash "$ROOT/infra/aws/cleanup-stale-security-groups.sh" || true
       terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
     fi

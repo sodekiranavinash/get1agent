@@ -1,3 +1,0 @@
-aws_region   = "us-east-1"
-package_path = "../../../../tools/challan-extractor/dist/function.zip"
-enable_data_plane = true

@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.7"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.7"
+    }
   }
 
   # Bucket is created by infra/terraform/bootstrap. After bootstrap exists:
@@ -17,7 +21,7 @@ terraform {
   # If you previously used a local backend, run: terraform init -migrate-state
   backend "s3" {
     bucket       = "get1agent-terraform-state-us-east-1"
-    key          = "envs/dev/terraform.tfstate"
+    key          = "envs/prod/terraform.tfstate"
     region       = "us-east-1"
     encrypt      = true
     use_lockfile = true

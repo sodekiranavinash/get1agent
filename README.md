@@ -7,8 +7,9 @@ Monorepo for get1agent.
 ```
 .
 ├── frontend/   # React + TypeScript + Tailwind (Vite)
-├── infra/      # Terraform + deploy scripts (Kong, RDS, S3)
-├── tools/      # Lambda tools
+├── backend/    # TypeScript Lambdas (health-check, etc.)
+├── infra/      # Terraform + deploy scripts (API Gateway, RDS, S3)
+├── tools/      # Go Lambda tools
 └── README.md
 ```
 
@@ -28,4 +29,4 @@ Then open the URL Vite prints (usually `http://localhost:5173`).
 bash infra/aws/deploy-all.sh
 ```
 
-See [infra/DEPLOY.md](infra/DEPLOY.md) for Cloudflare DNS, Kong Manager UI, and DBeaver setup.
+See [infra/DEPLOY.md](infra/DEPLOY.md) for Cloudflare DNS, API Gateway, and DBeaver setup.

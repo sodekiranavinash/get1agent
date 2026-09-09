@@ -6,18 +6,18 @@ alwaysApply: false
 
 ## Overview
 - UI: S3 + Cloudflare (`infra/terraform/envs/web`)
-- API Gateway: **Kong OSS** on EC2 (`infra/terraform/modules/data_plane`) — no nginx
-- API domain: `api.get1agent.com` → Cloudflare A record → Kong proxy :80
-- Kong UI: `kong.get1agent.com` → Kong Manager OSS (basic-auth protected)
-- RDS PostgreSQL: databases `get1agent` (app/lambdas) + `kong` (Kong config)
-- Kong → DB: **IAM auth** (user `kong_app`). DBeaver → SSM tunnel (`infra/aws/db-tunnel.sh`).
+- API: **AWS API Gateway HTTP API** (`infra/terraform/modules/api_gateway`) + Auth0 JWT
+- API domain: `api.get1agent.com` → Cloudflare CNAME → API Gateway
+- Data: RDS PostgreSQL + **SSM jumpbox EC2** (`infra/terraform/modules/data_plane`) for DB tunnel only
+- Tool Lambdas: `infra/terraform/modules/lambda_tool` (Go tools in `tools/`)
+- Backend Lambdas: `infra/terraform/modules/lambda_rds` (TypeScript in `backend/`, registry in `backend/registry.json`)
+- API routes: `infra/terraform/envs/prod/api_gateway.tf`
 
 ## Deploy scripts
-- `infra/aws/deploy-all.sh` — infra + Kong
+- `infra/aws/deploy-all.sh` — full infra apply
 - `infra/aws/deploy-infra.sh` — Terraform only
-- `infra/aws/deploy-kong.sh` — sync scripts + restart Kong on EC2 via SSM
-- `infra/aws/kong-admin-creds.sh` — Kong Manager UI password
 - `infra/aws/db-tunnel.sh` — SSM port forward to RDS for DBeaver
+- `infra/aws/deploy-backend.sh` — package/deploy backend/* Lambdas
 
 Full guide: **`infra/DEPLOY.md`**
 

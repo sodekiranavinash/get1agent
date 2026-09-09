@@ -116,6 +116,7 @@ vendor/
 
 # Terraform
 **/.terraform/
+**/tfplan
 *.tfstate
 *.tfstate.*
 crash.log

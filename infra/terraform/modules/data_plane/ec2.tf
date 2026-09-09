@@ -1,5 +1,5 @@
-resource "aws_iam_role" "app" {
-  name = "${var.name_prefix}-kong"
+resource "aws_iam_role" "jumpbox" {
+  name = "${var.name_prefix}-jumpbox"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -13,26 +13,26 @@ resource "aws_iam_role" "app" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "app_ssm" {
-  role       = aws_iam_role.app.name
+resource "aws_iam_role_policy_attachment" "jumpbox_ssm" {
+  role       = aws_iam_role.jumpbox.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_iam_instance_profile" "app" {
-  name = "${var.name_prefix}-kong"
-  role = aws_iam_role.app.name
+resource "aws_iam_instance_profile" "jumpbox" {
+  name = "${var.name_prefix}-jumpbox"
+  role = aws_iam_role.jumpbox.name
 }
 
 data "aws_ssm_parameter" "amazon_linux_2023_arm" {
   name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
 }
 
-resource "aws_instance" "app" {
+resource "aws_instance" "jumpbox" {
   ami                    = data.aws_ssm_parameter.amazon_linux_2023_arm.value
   instance_type          = var.ec2_instance_type
   subnet_id              = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.app.id]
-  iam_instance_profile   = aws_iam_instance_profile.app.name
+  vpc_security_group_ids = [aws_security_group.jumpbox.id]
+  iam_instance_profile   = aws_iam_instance_profile.jumpbox.name
 
   metadata_options {
     http_endpoint = "enabled"
@@ -41,31 +41,22 @@ resource "aws_instance" "app" {
 
   root_block_device {
     volume_type = "gp3"
-    volume_size = 12
+    volume_size = var.ec2_root_volume_gb
     encrypted   = true
   }
 
   user_data = templatefile("${path.module}/app_user_data.sh", {
-    aws_region                  = data.aws_region.current.name
-    api_hostname                = var.api_hostname
-    kong_ui_hostname            = var.kong_ui_hostname
-    kong_image                  = var.kong_image
-    name_prefix                 = var.name_prefix
-    db_credentials_secret_arn   = aws_secretsmanager_secret.db_credentials.arn
-    kong_admin_secret_arn       = aws_secretsmanager_secret.kong_admin_credentials.arn
-    db_host                     = aws_db_instance.postgres.address
-    db_name                     = var.db_name
-    db_master_username          = var.db_username
-    db_iam_username             = var.db_iam_username
-    kong_db_name                = var.kong_db_name
-    kong_db_iam_username        = var.kong_db_iam_username
-    bootstrap_db_script         = file("${path.module}/bootstrap-db.sh")
-    deploy_kong_script          = file("${path.module}/deploy-kong.sh.tpl")
-    bootstrap_kong_admin_script = file("${path.module}/bootstrap-kong-admin.sh")
+    aws_region                = data.aws_region.current.name
+    db_credentials_secret_arn = aws_secretsmanager_secret.db_credentials.arn
+    db_host                   = aws_db_instance.postgres.address
+    db_name                   = var.db_name
+    db_master_username        = var.db_username
+    db_iam_username           = var.db_iam_username
+    bootstrap_db_script       = file("${path.module}/bootstrap-db.sh")
   })
 
   tags = {
-    Name = "${var.name_prefix}-kong"
+    Name = "${var.name_prefix}-jumpbox"
   }
 
   lifecycle {
@@ -74,23 +65,9 @@ resource "aws_instance" "app" {
 
   depends_on = [
     aws_secretsmanager_secret_version.db_credentials,
-    aws_secretsmanager_secret_version.kong_admin_credentials,
     aws_db_instance.postgres,
-    aws_security_group_rule.postgres_from_app,
+    aws_security_group_rule.postgres_from_jumpbox,
   ]
 }
 
 data "aws_region" "current" {}
-
-resource "aws_eip" "app" {
-  domain = "vpc"
-
-  tags = {
-    Name = "${var.name_prefix}-kong-eip"
-  }
-}
-
-resource "aws_eip_association" "app" {
-  instance_id   = aws_instance.app.id
-  allocation_id = aws_eip.app.id
-}
