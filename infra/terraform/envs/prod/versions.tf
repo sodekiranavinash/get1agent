@@ -20,9 +20,9 @@ terraform {
   #   terraform init
   # If you previously used a local backend, run: terraform init -migrate-state
   backend "s3" {
-    bucket       = "get1agent-terraform-state-us-east-1"
+    bucket       = "get1agent-terraform-state-ap-south-1"
     key          = "envs/prod/terraform.tfstate"
-    region       = "us-east-1"
+    region       = "ap-south-1"
     encrypt      = true
     use_lockfile = true
   }

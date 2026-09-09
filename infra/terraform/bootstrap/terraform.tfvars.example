@@ -1,2 +1,2 @@
-aws_region        = "us-east-1"
-state_bucket_name = "get1agent-terraform-state-us-east-1"
+aws_region        = "ap-south-1"
+state_bucket_name = "get1agent-terraform-state-ap-south-1"

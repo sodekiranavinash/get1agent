@@ -42,7 +42,7 @@ if [[ "$MODE" == "apply" ]]; then
   echo "DB access:   bash infra/aws/db-access.sh  (starts jumpbox only while in use)"
   JUMPBOX_ID="$(terraform output -raw jumpbox_instance_id 2>/dev/null || true)"
   if [[ -n "$JUMPBOX_ID" ]]; then
-    aws ec2 stop-instances --region us-east-1 --instance-ids "$JUMPBOX_ID" >/dev/null 2>&1 || true
+    aws ec2 stop-instances --region "${AWS_REGION:-ap-south-1}" --instance-ids "$JUMPBOX_ID" >/dev/null 2>&1 || true
   fi
   echo ""
   echo "Auth0 API identifier: https://api.get1agent.com"

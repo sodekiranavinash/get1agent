@@ -8,7 +8,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-AWS_REGION="${AWS_REGION:-us-east-1}"
+AWS_REGION="${AWS_REGION:-ap-south-1}"
 NAME_PREFIX="${NAME_PREFIX:-get1agent-prod}"
 
 echo "=== Legacy AWS cleanup (${NAME_PREFIX}, ${AWS_REGION}) ==="

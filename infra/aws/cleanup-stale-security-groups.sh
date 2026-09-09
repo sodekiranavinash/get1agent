@@ -3,7 +3,7 @@
 # Safe to run before and after terraform apply (idempotent).
 set -euo pipefail
 
-AWS_REGION="${AWS_REGION:-us-east-1}"
+AWS_REGION="${AWS_REGION:-ap-south-1}"
 NAME_PREFIX="${NAME_PREFIX:-get1agent-prod}"
 
 describe_sg() {

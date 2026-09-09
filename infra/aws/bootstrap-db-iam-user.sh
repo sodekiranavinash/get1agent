@@ -8,10 +8,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_DIR="$ROOT/infra/terraform/envs/prod"
-AWS_REGION="${AWS_REGION:-us-east-1}"
+AWS_REGION="${AWS_REGION:-ap-south-1}"
 
 cd "$ENV_DIR"
 terraform init -input=false >/dev/null
+# Targeted applies may not refresh root outputs; sync state first.
+terraform refresh -input=false >/dev/null
 
 if ! terraform output -raw postgres_endpoint &>/dev/null; then
   echo "RDS not deployed; skipping IAM user bootstrap."
@@ -20,8 +22,8 @@ fi
 
 INSTANCE_ID="$(terraform output -raw jumpbox_instance_id)"
 RDS_HOST="$(terraform output -raw postgres_endpoint)"
-DB_NAME="$(terraform output -raw postgres_db_name)"
-IAM_USER="$(terraform output -raw db_iam_username)"
+DB_NAME="$(terraform output -raw postgres_db_name 2>/dev/null || echo get1agent)"
+IAM_USER="$(terraform output -raw db_iam_username 2>/dev/null || echo get1agent_app)"
 CREDS_PARAM="$(terraform output -raw postgres_credentials_parameter_name)"
 
 instance_state() {

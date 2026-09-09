@@ -1,7 +1,7 @@
 variable "aws_region" {
   type        = string
-  default     = "us-east-1"
-  description = "AWS region for prod resources"
+  default     = "ap-south-1"
+  description = "AWS region for prod resources (API, VPC, RDS, Lambdas)"
 }
 
 variable "package_path" {

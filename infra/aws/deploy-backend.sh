@@ -10,7 +10,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 QUERY="${1:-health-check}"
 MODE="${2:-package}"
-AWS_REGION="${AWS_REGION:-us-east-1}"
+AWS_REGION="${AWS_REGION:-ap-south-1}"
 
 if [[ "$MODE" != "package" && "$MODE" != "deploy" ]]; then
   echo "usage: $0 <lambda-name|function-name|all> [package|deploy]" >&2

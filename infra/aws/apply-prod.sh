@@ -15,11 +15,8 @@ TARGETS=()
   TARGETS+=(-target=module.network)
 }
 [[ "${APPLY_API_GATEWAY:-false}" == "true" ]] && TARGETS+=(-target=module.api_gateway)
-[[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && {
-  TARGETS+=(-target=module.health_check)
-  TARGETS+=(-target=module.network)
-  TARGETS+=(-target=module.rds)
-}
+# health-check only needs existing VPC/RDS in state — do not -target module.network (pulls jumpbox).
+[[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && TARGETS+=(-target=module.health_check)
 [[ "${APPLY_TOOL_LAMBDAS:-false}" == "true" ]] && TARGETS+=(-target=module.challan_extractor)
 
 need_tool_zip=false
@@ -51,6 +48,6 @@ if [[ "${APPLY_NETWORK:-false}" == "true" || ${#TARGETS[@]} -eq 0 ]]; then
   terraform init -input=false >/dev/null
   JUMPBOX_ID="$(terraform output -raw jumpbox_instance_id 2>/dev/null || true)"
   if [[ -n "$JUMPBOX_ID" ]]; then
-    aws ec2 stop-instances --region "${AWS_REGION:-us-east-1}" --instance-ids "$JUMPBOX_ID" >/dev/null 2>&1 || true
+    aws ec2 stop-instances --region "${AWS_REGION:-ap-south-1}" --instance-ids "$JUMPBOX_ID" >/dev/null 2>&1 || true
   fi
 fi

@@ -1,2 +1,2 @@
-aws_region       = "us-east-1"
+aws_region       = "ap-south-1"
 site_bucket_name = "www.get1agent.com"

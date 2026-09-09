@@ -44,7 +44,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "tfstate" {
 
 check "backend_bucket_name" {
   assert {
-    condition     = aws_s3_bucket.tfstate.bucket == "get1agent-terraform-state-us-east-1"
+    condition     = aws_s3_bucket.tfstate.bucket == "get1agent-terraform-state-ap-south-1"
     error_message = "state_bucket_name must match the hardcoded S3 backend bucket in versions.tf (and envs/*/versions.tf)."
   }
 }

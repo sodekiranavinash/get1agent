@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TFVARS="$ROOT/infra/terraform/envs/prod/terraform.tfvars"
 
 cat >"$TFVARS" <<'EOF'
-aws_region               = "us-east-1"
+aws_region               = "ap-south-1"
 package_path             = "../../../../tools/challan-extractor/dist/function.zip"
 enable_network           = true
 enable_rds               = true

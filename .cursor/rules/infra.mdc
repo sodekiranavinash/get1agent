@@ -5,6 +5,7 @@ alwaysApply: false
 # Infra rules
 
 ## Overview
+- Region: **`ap-south-1` (Mumbai)** for all AWS resources (API, VPC, RDS, Lambdas, web S3, Terraform state)
 - UI: S3 + Cloudflare (`infra/terraform/envs/web`) — deploy via **Frontend** workflow
 - API: **AWS API Gateway HTTP API** (`infra/terraform/modules/api_gateway`) + Auth0 JWT
 - API domain: `api.get1agent.com` → Cloudflare CNAME → API Gateway

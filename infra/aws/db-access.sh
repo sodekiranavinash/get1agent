@@ -16,7 +16,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_DIR="$ROOT/infra/terraform/envs/prod"
-AWS_REGION="${AWS_REGION:-us-east-1}"
+AWS_REGION="${AWS_REGION:-ap-south-1}"
 LOCAL_PORT="${LOCAL_PORT:-15432}"
 MODE="tunnel"
 KEEP_RUNNING=0

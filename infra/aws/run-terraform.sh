@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 STACK="${1:-}"
 MODE="${2:-}"
-BUCKET="${TF_STATE_BUCKET:-get1agent-terraform-state-us-east-1}"
+BUCKET="${TF_STATE_BUCKET:-get1agent-terraform-state-ap-south-1}"
 
 if [[ "$STACK" != "bootstrap" && "$STACK" != "prod" && "$STACK" != "web" ]]; then
   echo "usage: $0 <bootstrap|prod|web> <plan|apply>" >&2
@@ -35,11 +35,6 @@ bucket_exists() {
 
 init_s3() {
   terraform init -input=false -no-color -reconfigure
-}
-
-# moved.tf renames (data_plane/vpc_rds → network+rds) must run without -target.
-state_needs_move_migration() {
-  terraform state list 2>/dev/null | grep -qE 'module\.(vpc_rds|data_plane)\['
 }
 
 # First-time bootstrap: S3 backend cannot init until the bucket exists.
@@ -139,14 +134,8 @@ run_env() {
     fi
 
     if [[ "$env_name" == "prod" && -n "${PROD_TARGETS:-}" ]]; then
-      if state_needs_move_migration; then
-        echo "Legacy module addresses (vpc_rds/data_plane) found in state."
-        echo "Running a full apply first to complete moved-block migration; -target is skipped for this run."
-        terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
-      else
-        read -ra TARGET_ARR <<<"$PROD_TARGETS"
-        terraform apply -input=false -no-color -auto-approve -lock-timeout=5m "${TARGET_ARR[@]}"
-      fi
+      read -ra TARGET_ARR <<<"$PROD_TARGETS"
+      terraform apply -input=false -no-color -auto-approve -lock-timeout=5m "${TARGET_ARR[@]}"
     else
       terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
     fi
