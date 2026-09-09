@@ -1,5 +1,5 @@
 locals {
-  layer_data_zip = abspath("${path.module}/../../../../backend/layers/data/dist/layer.zip")
+  layer_data_zip   = abspath("${path.module}/../../../../backend/layers/data/dist/layer.zip")
   health_check_zip = abspath("${path.module}/../../../../backend/health-check/dist/function.zip")
 }
 
