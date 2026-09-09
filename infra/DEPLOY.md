@@ -150,6 +150,19 @@ Example: route `api.get1agent.com/my-service` → Lambda function URL or ALB.
 
 ## Troubleshooting
 
+### Terraform stuck deleting a security group
+
+Renaming security groups (`-app` → `-kong`) leaves the old group referenced by RDS rules. The **Infra** workflow now runs `cleanup-stale-security-groups.sh` before and after apply, then applies twice.
+
+If a run was cancelled mid-delete, re-run **Infra** — do not cancel for at least 5 minutes on the security group step.
+
+Manual cleanup:
+
+```bash
+bash infra/aws/cleanup-stale-security-groups.sh
+cd infra/terraform/envs/dev && terraform init && terraform apply
+```
+
 ### Kong not reachable
 
 ```bash

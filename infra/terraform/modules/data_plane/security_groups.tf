@@ -1,7 +1,9 @@
+# IMPORTANT: never change `name` — AWS rejects duplicate SG names and destroys block on dependents.
 resource "aws_security_group" "app" {
-  name        = "${var.name_prefix}-kong"
-  description = "Kong API Gateway (HTTP proxy on :80)"
-  vpc_id      = aws_vpc.main.id
+  name                   = "${var.name_prefix}-kong"
+  description            = "Kong API Gateway (HTTP proxy on :80)"
+  vpc_id                 = aws_vpc.main.id
+  revoke_rules_on_delete = true
 
   egress {
     description = "All outbound"
@@ -19,6 +21,10 @@ resource "aws_security_group" "app" {
     create_before_destroy = true
     ignore_changes        = [description]
   }
+
+  timeouts {
+    delete = "15m"
+  }
 }
 
 resource "aws_security_group_rule" "app_http" {
@@ -32,10 +38,12 @@ resource "aws_security_group_rule" "app_http" {
   ipv6_cidr_blocks  = local.cloudflare_ipv6_cidrs
 }
 
+# IMPORTANT: never change `name` or `description` — both force SG replacement.
 resource "aws_security_group" "postgres" {
-  name        = "${var.name_prefix}-postgres"
-  description = "PostgreSQL reachable only from the app EC2"
-  vpc_id      = aws_vpc.main.id
+  name                   = "${var.name_prefix}-postgres"
+  description            = "PostgreSQL reachable only from the app EC2"
+  vpc_id                 = aws_vpc.main.id
+  revoke_rules_on_delete = true
 
   egress {
     description = "All outbound"
@@ -51,8 +59,11 @@ resource "aws_security_group" "postgres" {
 
   lifecycle {
     create_before_destroy = true
-    # Description changes force SG replacement; AWS rejects duplicate names in the VPC.
-    ignore_changes = [description]
+    ignore_changes        = [description]
+  }
+
+  timeouts {
+    delete = "15m"
   }
 }
 
@@ -64,4 +75,8 @@ resource "aws_security_group_rule" "postgres_from_app" {
   from_port                = 5432
   to_port                  = 5432
   protocol                 = "tcp"
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }

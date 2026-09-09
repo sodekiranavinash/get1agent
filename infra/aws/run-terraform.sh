@@ -111,7 +111,17 @@ run_env() {
 
   init_s3
   if [[ "$MODE" == "apply" ]]; then
+    if [[ "$env_name" == "dev" ]]; then
+      # Orphaned SG references from past renames block terraform destroy for minutes.
+      bash "$ROOT/infra/aws/cleanup-stale-security-groups.sh" || true
+    fi
+
     terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
+
+    if [[ "$env_name" == "dev" ]]; then
+      bash "$ROOT/infra/aws/cleanup-stale-security-groups.sh" || true
+      terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
+    fi
   else
     terraform plan -input=false -no-color -out=tfplan -lock-timeout=5m
   fi
