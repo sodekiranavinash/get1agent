@@ -16,24 +16,32 @@ TARGETS=()
 }
 [[ "${APPLY_API_GATEWAY:-false}" == "true" ]] && TARGETS+=(-target=module.api_gateway)
 # health-check only needs existing VPC/RDS in state — do not -target module.network (pulls jumpbox).
-[[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && TARGETS+=(-target=module.health_check)
+[[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && {
+  TARGETS+=(-target='module.layer_data[0]')
+  TARGETS+=(-target='module.health_check[0]')
+}
 [[ "${APPLY_TOOL_LAMBDAS:-false}" == "true" ]] && TARGETS+=(-target=module.challan_extractor)
 
 need_tool_zip=false
-need_health_zip=false
+need_backend_artifacts=false
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
   need_tool_zip=true
-  need_health_zip=true
+  need_backend_artifacts=true
 else
-  [[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && need_health_zip=true
+  [[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && need_backend_artifacts=true
   [[ "${APPLY_TOOL_LAMBDAS:-false}" == "true" ]] && need_tool_zip=true
 fi
 
 if [[ "$need_tool_zip" == true && ! -s "$ROOT/tools/challan-extractor/dist/function.zip" ]]; then
   make -C "$ROOT/tools/challan-extractor" package
 fi
-if [[ "$need_health_zip" == true && ! -s "$ROOT/backend/health-check/dist/function.zip" ]]; then
-  make -C "$ROOT/backend/health-check" package
+if [[ "$need_backend_artifacts" == true ]]; then
+  if [[ ! -s "$ROOT/backend/layers/data/dist/layer.zip" ]]; then
+    bash "$ROOT/infra/aws/build-backend-layers.sh"
+  fi
+  if [[ ! -s "$ROOT/backend/health-check/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/health-check" package
+  fi
 fi
 
 export PROD_TARGETS="${TARGETS[*]}"

@@ -73,11 +73,9 @@ jobs:
           go-version-file: tools/challan-extractor/go.mod
           cache-dependency-path: tools/challan-extractor/go.sum
 
-      - name: Setup Node.js
+      - name: Setup uv
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
+        uses: astral-sh/setup-uv@v5
 
       - name: Terraform fmt
         run: terraform fmt -check -recursive infra/terraform
@@ -91,6 +89,10 @@ jobs:
         run: make package
         working-directory: tools/challan-extractor
 
+      - name: Build backend data layer
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        run: bash infra/aws/build-backend-layers.sh
+
       - name: Package backend health-check zip
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
@@ -101,8 +103,10 @@ jobs:
         run: |
           test -s tools/challan-extractor/dist/function.zip
           unzip -l tools/challan-extractor/dist/function.zip | grep bootstrap
+          test -s backend/layers/data/dist/layer.zip
+          unzip -l backend/layers/data/dist/layer.zip | grep 'python/sqlalchemy'
           test -s backend/health-check/dist/function.zip
-          unzip -l backend/health-check/dist/function.zip | grep index.js
+          unzip -l backend/health-check/dist/function.zip | grep handler.py
 
       - name: Terraform validate
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas

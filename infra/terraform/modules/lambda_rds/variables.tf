@@ -15,14 +15,20 @@ variable "source_code_hash" {
 
 variable "handler" {
   type        = string
-  default     = "index.handler"
+  default     = "handler.lambda_handler"
   description = "Lambda handler"
 }
 
 variable "runtime" {
   type        = string
-  default     = "nodejs22.x"
-  description = "Node.js runtime (arm64)"
+  default     = "python3.14"
+  description = "Python runtime (arm64)"
+}
+
+variable "layer_arns" {
+  type        = list(string)
+  default     = []
+  description = "Lambda layer ARNs to attach (newest version per ARN)"
 }
 
 variable "memory_size" {

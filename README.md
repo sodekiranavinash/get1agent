@@ -7,7 +7,7 @@ Monorepo for get1agent.
 ```
 .
 ├── frontend/   # React + TypeScript + Tailwind (Vite)
-├── backend/    # TypeScript Lambdas (health-check, etc.)
+├── backend/    # Python Lambdas + shared layers (health-check, etc.)
 ├── infra/      # Terraform + deploy scripts (API Gateway, RDS, S3)
 ├── tools/      # Go Lambda tools
 └── README.md

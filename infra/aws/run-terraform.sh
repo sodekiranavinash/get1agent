@@ -101,15 +101,16 @@ run_env() {
 
   if [[ "$env_name" == "prod" ]]; then
     local tool_zip="$ROOT/tools/challan-extractor/dist/function.zip"
+    local layer_zip="$ROOT/backend/layers/data/dist/layer.zip"
     local health_zip="$ROOT/backend/health-check/dist/function.zip"
-    local need_tool=false need_health=false
+    local need_tool=false need_backend=false
 
     if [[ -z "${PROD_TARGETS:-}" ]]; then
       need_tool=true
-      need_health=true
+      need_backend=true
     else
       [[ "$PROD_TARGETS" == *challan_extractor* ]] && need_tool=true
-      [[ "$PROD_TARGETS" == *health_check* ]] && need_health=true
+      [[ "$PROD_TARGETS" == *layer_data* || "$PROD_TARGETS" == *health_check* ]] && need_backend=true
     fi
 
     if [[ "$need_tool" == true && ! -s "$tool_zip" ]]; then
@@ -117,13 +118,19 @@ run_env() {
       echo "Run: make -C tools/challan-extractor package" >&2
       exit 1
     fi
-    if [[ "$need_health" == true && ! -s "$health_zip" ]]; then
+    if [[ "$need_backend" == true && ! -s "$layer_zip" ]]; then
+      echo "Backend data layer zip missing or empty: $layer_zip" >&2
+      echo "Run: bash infra/aws/build-backend-layers.sh" >&2
+      exit 1
+    fi
+    if [[ "$need_backend" == true && ! -s "$health_zip" ]]; then
       echo "Backend health-check zip missing or empty: $health_zip" >&2
       echo "Run: make -C backend/health-check package" >&2
       exit 1
     fi
     [[ "$need_tool" == true ]] && echo "Tool Lambda zip: $tool_zip ($(wc -c <"$tool_zip") bytes)"
-    [[ "$need_health" == true ]] && echo "Health-check zip: $health_zip ($(wc -c <"$health_zip") bytes)"
+    [[ "$need_backend" == true ]] && echo "Data layer zip: $layer_zip ($(wc -c <"$layer_zip") bytes)"
+    [[ "$need_backend" == true ]] && echo "Health-check zip: $health_zip ($(wc -c <"$health_zip") bytes)"
   fi
 
   init_s3

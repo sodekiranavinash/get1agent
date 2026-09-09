@@ -18,6 +18,7 @@ resource "aws_lambda_function" "this" {
   architectures    = var.architectures
   memory_size      = var.memory_size
   timeout          = var.timeout
+  layers           = var.layer_arns
 
   environment {
     variables = var.environment

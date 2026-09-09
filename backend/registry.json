@@ -1,9 +1,19 @@
 {
+  "layers": [
+    {
+      "name": "data",
+      "dir": "backend/layers/data",
+      "terraform_name": "get1agent-prod-layer-data"
+    }
+  ],
   "lambdas": [
     {
       "name": "health-check",
       "dir": "backend/health-check",
-      "function_name": "get1agent-prod-health-check"
+      "function_name": "get1agent-prod-health-check",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": ["data"]
     }
   ]
 }

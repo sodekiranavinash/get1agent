@@ -21,6 +21,11 @@ if [[ ! -s "$ROOT/tools/challan-extractor/dist/function.zip" ]]; then
   make -C "$ROOT/tools/challan-extractor" package
 fi
 
+if [[ ! -s "$ROOT/backend/layers/data/dist/layer.zip" ]]; then
+  echo "Building backend data Lambda layer..."
+  bash "$ROOT/infra/aws/build-backend-layers.sh"
+fi
+
 if [[ ! -s "$ROOT/backend/health-check/dist/function.zip" ]]; then
   echo "Packaging backend health-check Lambda zip..."
   make -C "$ROOT/backend/health-check" package

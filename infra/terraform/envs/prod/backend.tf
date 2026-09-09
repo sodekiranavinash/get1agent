@@ -1,5 +1,13 @@
 locals {
+  layer_data_zip = abspath("${path.module}/../../../../backend/layers/data/dist/layer.zip")
   health_check_zip = abspath("${path.module}/../../../../backend/health-check/dist/function.zip")
+}
+
+check "layer_data_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.layer_data_zip)
+    error_message = "Backend data layer zip not found at ${local.layer_data_zip}. Run: make -C backend/layers/data build"
+  }
 }
 
 check "health_check_zip_exists" {
@@ -16,6 +24,16 @@ check "backend_lambdas_need_network_and_rds" {
   }
 }
 
+module "layer_data" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_layer"
+
+  name             = "get1agent-prod-layer-data"
+  filename         = local.layer_data_zip
+  source_code_hash = filebase64sha256(local.layer_data_zip)
+  description      = "SQLAlchemy async + asyncpg + shared/db"
+}
+
 module "health_check" {
   count  = var.enable_backend_lambdas ? 1 : 0
   source = "../../modules/lambda_rds"
@@ -23,6 +41,9 @@ module "health_check" {
   name             = "get1agent-prod-health-check"
   filename         = local.health_check_zip
   source_code_hash = filebase64sha256(local.health_check_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = "python3.14"
+  layer_arns       = [module.layer_data[0].arn]
 
   memory_size = 256
   timeout     = 15

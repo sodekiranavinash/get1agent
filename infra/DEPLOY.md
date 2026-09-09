@@ -94,21 +94,30 @@ EC2 jumpbox (on-demand, public IPv4 only while running) → RDS PostgreSQL
 
 ---
 
-## Backend Lambdas (TypeScript)
+## Backend Lambdas (Python)
 
-Registry: `backend/registry.json`
+Registry: `backend/registry.json` — lists **layers** and **lambdas** (with `layers: [...]`).
 
-| Lambda | Route | Purpose |
-|--------|-------|---------|
-| `health-check` | `GET /health/db` | RDS IAM `SELECT 1` |
+| Lambda | Route | Layers | Purpose |
+|--------|-------|--------|---------|
+| `health-check` | `GET /health/db` | `data` | SQLAlchemy async + asyncpg RDS IAM `SELECT 1` |
+
+| Layer | Contents |
+|-------|----------|
+| `data` | SQLAlchemy 2 async, asyncpg, `shared/db` |
+
+Handler zips contain **only** `handler.py`. Dependencies ship in Lambda layers.
 
 ```bash
-# Package locally
+# Build data layer + handler zip locally
+bash infra/aws/build-backend-layers.sh
 make -C backend/health-check package
 
-# Package + upload code (after Infra created the function)
+# Package + upload handler code (after Infra created the function + layer)
 bash infra/aws/deploy-backend.sh health-check deploy
 ```
+
+Layer updates require an **Infra** apply (Terraform publishes a new layer version).
 
 GitHub Actions: **Backend** workflow — check `health-check` to deploy.
 

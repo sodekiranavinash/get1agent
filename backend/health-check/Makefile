@@ -1,17 +1,10 @@
-.PHONY: test build zip package clean
+.PHONY: package clean
 
-package: build zip
-
-test:
-	npm run test
-
-build:
-	npm ci
-	npm run build
-	TZ=UTC touch -t 198001010000 dist/index.js
-
-zip:
-	npm run zip
+package:
+	rm -rf dist
+	mkdir -p dist
+	cp src/handler.py dist/handler.py
+	cd dist && zip -qX function.zip handler.py
 
 clean:
-	rm -rf dist node_modules
+	rm -rf dist

@@ -53,12 +53,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
 
-      - name: Package
+      - name: Package handler zip
         run: make package
         working-directory: ${{ matrix.lambda_dir }}
 

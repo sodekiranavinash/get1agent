@@ -12,7 +12,7 @@ alwaysApply: false
 - Network: VPC + jumpbox (`infra/terraform/modules/network`); public IPv4 only while `db-access.sh` runs
 - Data: RDS PostgreSQL (`infra/terraform/modules/rds`) + SSM Parameter Store credentials
 - Tool Lambdas: `infra/terraform/modules/lambda_tool` (Go tools in `tools/`)
-- Backend Lambdas: `infra/terraform/modules/lambda_rds` (TypeScript in `backend/`, registry in `backend/registry.json`)
+- Backend Lambdas: `infra/terraform/modules/lambda_rds` (Python in `backend/`, layers in `backend/layers/`, registry in `backend/registry.json`)
 - API routes: `infra/terraform/envs/prod/api_gateway.tf`
 
 ## GitHub Actions

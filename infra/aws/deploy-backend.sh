@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Package and optionally deploy backend/* Lambdas (TypeScript + esbuild).
+# Package and optionally deploy backend/* Lambdas (Python handler zips + registry layers).
 #
 # Usage:
 #   bash infra/aws/deploy-backend.sh health-check          # package only
@@ -17,17 +17,15 @@ if [[ "$MODE" != "package" && "$MODE" != "deploy" ]]; then
   exit 2
 fi
 
-ENTRIES=()
-while IFS= read -r line; do
-  [[ -n "$line" ]] && ENTRIES+=("$line")
-done < <(python3 - "$ROOT/backend/registry.json" "$QUERY" <<'PY'
+RESOLVED="$(python3 - "$ROOT/backend/registry.json" "$QUERY" <<'PY'
 import json
 import sys
 
 path, query = sys.argv[1], sys.argv[2].strip()
 with open(path, encoding="utf-8") as f:
-    lambdas = json.load(f)["lambdas"]
+    registry = json.load(f)
 
+lambdas = registry["lambdas"]
 if query.lower() == "all":
     selected = lambdas
 else:
@@ -39,15 +37,39 @@ else:
 if not selected:
     sys.exit(1)
 
+layer_names = []
 for item in selected:
-    print(f"{item['dir']}|{item['function_name']}")
-PY
-)
+    for layer_name in item.get("layers", []):
+        if layer_name not in layer_names:
+            layer_names.append(layer_name)
 
-if [[ "${#ENTRIES[@]}" -eq 0 ]]; then
+print("LAYERS=" + ",".join(layer_names))
+for item in selected:
+    print(f"LAMBDA={item['dir']}|{item['function_name']}")
+PY
+)"
+
+if [[ -z "$RESOLVED" ]]; then
   echo "Unknown lambda: $QUERY" >&2
   bash "$ROOT/infra/aws/select-backend.sh" >&2 || true
   exit 1
+fi
+
+LAYER_CSV=""
+ENTRIES=()
+while IFS= read -r line; do
+  case "$line" in
+    LAYERS=*)
+      LAYER_CSV="${line#LAYERS=}"
+      ;;
+    LAMBDA=*)
+      ENTRIES+=("${line#LAMBDA=}")
+      ;;
+  esac
+done <<<"$RESOLVED"
+
+if [[ -n "$LAYER_CSV" ]]; then
+  bash "$ROOT/infra/aws/build-backend-layers.sh" "$LAYER_CSV"
 fi
 
 for entry in "${ENTRIES[@]}"; do
