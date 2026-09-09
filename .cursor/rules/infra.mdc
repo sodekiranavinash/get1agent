@@ -15,7 +15,7 @@ alwaysApply: false
 - API routes: `infra/terraform/envs/prod/api_gateway.tf`
 
 ## GitHub Actions
-- **Infra** — bootstrap / web / vpc / rds / api_gateway / lambdas (always apply; checkboxes pick components)
+- **Infra** — web / vpc / rds / api_gateway / lambdas (state bucket auto; always apply)
 - **Frontend** — build + sync to S3 (separate from Infra)
 - **Backend** — one checkbox per Lambda = deploy code
 - **Tools** — one checkbox per tool = deploy code

@@ -3,10 +3,6 @@ name: Infra
 on:
   workflow_dispatch:
     inputs:
-      bootstrap:
-        description: Bootstrap - Terraform state S3 bucket
-        type: boolean
-        default: false
       web:
         description: Web - S3 static site bucket (www.get1agent.com)
         type: boolean
@@ -16,7 +12,7 @@ on:
         type: boolean
         default: false
       rds:
-        description: RDS - PostgreSQL + SSM credentials
+        description: RDS - PostgreSQL
         type: boolean
         default: false
       api_gateway:
@@ -24,7 +20,7 @@ on:
         type: boolean
         default: false
       lambdas:
-        description: Lambdas - Terraform for health-check + challan-extractor
+        description: Lambdas
         type: boolean
         default: false
 
@@ -51,7 +47,6 @@ jobs:
 
       - name: Require at least one component
         if: >-
-          inputs.bootstrap == false &&
           inputs.web == false &&
           inputs.vpc == false &&
           inputs.rds == false &&
@@ -62,12 +57,10 @@ jobs:
           exit 1
 
       - name: Read Terraform version
-        if: inputs.bootstrap || inputs.web || inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         id: tfver
         run: echo "version=$(tr -d '[:space:]' < infra/terraform/.terraform-version)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Terraform
-        if: inputs.bootstrap || inputs.web || inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ steps.tfver.outputs.version }}
@@ -87,7 +80,6 @@ jobs:
           node-version: 22
 
       - name: Terraform fmt
-        if: inputs.bootstrap || inputs.web || inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: terraform fmt -check -recursive infra/terraform
 
       - name: Write prod terraform.tfvars
@@ -126,8 +118,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Bootstrap
-        if: inputs.bootstrap
+      - name: Bootstrap state bucket
         run: bash infra/aws/run-terraform.sh bootstrap apply
 
       - name: Web
