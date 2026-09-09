@@ -99,17 +99,10 @@ PY
 )"
 
 export PGSSLMODE=require
-psql -v ON_ERROR_STOP=1 <<SQL
-DO \$\$
-BEGIN
-  CREATE USER ${IAM_USER};
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END
-\$\$;
-GRANT rds_iam TO ${IAM_USER};
-GRANT CONNECT ON DATABASE ${DB_NAME} TO ${IAM_USER};
-SQL
+# Avoid DO $$ blocks: remote bash expands $$ to its PID before psql runs.
+psql -v ON_ERROR_STOP=0 -c "CREATE USER ${IAM_USER};"
+psql -v ON_ERROR_STOP=1 -c "GRANT rds_iam TO ${IAM_USER};"
+psql -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE ${DB_NAME} TO ${IAM_USER};"
 
 sudo mkdir -p /opt/get1agent
 sudo touch "\$MARKER"
