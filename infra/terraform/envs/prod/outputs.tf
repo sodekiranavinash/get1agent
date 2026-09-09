@@ -1,6 +1,9 @@
 output "api_url" {
   description = "Public API URL (custom domain when enabled, else execute-api URL)"
-  value       = try(coalesce(module.api_gateway[0].api_custom_domain, module.api_gateway[0].api_endpoint), null)
+  value = try(
+    "${trimsuffix(coalesce(module.api_gateway[0].api_custom_domain, module.api_gateway[0].api_endpoint), "/")}/",
+    null,
+  )
 }
 
 output "api_gateway_endpoint" {

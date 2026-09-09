@@ -95,4 +95,4 @@ done
 
 echo ""
 echo "=== Legacy cleanup complete ==="
-echo "Run terraform apply to ensure vpc_rds uses SSM Parameter Store (no Secrets Manager)."
+echo "Credentials now live in SSM Parameter Store (not Secrets Manager)."

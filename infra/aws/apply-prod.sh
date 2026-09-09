@@ -42,6 +42,10 @@ fi
 export PROD_TARGETS="${TARGETS[*]}"
 bash "$ROOT/infra/aws/run-terraform.sh" prod apply
 
+if [[ "${APPLY_RDS:-false}" == "true" || ${#TARGETS[@]} -eq 0 ]]; then
+  bash "$ROOT/infra/aws/bootstrap-db-iam-user.sh"
+fi
+
 if [[ "${APPLY_NETWORK:-false}" == "true" || ${#TARGETS[@]} -eq 0 ]]; then
   cd "$ROOT/infra/terraform/envs/prod"
   terraform init -input=false >/dev/null

@@ -142,12 +142,6 @@ run_env() {
 
     if [[ "$env_name" == "prod" ]]; then
       bash "$ROOT/infra/aws/cleanup-stale-security-groups.sh" || true
-      if [[ -n "${PROD_TARGETS:-}" ]]; then
-        read -ra TARGET_ARR <<<"$PROD_TARGETS"
-        terraform apply -input=false -no-color -auto-approve -lock-timeout=5m "${TARGET_ARR[@]}"
-      else
-        terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
-      fi
     fi
   else
     terraform plan -input=false -no-color -out=tfplan -lock-timeout=5m

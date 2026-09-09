@@ -31,6 +31,7 @@ bash "$ROOT/infra/aws/run-terraform.sh" web "$MODE"
 bash "$ROOT/infra/aws/run-terraform.sh" prod "$MODE"
 
 if [[ "$MODE" == "apply" ]]; then
+  bash "$ROOT/infra/aws/bootstrap-db-iam-user.sh" || true
   cd "$ROOT/infra/terraform/envs/prod"
   terraform init -input=false >/dev/null
   echo ""
