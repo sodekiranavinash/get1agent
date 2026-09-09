@@ -120,7 +120,9 @@ bash infra/aws/deploy-backend.sh health-check deploy
 
 Layer updates require an **Infra** apply (Terraform publishes a new layer version).
 
-GitHub Actions: **Backend** workflow — check `health-check` to deploy.
+After a runtime/handler migration, also run **Backend** once to upload the Python handler zip (Terraform ignores function code after create).
+
+GitHub Actions: **Backend** workflow — check `health-check` to deploy handler code.
 
 ---
 
