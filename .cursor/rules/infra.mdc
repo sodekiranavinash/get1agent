@@ -26,7 +26,6 @@ alwaysApply: false
 - `infra/aws/deploy-infra.sh` — Terraform only (bootstrap + web + full prod)
 - `infra/aws/apply-prod.sh` — targeted prod apply (used by Infra workflow)
 - `infra/aws/db-access.sh` — start jumpbox, SSM tunnel to RDS, stop on exit (minimal IPv4 cost)
-- `infra/aws/cleanup-legacy-aws.sh` — remove Kong-era EIPs, SGs, Secrets Manager secrets
 - `infra/aws/deploy-backend.sh` — package/deploy backend/* Lambdas
 
 Full guide: **`infra/DEPLOY.md`**

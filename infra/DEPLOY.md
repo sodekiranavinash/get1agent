@@ -51,7 +51,7 @@ terraform output api_gateway_cname_target # step B
 |------|-------------------|--------|
 | **A** | ACM validation **CNAME** | Copy `name` + `value` from `acm_validation_records` (usually `_xxxx.api` → `_xxxx.acm-validations.aws`) |
 | **B** | `api` **CNAME** → API Gateway target | Copy from `api_gateway_cname_target` (looks like `d-xxxxx.execute-api.ap-south-1.amazonaws.com`) |
-| **C** | Delete old records | Remove any `api` **A** record and `kong` **A** record if present |
+| **C** | Delete old records | Remove any stale `api` **A** record if present |
 
 ### 3) Verify
 
@@ -191,71 +191,6 @@ Terraform state lives in a dedicated S3 bucket (created automatically before any
 No WAF by default (adds ~$5/month if needed later).
 
 DB credentials live in **SSM Parameter Store** (not Secrets Manager — saves ~$0.80/month).
-
-### Remove Kong-era leftovers
-
-After migrating from Kong, run once:
-
-```bash
-bash infra/aws/cleanup-legacy-aws.sh
-```
-
-Removes orphaned Kong security groups, Elastic IPs, and old Secrets Manager secrets.
-
----
-
-## Migrating from us-east-1 → ap-south-1 (Mumbai)
-
-**Warning:** Resources cannot move across regions in place. Destroy the old stack, then create a new one. **RDS data is not migrated automatically.**
-
-### 1) Destroy old us-east-1 stacks (if they exist)
-
-```bash
-# Prod (use old state bucket + region)
-cd infra/terraform/envs/prod
-terraform init -reconfigure \
-  -backend-config="bucket=get1agent-terraform-state-us-east-1" \
-  -backend-config="region=us-east-1"
-terraform apply -var='aws_region=us-east-1' -destroy -auto-approve
-
-# Web
-cd ../web
-terraform init -reconfigure \
-  -backend-config="bucket=get1agent-terraform-state-us-east-1" \
-  -backend-config="region=us-east-1"
-terraform destroy -auto-approve
-```
-
-### 2) Deploy Mumbai (all components)
-
-```bash
-bash infra/aws/deploy-infra.sh apply
-```
-
-### 3) Update Cloudflare DNS
-
-```bash
-cd infra/terraform/envs/prod
-terraform output acm_validation_records
-terraform output api_gateway_cname_target   # d-xxxxx.execute-api.ap-south-1.amazonaws.com
-```
-
-Update `api` CNAME. Re-sync `www` CNAME to the new S3 website endpoint from `cd ../web && terraform output`.
-
-### 4) Bootstrap IAM DB user + verify
-
-```bash
-bash infra/aws/bootstrap-db-iam-user.sh
-curl -s https://api.get1agent.com/health
-curl -s https://api.get1agent.com/health/db
-```
-
-### 5) Clean up orphaned us-east-1 resources
-
-```bash
-AWS_REGION=us-east-1 bash infra/aws/cleanup-legacy-aws.sh
-AWS_REGION=us-east-1 bash infra/aws/cleanup-stale-security-groups.sh
-```
 
 ---
 

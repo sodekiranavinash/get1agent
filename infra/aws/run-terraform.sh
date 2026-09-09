@@ -128,20 +128,11 @@ run_env() {
 
   init_s3
   if [[ "$MODE" == "apply" ]]; then
-    if [[ "$env_name" == "prod" ]]; then
-      # Orphaned SG references from past renames block terraform destroy for minutes.
-      bash "$ROOT/infra/aws/cleanup-stale-security-groups.sh" || true
-    fi
-
     if [[ "$env_name" == "prod" && -n "${PROD_TARGETS:-}" ]]; then
       read -ra TARGET_ARR <<<"$PROD_TARGETS"
       terraform apply -input=false -no-color -auto-approve -lock-timeout=5m "${TARGET_ARR[@]}"
     else
       terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
-    fi
-
-    if [[ "$env_name" == "prod" ]]; then
-      bash "$ROOT/infra/aws/cleanup-stale-security-groups.sh" || true
     fi
   else
     terraform plan -input=false -no-color -out=tfplan -lock-timeout=5m

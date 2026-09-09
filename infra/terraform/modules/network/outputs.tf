@@ -27,8 +27,3 @@ output "db_access_command" {
   description = "Start jumpbox, SSM tunnel to RDS, stop on exit"
   value       = "bash infra/aws/db-access.sh"
 }
-
-# Backward-compatible alias for scripts still using app_instance_id.
-output "app_instance_id" {
-  value = aws_instance.jumpbox.id
-}

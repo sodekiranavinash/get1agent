@@ -41,11 +41,6 @@ output "db_access_command" {
   value       = try(module.network[0].db_access_command, null)
 }
 
-output "app_instance_id" {
-  description = "Alias for jumpbox_instance_id"
-  value       = try(module.network[0].app_instance_id, null)
-}
-
 output "postgres_endpoint" {
   description = "RDS hostname (private)"
   value       = try(module.rds[0].postgres_endpoint, null)
