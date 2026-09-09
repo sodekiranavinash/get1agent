@@ -126,14 +126,19 @@ else
   exit 1
 fi
 
+CLEANED_UP=0
 cleanup() {
+  [[ "$CLEANED_UP" -eq 1 ]] && return 0
+  CLEANED_UP=1
+  trap - EXIT INT TERM
+
   if [[ "$KEEP_RUNNING" -eq 0 ]]; then
     stop_instance
   else
     echo "Leaving jumpbox running (--keep-running)."
   fi
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 echo ""
 echo "RDS host: $RDS_HOST"
@@ -143,7 +148,7 @@ echo ""
 echo "DBeaver: host localhost, port $LOCAL_PORT, SSH tab OFF"
 echo "Press Ctrl+C to close tunnel and stop jumpbox (releases public IPv4)."
 echo ""
-exec aws ssm start-session \
+aws ssm start-session \
   --region "$AWS_REGION" \
   --target "$INSTANCE_ID" \
   --document-name AWS-StartPortForwardingSessionToRemoteHost \
