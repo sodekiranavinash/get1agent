@@ -9,6 +9,4 @@ resource "aws_lambda_layer_version" "this" {
   lifecycle {
     create_before_destroy = true
   }
-
-  tags = var.tags
 }
