@@ -1,9 +1,9 @@
-import asyncio
 import json
 import os
 
 from sqlalchemy import text
 
+from shared.db.engine import run_async
 from shared.db.session import get_session
 
 
@@ -24,7 +24,7 @@ async def _check_db() -> str:
 
 def lambda_handler(_event, _context):
     try:
-        database = asyncio.run(_check_db())
+        database = run_async(_check_db())
         return _json(200, {"status": "ok", "database": database})
     except Exception as exc:
         message = str(exc)

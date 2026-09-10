@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import json
 from typing import Any
@@ -8,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.db.engine import run_async
 from shared.db.session import get_session
 from shared.models import User, UserNotificationPreferences, UserSettings
 
@@ -203,9 +203,9 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
     method = _method(event)
     try:
         if method == "GET":
-            return asyncio.run(_handle_get(claims))
+            return run_async(_handle_get(claims))
         if method == "POST":
-            return asyncio.run(_handle_post(claims, _body(event)))
+            return run_async(_handle_post(claims, _body(event)))
         return _json(405, {"error": f"Method not allowed: {method}"})
     except ValueError as exc:
         return _json(400, {"error": str(exc)})

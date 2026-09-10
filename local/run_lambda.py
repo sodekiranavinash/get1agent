@@ -24,11 +24,6 @@ LAMBDAS: dict[str, dict[str, Any]] = {
         "mode": "http",
         "port": 9001,
     },
-    "migration-runner": {
-        "handler": "backend/migration-runner/src/handler.py",
-        "mode": "direct",
-        "port": 9002,
-    },
     "health-check": {
         "handler": "backend/health-check/src/handler.py",
         "mode": "direct",
