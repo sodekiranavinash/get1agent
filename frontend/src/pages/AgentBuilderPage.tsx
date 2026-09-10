@@ -1,4 +1,4 @@
-import { Bot, Plus, Sparkles, Wrench } from 'lucide-react'
+import { Bot, FileStack, Plus, Sparkles, Wrench } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -16,9 +16,9 @@ export function AgentBuilderPage() {
   return (
     <PageShell>
       <PageHeader
-        title="Agent Builder"
-        description="Design custom agents with prompts, models, reasoning effort, and default tools."
-        badge="Build"
+        title="Builder"
+        description="Design custom agents with prompts, models, reasoning effort, tools, and knowledge bases."
+        badge="Agents"
         action={{ label: 'Save Agent', icon: <Plus className="h-4 w-4" /> }}
       />
 
@@ -79,6 +79,25 @@ export function AgentBuilderPage() {
         </Card>
 
         <div className="space-y-4">
+          <Card padding="md">
+            <h3 className="text-sm font-semibold text-foreground">Knowledge Bases</h3>
+            <p className="mt-1 text-xs text-muted">Attach ready document collections for RAG</p>
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between rounded-xl border border-border bg-raised/50 px-3 py-2.5">
+                <div className="flex items-center gap-2.5">
+                  <FileStack className="h-4 w-4 text-success" strokeWidth={1.75} />
+                  <span className="text-sm text-foreground">Product Documentation</span>
+                </div>
+                <Badge variant="success" dot>
+                  ready
+                </Badge>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" className="mt-4 w-full">
+              Attach Knowledge Base
+            </Button>
+          </Card>
+
           <Card padding="md">
             <h3 className="text-sm font-semibold text-foreground">Default Tools</h3>
             <p className="mt-1 text-xs text-muted">Attach tools available on every run</p>

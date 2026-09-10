@@ -40,7 +40,7 @@ const quickActions = [
   { label: 'New Agent', to: '/agent-builder', icon: Bot },
   { label: 'New Workflow', to: '/workflow-builder', icon: Workflow },
   { label: 'Open Chat', to: '/chat', icon: Sparkles },
-  { label: 'Schedule Job', to: '/scheduled-jobs', icon: CalendarClock },
+  { label: 'New Schedule', to: '/scheduled-jobs', icon: CalendarClock },
 ]
 
 export function DashboardPage() {

@@ -40,9 +40,9 @@ export function AgentStorePage() {
   return (
     <PageShell>
       <PageHeader
-        title="Agent Store"
+        title="Library"
         description="Browse your agents and discover community-published agents to add to your workspace."
-        badge="Discover"
+        badge="Agents"
       />
 
       <div className="mb-6 flex flex-wrap gap-2">

@@ -86,6 +86,12 @@ variable "db_iam_username" {
   description = "PostgreSQL IAM user (rds-db:connect)"
 }
 
+variable "ssm_parameter_names" {
+  type        = list(string)
+  default     = []
+  description = "SSM parameter names this Lambda may read (for admin/bootstrap tasks)"
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

@@ -18,9 +18,9 @@ export function WorkflowBuilderPage() {
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="border-b border-border px-6 py-5 lg:px-8">
           <PageHeader
-            title="Workflow Builder"
+            title="Builder"
             description="Chain agents in order or connect them to a host agent with live execution events."
-            badge="Build"
+            badge="Workflows"
             action={{ label: 'Run Workflow', icon: <Play className="h-4 w-4" /> }}
           />
         </div>

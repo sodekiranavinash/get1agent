@@ -98,7 +98,7 @@ export function Sidebar() {
                       key={link.to}
                       to={link.to}
                       end={link.to === '/dashboard'}
-                      title={effectiveCollapsed ? link.label : undefined}
+                      title={effectiveCollapsed ? (link.tooltip ?? link.label) : undefined}
                       className={({ isActive }) =>
                         `group relative mb-0.5 flex items-center rounded-xl text-sm font-medium no-underline transition-all duration-200 ${
                           effectiveCollapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'

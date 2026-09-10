@@ -28,7 +28,7 @@ export function ChatPage() {
             <PageHeader
               title="Chat"
               description="Talk to your agents with a host system prompt and watch A2A execution live."
-              badge="Build"
+              badge="Workspace"
             />
           </div>
 

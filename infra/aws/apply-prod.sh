@@ -19,6 +19,8 @@ TARGETS=()
 [[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && {
   TARGETS+=(-target='module.layer_data[0]')
   TARGETS+=(-target='module.health_check[0]')
+  TARGETS+=(-target='module.migration_runner[0]')
+  TARGETS+=(-target='module.account_settings[0]')
 }
 [[ "${APPLY_TOOL_LAMBDAS:-false}" == "true" ]] && TARGETS+=(-target=module.challan_extractor)
 
@@ -41,6 +43,12 @@ if [[ "$need_backend_artifacts" == true ]]; then
   fi
   if [[ ! -s "$ROOT/backend/health-check/dist/function.zip" ]]; then
     make -C "$ROOT/backend/health-check" package
+  fi
+  if [[ ! -s "$ROOT/backend/migration-runner/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/migration-runner" package
+  fi
+  if [[ ! -s "$ROOT/backend/account-settings/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/account-settings" package
   fi
 fi
 

@@ -73,10 +73,6 @@ wait_for_ssm
 REMOTE_SCRIPT="$(cat <<EOF
 set -euo pipefail
 MARKER="/opt/get1agent/.db_iam_bootstrapped"
-if [[ -f "\$MARKER" ]]; then
-  echo "IAM DB user already bootstrapped"
-  exit 0
-fi
 
 if ! command -v psql >/dev/null 2>&1; then
   sudo dnf install -y postgresql15
@@ -106,6 +102,8 @@ export PGSSLMODE=require
 psql -c "CREATE USER ${IAM_USER};" || true
 psql -v ON_ERROR_STOP=1 -c "GRANT rds_iam TO ${IAM_USER};"
 psql -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE ${DB_NAME} TO ${IAM_USER};"
+psql -v ON_ERROR_STOP=1 -c "GRANT USAGE ON SCHEMA public TO ${IAM_USER};"
+psql -v ON_ERROR_STOP=1 -c "GRANT CREATE ON SCHEMA public TO ${IAM_USER};"
 
 sudo mkdir -p /opt/get1agent
 sudo touch "\$MARKER"

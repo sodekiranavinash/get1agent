@@ -33,9 +33,9 @@ export function WorkflowStorePage() {
   return (
     <PageShell>
       <PageHeader
-        title="Workflow Store"
+        title="Library"
         description="Share workflows with the community or import proven automation templates."
-        badge="Discover"
+        badge="Workflows"
       />
 
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">

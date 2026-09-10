@@ -1,7 +1,9 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { RequireAuth } from './auth/RequireAuth'
 import { MainLayout } from './layouts/MainLayout'
-import { AdministrationPage } from './pages/AdministrationPage'
+import { InsightsPage } from './pages/InsightsPage'
+import { KnowledgeBasesPage } from './pages/KnowledgeBasesPage'
+import { UsagePage } from './pages/UsagePage'
 import { AgentBuilderPage } from './pages/AgentBuilderPage'
 import { AgentStorePage } from './pages/AgentStorePage'
 import { CallbackPage } from './pages/CallbackPage'
@@ -33,7 +35,10 @@ function App() {
           <Route path="/agent-store" element={<AgentStorePage />} />
           <Route path="/workflow-store" element={<WorkflowStorePage />} />
           <Route path="/scheduled-jobs" element={<ScheduledJobsPage />} />
-          <Route path="/administration" element={<AdministrationPage />} />
+          <Route path="/usage" element={<UsagePage />} />
+          <Route path="/administration" element={<Navigate to="/usage" replace />} />
+          <Route path="/insights" element={<InsightsPage />} />
+          <Route path="/knowledge-bases" element={<KnowledgeBasesPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />

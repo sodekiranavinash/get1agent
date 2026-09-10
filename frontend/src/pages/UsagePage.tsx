@@ -6,11 +6,11 @@ import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
 import { StatCard } from '../components/ui/StatCard'
 
-export function AdministrationPage() {
+export function UsagePage() {
   return (
     <PageShell>
       <PageHeader
-        title="Administration"
+        title="Usage"
         description="Manage API keys, monitor token usage, and review billing information."
         badge="Manage"
       />

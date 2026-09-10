@@ -31,6 +31,16 @@ if [[ ! -s "$ROOT/backend/health-check/dist/function.zip" ]]; then
   make -C "$ROOT/backend/health-check" package
 fi
 
+if [[ ! -s "$ROOT/backend/migration-runner/dist/function.zip" ]]; then
+  echo "Packaging backend migration-runner Lambda zip..."
+  make -C "$ROOT/backend/migration-runner" package
+fi
+
+if [[ ! -s "$ROOT/backend/account-settings/dist/function.zip" ]]; then
+  echo "Packaging backend account-settings Lambda zip..."
+  make -C "$ROOT/backend/account-settings" package
+fi
+
 bash "$ROOT/infra/aws/run-terraform.sh" bootstrap "$MODE"
 bash "$ROOT/infra/aws/run-terraform.sh" web "$MODE"
 bash "$ROOT/infra/aws/run-terraform.sh" prod "$MODE"

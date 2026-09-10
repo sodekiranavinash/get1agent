@@ -7,6 +7,14 @@ on:
         description: Deploy health-check
         type: boolean
         default: true
+      migration_runner:
+        description: Deploy migration-runner
+        type: boolean
+        default: false
+      account_settings:
+        description: Deploy account-settings
+        type: boolean
+        default: false
 
 concurrency:
   group: backend-deploy
@@ -32,6 +40,8 @@ jobs:
         id: matrix
         env:
           SELECT_HEALTH_CHECK: ${{ inputs.health_check }}
+          SELECT_MIGRATION_RUNNER: ${{ inputs.migration_runner }}
+          SELECT_ACCOUNT_SETTINGS: ${{ inputs.account_settings }}
         run: |
           include="$(bash infra/aws/build-backend-matrix.sh)"
           echo "Deploying: $include"

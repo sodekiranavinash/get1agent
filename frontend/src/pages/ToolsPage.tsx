@@ -55,9 +55,9 @@ export function ToolsPage() {
   return (
     <PageShell>
       <PageHeader
-        title="Tools"
+        title="Integrations"
         description="Manage built-in tools and connect MCP integrations for your agents."
-        badge="Build"
+        badge="Agents"
       />
 
       <div className="grid gap-4 sm:grid-cols-2">

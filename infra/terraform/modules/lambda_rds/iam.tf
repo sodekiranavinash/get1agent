@@ -39,3 +39,27 @@ resource "aws_iam_role_policy" "rds_connect" {
     }]
   })
 }
+
+resource "aws_iam_role_policy" "ssm_read" {
+  count = length(var.ssm_parameter_names) > 0 ? 1 : 0
+  name  = "${var.name}-ssm-read"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ReadParameters"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
+        Resource = [for name in var.ssm_parameter_names : "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${name}"]
+      },
+      {
+        Sid      = "DecryptParameters"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt", "kms:DescribeKey"]
+        Resource = "*"
+      },
+    ]
+  })
+}

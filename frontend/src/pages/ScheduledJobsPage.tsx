@@ -33,8 +33,8 @@ export function ScheduledJobsPage() {
   return (
     <PageShell>
       <PageHeader
-        title="Scheduled Jobs"
-        description="Automate saved workflows on a schedule — set it and let agents run on their own."
+        title="Schedules"
+        description="Automate saved agents and workflows on a schedule — set it and let them run on their own."
         badge="Manage"
         action={{ label: 'New Schedule', icon: <Plus className="h-4 w-4" /> }}
       />

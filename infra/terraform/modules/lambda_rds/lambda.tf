@@ -34,6 +34,7 @@ resource "aws_lambda_function" "this" {
     aws_iam_role_policy_attachment.logs,
     aws_iam_role_policy_attachment.vpc,
     aws_iam_role_policy.rds_connect,
+    aws_iam_role_policy.ssm_read,
     aws_security_group_rule.postgres_from_lambda,
   ]
 

@@ -103,6 +103,8 @@ run_env() {
     local tool_zip="$ROOT/tools/challan-extractor/dist/function.zip"
     local layer_zip="$ROOT/backend/layers/data/dist/layer.zip"
     local health_zip="$ROOT/backend/health-check/dist/function.zip"
+    local migration_zip="$ROOT/backend/migration-runner/dist/function.zip"
+    local account_zip="$ROOT/backend/account-settings/dist/function.zip"
     local need_tool=false need_backend=false
 
     if [[ -z "${PROD_TARGETS:-}" ]]; then
@@ -126,6 +128,16 @@ run_env() {
     if [[ "$need_backend" == true && ! -s "$health_zip" ]]; then
       echo "Backend health-check zip missing or empty: $health_zip" >&2
       echo "Run: make -C backend/health-check package" >&2
+      exit 1
+    fi
+    if [[ "$need_backend" == true && ! -s "$migration_zip" ]]; then
+      echo "Backend migration-runner zip missing or empty: $migration_zip" >&2
+      echo "Run: make -C backend/migration-runner package" >&2
+      exit 1
+    fi
+    if [[ "$need_backend" == true && ! -s "$account_zip" ]]; then
+      echo "Backend account-settings zip missing or empty: $account_zip" >&2
+      echo "Run: make -C backend/account-settings package" >&2
       exit 1
     fi
     [[ "$need_tool" == true ]] && echo "Tool Lambda zip: $tool_zip ($(wc -c <"$tool_zip") bytes)"

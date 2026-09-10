@@ -30,6 +30,14 @@ def _iam_token() -> str:
     )
 
 
+def create_engine_from_url(database_url: str) -> AsyncEngine:
+    return create_async_engine(
+        database_url,
+        poolclass=NullPool,
+        connect_args={"statement_cache_size": 0},
+    )
+
+
 def create_engine_from_env() -> AsyncEngine:
     host = _required("DB_HOST")
     port = os.environ.get("DB_PORT", "5432")
@@ -53,6 +61,11 @@ def create_engine_from_env() -> AsyncEngine:
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
     global _engine, _session_factory
     if _session_factory is None:
-        _engine = create_engine_from_env()
+        database_url = os.environ.get("DATABASE_URL")
+        _engine = (
+            create_engine_from_url(database_url)
+            if database_url
+            else create_engine_from_env()
+        )
         _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
     return _session_factory

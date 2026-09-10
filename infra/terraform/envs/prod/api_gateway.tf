@@ -21,5 +21,19 @@ module "api_gateway" {
       lambda_function_name = module.health_check[0].function_name
       authorization_type   = "NONE"
     }
+    user_settings_get = {
+      method               = "GET"
+      path                 = "/v1/user/settings"
+      lambda_invoke_arn    = module.account_settings[0].invoke_arn
+      lambda_function_name = module.account_settings[0].function_name
+      authorization_type   = "JWT"
+    }
+    user_settings_update = {
+      method               = "POST"
+      path                 = "/v1/user/settings"
+      lambda_invoke_arn    = module.account_settings[0].invoke_arn
+      lambda_function_name = module.account_settings[0].function_name
+      authorization_type   = "JWT"
+    }
   } : {}
 }
