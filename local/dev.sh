@@ -28,6 +28,7 @@ done < <(python3 -c "import json; [print(f\"{s['name']}:{s['port']}\") for s in 
 
 echo
 echo "logs:    ${LOG_DIR}/get1agent-*.log"
+echo "follow:  tail -f ${LOG_DIR}/get1agent-*.log"
 echo "gateway: http://localhost:9000  (UI base URL)"
 echo "press Ctrl+C to stop"
 echo

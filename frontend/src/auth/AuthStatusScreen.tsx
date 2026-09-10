@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { Loader2 } from 'lucide-react'
 import { Card } from '../components/ui/Card'
+import { Spinner } from '../components/ui/Spinner'
 
 type AuthStatusScreenProps = {
   children: ReactNode
@@ -21,10 +21,9 @@ export function AuthStatusScreen({
       >
         <Card glow padding="lg" className="w-full max-w-md text-center">
           {tone === 'default' ? (
-            <Loader2
-              className="mx-auto mb-4 h-8 w-8 animate-spin text-accent"
-              strokeWidth={1.75}
-            />
+            <div className="mb-4 flex justify-center">
+              <Spinner size="lg" />
+            </div>
           ) : null}
           <p
             className={`text-sm leading-relaxed ${tone === 'error' ? 'text-accent' : 'text-muted'}`}

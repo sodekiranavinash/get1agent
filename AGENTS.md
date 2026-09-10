@@ -28,6 +28,33 @@ tools/      Go Lambda tools
 - TypeScript: strict mode, no default exports.
 -->
 
+### Page loading states
+
+Loading is handled in one place per concern — never hand-roll timers per page.
+
+- **Route entry (all pages):** routes are lazy (`React.lazy` in `App.tsx`) and
+  `RouteGate` in `layouts/MainLayout.tsx` shows a page-shaped skeleton for at
+  least `PAGE_SKELETON_MIN_MS` before revealing the page. The shape comes from
+  `components/ui/RouteSkeleton.tsx`. Tune the timing in exactly one spot:
+  `frontend/src/hooks/usePageQuery.ts`.
+- **Page data:** fetch with `usePageQuery(key, fetcher)`
+  (`frontend/src/hooks/usePageQuery.ts`). Render a **shaped skeleton** while
+  `isPending`, inside a single `<PageShell>`:
+  ```tsx
+  const { data, isPending } = usePageQuery('my-page', () =>
+    api.get<MyData>('/v1/...'),
+  )
+  return (
+    <PageShell>
+      {isPending ? <MyPageSkeleton /> : <MyPageContent data={data!} />}
+    </PageShell>
+  )
+  ```
+- Skeletons are neutral (no accent color) and use the `.skeleton` shimmer
+  (`frontend/src/index.css`); primitives live in
+  `frontend/src/components/ui/Skeleton.tsx`.
+- Small inline/button loading uses the circular `<Spinner />`, not a skeleton.
+
 ## Local development
 
 Everything runs locally with the root `Makefile` + `local/` scripts. No Docker,

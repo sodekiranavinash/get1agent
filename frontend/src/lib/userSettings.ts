@@ -1,5 +1,7 @@
-import { useCallback, useMemo } from 'react'
-import { useApi } from './api'
+import { useCallback } from 'react'
+import { usePageQuery } from '../hooks/usePageQuery'
+import { useApiClient } from './api'
+import { setQueryData } from './query'
 
 export type ThemePreference = 'light' | 'dark'
 
@@ -26,25 +28,26 @@ export type UserSettingsUpdate = Partial<
   >
 >
 
-export function useUserSettings() {
-  const api = useApi()
+const SETTINGS_QUERY_KEY = 'user-settings'
 
-  const getSettings = useCallback(
-    () => api<UserSettings>('/v1/user/settings'),
-    [api],
+export function useUserSettings() {
+  const api = useApiClient()
+
+  const query = usePageQuery(SETTINGS_QUERY_KEY, () =>
+    api.get<UserSettings>('/v1/user/settings'),
   )
 
   const updateSettings = useCallback(
-    (payload: UserSettingsUpdate) =>
-      api<UserSettings>('/v1/user/settings', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      }),
+    async (payload: UserSettingsUpdate) => {
+      const updated = await api.post<UserSettings>(
+        '/v1/user/settings',
+        payload,
+      )
+      setQueryData(SETTINGS_QUERY_KEY, updated)
+      return updated
+    },
     [api],
   )
 
-  return useMemo(
-    () => ({ getSettings, updateSettings }),
-    [getSettings, updateSettings],
-  )
+  return { ...query, updateSettings }
 }

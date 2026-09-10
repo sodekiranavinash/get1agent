@@ -18,10 +18,14 @@ case "$LAMBDA" in
 esac
 
 # Local overrides (DATABASE_URL, PORT, ...). Never committed.
-if [[ -f "$ROOT/.env.local" ]]; then
+# Prefer `.env.local`; fall back to `.env` for anyone who copied the template
+# there instead of to `.env.local`.
+ENV_FILE="$ROOT/.env.local"
+[[ -f "$ENV_FILE" ]] || ENV_FILE="$ROOT/.env"
+if [[ -f "$ENV_FILE" ]]; then
   set -a
-  # shellcheck disable=SC1091
-  source "$ROOT/.env.local"
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
   set +a
 fi
 

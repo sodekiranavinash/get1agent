@@ -13,7 +13,7 @@ export function PageShell({ children, className = '' }: PageShellProps) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.3 }}
-        className="relative mx-auto max-w-[1400px] px-6 py-8 lg:px-8 lg:py-10"
+        className="relative mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-8 lg:py-10"
       >
         {children}
       </motion.div>

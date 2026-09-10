@@ -22,6 +22,7 @@ jobs:
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest
+    environment: prod
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -34,6 +35,11 @@ jobs:
 
       - name: Build
         working-directory: frontend
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL || 'https://api.get1agent.com' }}
+          VITE_AUTH0_DOMAIN: ${{ vars.VITE_AUTH0_DOMAIN || 'get1agent.us.auth0.com' }}
+          VITE_AUTH0_CLIENT_ID: ${{ vars.VITE_AUTH0_CLIENT_ID || 'dObQEtFUZ1fL4vO9FLOdQEDCmFpt0sjM' }}
+          VITE_AUTH0_AUDIENCE: ${{ vars.VITE_AUTH0_AUDIENCE || vars.AUTH0_AUDIENCE || 'https://api.get1agent.com' }}
         run: |
           npm ci
           npm run build

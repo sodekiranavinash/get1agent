@@ -3,7 +3,6 @@ import {
   AlertCircle,
   CheckCircle2,
   FileStack,
-  Loader2,
   Paperclip,
   Plus,
   Upload,
@@ -14,6 +13,7 @@ import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
+import { Spinner } from '../components/ui/Spinner'
 
 type KnowledgeBaseStatus = 'ready' | 'processing' | 'failed'
 
@@ -153,7 +153,7 @@ export function KnowledgeBasesPage() {
             {!dismissedBanner && processingCount > 0 ? (
               <div className="mb-6 flex items-start justify-between gap-4 rounded-2xl border border-accent/25 bg-accent-soft/40 px-4 py-3">
                 <div className="flex items-start gap-3">
-                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-accent" />
+                  <Spinner size="xs" className="mt-0.5" />
                   <div>
                     <p className="text-sm font-medium text-foreground">
                       Ingestion in progress for Q3 Sales Reports
@@ -284,7 +284,7 @@ export function KnowledgeBasesPage() {
         {showEventsPanel ? (
           <aside className="hidden w-80 shrink-0 border-l border-border bg-surface/80 p-5 backdrop-blur-xl xl:block">
             <div className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-accent" strokeWidth={1.75} />
+              <Spinner size="xs" />
               <h3 className="text-sm font-semibold text-foreground">Ingestion Events</h3>
             </div>
             <p className="mt-1 text-xs text-muted">Live RAG pipeline for Q3 Sales Reports</p>
@@ -301,7 +301,7 @@ export function KnowledgeBasesPage() {
                     ) : event.status === 'error' ? (
                       <AlertCircle className="h-3.5 w-3.5 text-warning" strokeWidth={1.75} />
                     ) : (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" strokeWidth={1.75} />
+                      <Spinner size="xs" />
                     )}
                     <span className="text-xs font-semibold text-foreground">{event.message}</span>
                     <Badge

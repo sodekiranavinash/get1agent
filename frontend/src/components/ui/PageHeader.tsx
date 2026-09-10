@@ -12,6 +12,7 @@ type PageHeaderProps = {
     label: string
     icon?: ReactNode
     onClick?: () => void
+    disabled?: boolean
   }
 }
 
@@ -45,7 +46,11 @@ export function PageHeader({
         ) : null}
       </div>
       {action ? (
-        <Button icon={action.icon} onClick={action.onClick}>
+        <Button
+          icon={action.icon}
+          onClick={action.onClick}
+          disabled={action.disabled}
+        >
           {action.label}
         </Button>
       ) : null}
