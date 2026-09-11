@@ -23,6 +23,7 @@ import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { ErrorState } from '../components/ui/ErrorState'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
 import { Skeleton } from '../components/ui/Skeleton'
@@ -392,7 +393,7 @@ function KnowledgeBasesSkeleton() {
 }
 
 export function KnowledgeBasesPage() {
-  const { data, isPending, refetch } = useKnowledgeBases()
+  const { data, isPending, error, refetch } = useKnowledgeBases()
   const { data: ingestionEvents, refetch: refetchEvents } = useIngestionEvents()
   const api = useApiClient()
   const [createOpen, setCreateOpen] = useState(false)
@@ -474,6 +475,20 @@ export function KnowledgeBasesPage() {
   }
 
   if (isPending) return <KnowledgeBasesSkeleton />
+
+  if (error) {
+    return (
+      <PageShell className="!py-0">
+        <div className="flex min-h-[60vh] items-center justify-center pt-6 pb-10 lg:pt-8">
+          <ErrorState
+            title="Couldn't load knowledge bases"
+            error={error}
+            onRetry={refreshAll}
+          />
+        </div>
+      </PageShell>
+    )
+  }
 
   const kbPercent = kbLimit > 0 ? (usedKbs / kbLimit) * 100 : 0
   const filePercent = fileLimit > 0 ? (usedFiles / fileLimit) * 100 : 0

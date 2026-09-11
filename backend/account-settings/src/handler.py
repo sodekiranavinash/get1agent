@@ -1,5 +1,7 @@
 import base64
 import json
+import sys
+import traceback
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -210,5 +212,6 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
     except ValueError as exc:
         return _json(400, {"error": str(exc)})
     except Exception as exc:
-        print(f"account-settings error: {exc}")
+        print(f"account-settings error: {exc!r}", file=sys.stderr)
+        traceback.print_exc()
         return _json(500, {"error": "Internal server error"})

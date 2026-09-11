@@ -1,5 +1,6 @@
 import asyncio
 import os
+import threading
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
@@ -10,6 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 _loop: asyncio.AbstractEventLoop | None = None
+# The local HTTP runner serves requests on multiple threads, but a Lambda
+# execution environment handles one request at a time and asyncpg connections
+# are bound to the loop that created them. Serialize access to the shared loop
+# so concurrent requests can't call `run_until_complete` on a loop that is
+# already running (which raises "This event loop is already running").
+_loop_lock = threading.Lock()
 
 T = TypeVar("T")
 
@@ -62,7 +69,8 @@ def get_event_loop() -> asyncio.AbstractEventLoop:
 
 
 def run_async(coro: Coroutine[Any, Any, T]) -> T:
-    return get_event_loop().run_until_complete(coro)
+    with _loop_lock:
+        return get_event_loop().run_until_complete(coro)
 
 
 def create_engine_from_url(database_url: str) -> AsyncEngine:

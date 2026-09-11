@@ -13,6 +13,7 @@ import http.client
 import json
 import os
 import sys
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -114,6 +115,8 @@ def make_handler(routes: list[dict[str, Any]]):
                 self.end_headers()
                 self.wfile.write(data)
             except Exception as exc:  # noqa: BLE001
+                print(f"[gateway] proxy error for {self.path}: {exc!r}", file=sys.stderr)
+                traceback.print_exc()
                 self._send(502, json.dumps({"error": str(exc)}).encode())
             finally:
                 connection.close()

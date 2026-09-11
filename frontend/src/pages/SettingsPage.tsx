@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Card } from '../components/ui/Card'
+import { ErrorState } from '../components/ui/ErrorState'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
 import { SettingsSkeleton } from '../components/ui/Skeleton'
@@ -123,6 +124,7 @@ export function SettingsPage() {
     data,
     error: loadError,
     isPending,
+    refetch,
     updateSettings,
   } = useUserSettings()
   const [form, setForm] = useState<UserSettings | null>(null)
@@ -230,6 +232,20 @@ export function SettingsPage() {
     return (
       <PageShell>
         <SettingsSkeleton />
+      </PageShell>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <PageShell>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <ErrorState
+            title="Couldn't load settings"
+            error={loadError}
+            onRetry={refetch}
+          />
+        </div>
       </PageShell>
     )
   }

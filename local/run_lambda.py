@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import sys
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 
@@ -106,6 +107,8 @@ def make_server(name: str, lambda_handler: Callable[[dict, Any], dict], mode: st
                 payload = result.get("body", "") or ""
                 headers = result.get("headers") or {}
             except Exception as exc:  # noqa: BLE001
+                print(f"[{name}] unhandled error: {exc!r}", file=sys.stderr)
+                traceback.print_exc()
                 status = 500
                 payload = json.dumps({"error": str(exc)})
                 headers = {"content-type": "application/json"}

@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 import re
+import sys
+import traceback
 import uuid
 from typing import Any
 from urllib.parse import parse_qs
@@ -1036,5 +1038,6 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
     except ValueError as exc:
         return _json(400, {"error": str(exc)})
     except Exception as exc:  # noqa: BLE001
-        print(f"knowledge-bases error: {exc}")
+        print(f"knowledge-bases error: {exc!r}", file=sys.stderr)
+        traceback.print_exc()
         return _json(500, {"error": "Internal server error"})
