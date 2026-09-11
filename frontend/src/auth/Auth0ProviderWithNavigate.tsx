@@ -3,12 +3,9 @@ import { Auth0Provider, type AppState } from '@auth0/auth0-react'
 import { useNavigate } from 'react-router-dom'
 import { AUTH_PATHS, authAbsoluteUrl } from './authUrls'
 
-const AUTH0_DOMAIN =
-  import.meta.env.VITE_AUTH0_DOMAIN ?? 'get1agent.us.auth0.com'
-const AUTH0_CLIENT_ID =
-  import.meta.env.VITE_AUTH0_CLIENT_ID ?? 'dObQEtFUZ1fL4vO9FLOdQEDCmFpt0sjM'
-const AUTH0_AUDIENCE =
-  import.meta.env.VITE_AUTH0_AUDIENCE ?? 'https://api.get1agent.com'
+const AUTH0_DOMAIN = import.meta.env.VITE_AUTH0_DOMAIN
+const AUTH0_CLIENT_ID = import.meta.env.VITE_AUTH0_CLIENT_ID
+const AUTH0_AUDIENCE = import.meta.env.VITE_AUTH0_AUDIENCE
 
 type Auth0ProviderWithNavigateProps = {
   children: ReactNode

@@ -24,6 +24,14 @@ export function SidebarUserSection({ collapsed }: SidebarUserSectionProps) {
           className="h-9 w-9"
         />
         <Link
+          to="/settings"
+          title="Settings"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted no-underline transition-colors hover:bg-raised hover:text-foreground"
+        >
+          <Settings className="h-4 w-4" strokeWidth={1.75} />
+          <span className="sr-only">Settings</span>
+        </Link>
+        <Link
           to={AUTH_PATHS.logout}
           title="Log out"
           className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted no-underline transition-colors hover:bg-raised hover:text-accent"
