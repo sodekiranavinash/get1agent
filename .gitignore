@@ -32,8 +32,6 @@ Desktop.ini
 # Environment and secrets
 .env
 .env.*
-!.env.example
-!.env.sample
 *.pem
 *.p12
 *.key

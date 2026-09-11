@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# On-demand RDS access: start jumpbox (gets public IPv4), SSM tunnel, stop on exit.
+# RDS access: SSM port-forward tunnel to the always-on jumpbox.
 #
-# IPv4 is billed only while the instance is running (~$0.005/hr). Stopping releases it.
+# The jumpbox runs continuously (public IPv4) and is never stopped on exit.
 #
 # Usage:
-#   bash infra/aws/db-access.sh              # tunnel on localhost:15432 (stops EC2 when you exit)
-#   bash infra/aws/db-access.sh --show-creds   # print DBeaver credentials (no EC2 start)
-#   bash infra/aws/db-access.sh --stop        # stop jumpbox now (release public IPv4)
-#   bash infra/aws/db-access.sh --keep-running # don't stop EC2 when tunnel exits
+#   bash infra/aws/db-access.sh                # tunnel on localhost:15432
+#   bash infra/aws/db-access.sh --show-creds   # print DBeaver credentials
+#   bash infra/aws/db-access.sh --stop         # stop jumpbox now (releases public IPv4)
+#   bash infra/aws/db-access.sh --keep-running # accepted for backwards compat (default)
 #
 # DBeaver: host localhost, port 15432, SSH tab OFF, SSL require
 #
@@ -19,7 +19,7 @@ ENV_DIR="$ROOT/infra/terraform/envs/prod"
 AWS_REGION="${AWS_REGION:-ap-south-1}"
 LOCAL_PORT="${LOCAL_PORT:-15432}"
 MODE="tunnel"
-KEEP_RUNNING=0
+KEEP_RUNNING=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -146,7 +146,7 @@ echo "Local port: $LOCAL_PORT"
 echo "Credentials: bash infra/aws/db-access.sh --show-creds"
 echo ""
 echo "DBeaver: host localhost, port $LOCAL_PORT, SSH tab OFF"
-echo "Press Ctrl+C to close tunnel and stop jumpbox (releases public IPv4)."
+echo "Press Ctrl+C to close tunnel (jumpbox keeps running)."
 echo ""
 aws ssm start-session \
   --region "$AWS_REGION" \

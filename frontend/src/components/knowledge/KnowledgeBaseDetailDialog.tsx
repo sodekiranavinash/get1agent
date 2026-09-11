@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, FileText, Loader2, Trash2 } from 'lucide-react'
+import { AlertCircle, AlertTriangle, FileText, Loader2, Scissors, Trash2 } from 'lucide-react'
 import { Dialog } from '../ui/Dialog'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { Segmented } from '../ui/Segmented'
 import { Spinner } from '../ui/Spinner'
-import { useApiClient } from '../../lib/api'
+import { ApiError, useApiClient } from '../../lib/api'
 import {
+  CHUNK_OVERLAPS,
+  CHUNK_SIZES,
   deleteDocument,
   deleteKnowledgeBase,
   fetchKnowledgeBase,
   formatBytes,
   invalidateKnowledgeBases,
   type KnowledgeBaseDetail,
+  type KnowledgeBaseDocument,
 } from '../../lib/knowledgeBases'
 
 type KnowledgeBaseDetailDialogProps = {
@@ -32,6 +37,14 @@ const statusVariant: Record<
   failed: 'warning',
 }
 
+function ConfigLabel({ children }: { children: string }) {
+  return (
+    <span className="mb-1.5 block text-[11px] font-medium text-muted">
+      {children}
+    </span>
+  )
+}
+
 export function KnowledgeBaseDetailDialog({
   open,
   onOpenChange,
@@ -44,6 +57,11 @@ export function KnowledgeBaseDetailDialog({
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [deletingKb, setDeletingKb] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [lastFile, setLastFile] = useState<{
+    id: string
+    name: string
+  } | null>(null)
 
   const load = useCallback(async () => {
     if (!knowledgeBaseId) return
@@ -63,15 +81,24 @@ export function KnowledgeBaseDetailDialog({
   useEffect(() => {
     if (open) {
       setDetail(null)
+      setConfirmingDelete(false)
+      setLastFile(null)
       void load()
     }
   }, [open, load])
 
-  const removeDocument = async (documentId: string) => {
+  const removeDocument = async (documentId: string, alsoDeleteKb = false) => {
     if (!knowledgeBaseId) return
     setBusyId(documentId)
     try {
       await deleteDocument(api, knowledgeBaseId, documentId)
+      if (alsoDeleteKb) {
+        await deleteKnowledgeBase(api, knowledgeBaseId)
+        invalidateKnowledgeBases()
+        onChanged?.()
+        onOpenChange(false)
+        return
+      }
       await load()
       invalidateKnowledgeBases()
       onChanged?.()
@@ -84,6 +111,14 @@ export function KnowledgeBaseDetailDialog({
     }
   }
 
+  const requestRemoveDocument = (document: KnowledgeBaseDocument) => {
+    if (detail && detail.documents.length <= 1) {
+      setLastFile({ id: document.id, name: document.fileName })
+      return
+    }
+    void removeDocument(document.id)
+  }
+
   const removeKnowledgeBase = async () => {
     if (!knowledgeBaseId) return
     setDeletingKb(true)
@@ -93,6 +128,13 @@ export function KnowledgeBaseDetailDialog({
       onChanged?.()
       onOpenChange(false)
     } catch (deleteError) {
+      if (deleteError instanceof ApiError && deleteError.status === 404) {
+        // Already gone — treat as deleted.
+        invalidateKnowledgeBases()
+        onChanged?.()
+        onOpenChange(false)
+        return
+      }
       setError(
         deleteError instanceof Error
           ? deleteError.message
@@ -107,36 +149,92 @@ export function KnowledgeBaseDetailDialog({
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      size="lg"
+      size="xl"
       title={detail?.knowledgeBase.name ?? 'Knowledge base'}
       description={detail?.knowledgeBase.description ?? 'Files in this knowledge base.'}
       footer={
-        <>
-          <Button
-            variant="secondary"
-            onClick={removeKnowledgeBase}
-            disabled={deletingKb || loading}
-            icon={
-              deletingKb ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Trash2 className="h-4 w-4" />
-              )
-            }
-            className="mr-auto text-warning"
-          >
-            Delete knowledge base
-          </Button>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Close
-          </Button>
-        </>
+        confirmingDelete ? (
+          <>
+            <p className="mr-auto text-sm text-muted">
+              Delete this knowledge base and all its files?
+            </p>
+            <Button
+              variant="ghost"
+              onClick={() => setConfirmingDelete(false)}
+              disabled={deletingKb}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={removeKnowledgeBase}
+              disabled={deletingKb}
+              variant="danger"
+              icon={
+                deletingKb ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4" />
+                )
+              }
+            >
+              {deletingKb ? 'Deleting…' : 'Delete'}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              variant="danger"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={loading}
+              icon={<Trash2 className="h-4 w-4" />}
+              className="mr-auto"
+            >
+              Delete knowledge base
+            </Button>
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
+          </>
+        )
       }
     >
       {error ? (
         <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning-soft/50 px-3.5 py-2.5">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           <p className="text-sm text-foreground">{error}</p>
+        </div>
+      ) : null}
+
+      {detail ? (
+        <div className="mb-4 rounded-xl border border-border bg-raised/30 p-3">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-subtle">
+            <Scissors className="h-3.5 w-3.5" />
+            Chunking
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <ConfigLabel>Chunk size (tokens)</ConfigLabel>
+              <Segmented
+                options={CHUNK_SIZES}
+                value={detail.knowledgeBase.chunkSize}
+                disabled
+                size="sm"
+              />
+            </div>
+            <div>
+              <ConfigLabel>Chunk overlap (tokens)</ConfigLabel>
+              <Segmented
+                options={CHUNK_OVERLAPS}
+                value={detail.knowledgeBase.chunkOverlap}
+                disabled
+                size="sm"
+              />
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] text-subtle">
+            Fixed at creation — every file in this knowledge base uses the same
+            chunking.
+          </p>
         </div>
       ) : null}
 
@@ -183,7 +281,7 @@ export function KnowledgeBaseDetailDialog({
                 </div>
                 <button
                   type="button"
-                  onClick={() => removeDocument(document.id)}
+                  onClick={() => requestRemoveDocument(document)}
                   disabled={busyId === document.id}
                   aria-label={`Delete ${document.fileName}`}
                   className="rounded-lg p-1.5 text-subtle transition-colors hover:bg-raised hover:text-warning disabled:opacity-40"
@@ -203,6 +301,31 @@ export function KnowledgeBaseDetailDialog({
           No files in this knowledge base yet.
         </p>
       )}
+
+      <ConfirmDialog
+        open={lastFile !== null}
+        onOpenChange={(next) => {
+          if (!next) setLastFile(null)
+        }}
+        title="Delete last file?"
+        description="This knowledge base will have no files left, so it will be deleted too."
+        confirmLabel="Delete file & knowledge base"
+        destructive
+        loading={busyId === lastFile?.id}
+        onConfirm={async () => {
+          if (!lastFile) return
+          await removeDocument(lastFile.id, true)
+          setLastFile(null)
+        }}
+      >
+        <p className="text-sm text-muted">
+          <span className="font-semibold text-foreground">
+            {lastFile?.name}
+          </span>{' '}
+          is the only file in this knowledge base. Deleting it will also delete
+          the knowledge base. This cannot be undone.
+        </p>
+      </ConfirmDialog>
     </Dialog>
   )
 }

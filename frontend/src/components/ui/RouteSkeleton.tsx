@@ -479,87 +479,26 @@ function WorkflowStoreSkeleton() {
 function KnowledgeBasesSkeleton() {
   return (
     <PageShell className="!py-0">
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="border-b border-border px-6 py-5 lg:px-8">
-            <HeaderSkeleton />
-          </div>
-          <div className="flex-1 px-6 py-6 lg:px-8">
-            <div className="mb-6 flex items-start justify-between gap-4 rounded-2xl border border-accent/25 bg-accent-soft/40 px-4 py-3">
-              <div className="flex items-start gap-3">
-                <Skeleton className="h-4 w-4" style={CIRCLE} />
-                <div className="space-y-2">
-                  <Skeleton className="h-4 w-64" />
-                  <Skeleton className="h-3 w-72" />
-                </div>
-              </div>
-              <Skeleton className="h-5 w-5 rounded-md" />
-            </div>
-
-            <Card
-              padding="lg"
-              className="mb-6 border-dashed border-border-strong bg-raised/20"
-            >
-              <div className="flex flex-col items-center">
-                <Skeleton className="h-12 w-12 rounded-2xl" />
-                <Skeleton className="mt-4 h-5 w-40" />
-                <Skeleton className="mt-3 h-3.5 w-72" />
-                <div className="mt-5 flex gap-3">
-                  <Skeleton className="h-10 w-32 rounded-xl" />
-                  <Skeleton className="h-10 w-44 rounded-xl" />
-                </div>
-              </div>
-            </Card>
-
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-3 w-28" />
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-2">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <Card key={index} padding="lg">
-                  <div className="flex items-start gap-4">
-                    <Skeleton className="h-12 w-12 shrink-0 rounded-2xl" />
-                    <div className="min-w-0 flex-1 space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="w-full space-y-2">
-                          <Skeleton className="h-4 w-40" />
-                          <Skeleton className="h-3.5 w-full" />
-                        </div>
-                        <Skeleton className="h-5 w-16" style={PILL} />
-                      </div>
-                      <Skeleton className="h-3 w-48" />
-                      <div className="flex gap-2">
-                        <Skeleton className="h-8 w-28 rounded-lg" />
-                        <Skeleton className="h-8 w-32 rounded-lg" />
-                      </div>
-                    </div>
-                  </div>
-                </Card>
+      <div className="pt-6 pb-10 lg:pt-8">
+        <div className="mb-8 space-y-3">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-4 w-96 max-w-full" />
+        </div>
+        <div className="flex gap-6">
+          <div className="min-w-0 flex-1 space-y-6">
+            <div className="grid gap-3 sm:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <Skeleton key={index} className="h-24 w-full rounded-2xl" />
               ))}
             </div>
+            <Skeleton className="h-44 w-full rounded-2xl" />
+            <div>
+              <Skeleton className="mb-4 h-11 w-72 rounded-2xl" />
+              <Skeleton className="h-[400px] w-full rounded-2xl" />
+            </div>
           </div>
+          <Skeleton className="hidden w-[360px] shrink-0 self-stretch rounded-2xl xl:block" />
         </div>
-
-        <aside className="hidden w-80 shrink-0 border-l border-border bg-surface/80 p-5 xl:block">
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="mt-2 h-3 w-48" />
-          <div className="mt-5 space-y-2">
-            {Array.from({ length: 5 }).map((_, index) => (
-              <div
-                key={index}
-                className="rounded-xl border border-border bg-raised/50 px-3 py-2.5"
-              >
-                <div className="flex items-center gap-2">
-                  <Skeleton className="h-3.5 w-3.5" style={CIRCLE} />
-                  <Skeleton className="h-3.5 w-28" />
-                </div>
-                <Skeleton className="mt-2 h-3 w-40" />
-              </div>
-            ))}
-          </div>
-        </aside>
       </div>
     </PageShell>
   )

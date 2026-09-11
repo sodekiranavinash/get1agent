@@ -5,14 +5,24 @@ import os
 import re
 import uuid
 from typing import Any
+from urllib.parse import parse_qs
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from shared.db.engine import run_async
 from shared.db.session import get_session
-from shared.models import Document, DocumentTag, KnowledgeBase
-from shared.models.document_tag import MAX_TAGS_PER_DOCUMENT, MIN_TAG_DESCRIPTION_LENGTH
+from shared.ingestion import emit_event
+from shared.ingestion import get_document as get_ingestion_document
+from shared.ingestion import ingest_document, load_config
+from shared.ingestion.config import (
+    SUPPORTED_CHUNK_OVERLAPS,
+    SUPPORTED_CHUNK_SIZES,
+    SUPPORTED_IMAGE_EMBED_MODELS,
+    SUPPORTED_TEXT_EMBED_MODELS,
+)
+from shared.models import Document, DocumentTag, IngestionEvent, KnowledgeBase
+from shared.models.document_tag import MAX_TAGS_PER_DOCUMENT
 from shared.quotas import Quota, get_quota
 from shared.users import get_or_create_user
 
@@ -43,6 +53,9 @@ DEFAULT_CONTENT_TYPES: dict[str, str] = {
 PRESIGN_EXPIRES_SECONDS = 3600
 MAX_NAME_LENGTH = 255
 MAX_TITLE_LENGTH = 200
+MAX_DESCRIPTION_LENGTH = 1000
+MAX_TAG_NAME_LENGTH = 64
+MAX_TAG_DESCRIPTION_LENGTH = 500
 
 
 class ApiError(Exception):
@@ -96,6 +109,15 @@ def _body(event: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ApiError(400, "Request body must be a JSON object")
     return parsed
+
+
+def _query(event: dict[str, Any]) -> dict[str, str]:
+    raw = event.get("rawQueryString") or ""
+    if raw:
+        parsed = parse_qs(raw)
+        return {key: values[0] for key, values in parsed.items() if values}
+    params = event.get("queryStringParameters") or {}
+    return {key: str(value) for key, value in params.items() if value is not None}
 
 
 def _parse_uuid(value: str, label: str) -> uuid.UUID:
@@ -203,6 +225,19 @@ def _head_object(key: str) -> int:
     return os.path.getsize(path) if os.path.exists(path) else 0
 
 
+def _object_etag(key: str) -> str | None:
+    """Content fingerprint of the stored object, used as the ingestion idempotency key."""
+    if _storage_mode() == "s3":
+        response = _s3_client().head_object(Bucket=_bucket(), Key=key)
+        etag = response.get("ETag")
+        return etag.strip('"') if etag else None
+    path = os.path.join(_local_root(), key)
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
 def _delete_object(key: str) -> None:
     if _storage_mode() == "s3":
         _s3_client().delete_object(Bucket=_bucket(), Key=key)
@@ -224,13 +259,37 @@ def _validated_name(value: Any, label: str) -> str:
     return name
 
 
+def _validated_choice(
+    value: Any, allowed: tuple[int, ...], label: str, default: int
+) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, f"{label} must be one of {list(allowed)}") from exc
+    if number not in allowed:
+        raise ApiError(400, f"{label} must be one of {list(allowed)}")
+    return number
+
+
+def _validated_model(
+    value: Any, allowed: tuple[str, ...], label: str, default: str
+) -> str:
+    if value is None or str(value).strip() == "":
+        return default
+    model = str(value).strip()
+    if model not in allowed:
+        raise ApiError(400, f"{label} must be one of {list(allowed)}")
+    return model
+
+
 def _parse_tags(raw: Any) -> list[tuple[str, str]]:
+    """Tags are optional. Rows without a name are ignored; description is optional."""
     if raw in (None, []):
         return []
     if not isinstance(raw, list):
         raise ApiError(400, "tags must be a list")
-    if len(raw) > MAX_TAGS_PER_DOCUMENT:
-        raise ApiError(400, f"At most {MAX_TAGS_PER_DOCUMENT} tags per file")
     tags: list[tuple[str, str]] = []
     seen: set[str] = set()
     for item in raw:
@@ -238,17 +297,23 @@ def _parse_tags(raw: Any) -> list[tuple[str, str]]:
             raise ApiError(400, "Each tag must be an object with name and description")
         name = str(item.get("name") or "").strip()
         description = str(item.get("description") or "").strip()
-        if not name or len(name) > 64:
-            raise ApiError(400, "Tag name is required and must be at most 64 characters")
-        if len(description) < MIN_TAG_DESCRIPTION_LENGTH:
+        if not name:
+            continue
+        if len(name) > MAX_TAG_NAME_LENGTH:
+            raise ApiError(
+                400, f"Tag name must be at most {MAX_TAG_NAME_LENGTH} characters"
+            )
+        if len(description) > MAX_TAG_DESCRIPTION_LENGTH:
             raise ApiError(
                 400,
-                f"Tag description must be at least {MIN_TAG_DESCRIPTION_LENGTH} characters",
+                f"Tag description must be at most {MAX_TAG_DESCRIPTION_LENGTH} characters",
             )
         if name.lower() in seen:
             raise ApiError(400, f"Duplicate tag: {name}")
         seen.add(name.lower())
         tags.append((name, description))
+    if len(tags) > MAX_TAGS_PER_DOCUMENT:
+        raise ApiError(400, f"At most {MAX_TAGS_PER_DOCUMENT} tags per file")
     return tags
 
 
@@ -272,12 +337,31 @@ def _serialize_document(document: Document, *, download_url: str | None = None) 
         "sizeBytes": document.size_bytes,
         "source": document.source,
         "status": document.status,
+        "chunkCount": document.chunk_count,
+        "imageCount": document.image_count,
         "tags": [
-            {"name": tag.name, "description": tag.description} for tag in document.tags
+            {"name": tag.name, "description": tag.description or ""}
+            for tag in document.tags
         ],
         "createdAt": _iso(document.created_at),
         "updatedAt": _iso(document.updated_at),
         "downloadUrl": download_url,
+    }
+
+
+def _serialize_event(
+    event: IngestionEvent, file_name: str, document_status: str
+) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "documentId": str(event.document_id),
+        "knowledgeBaseId": str(event.knowledge_base_id),
+        "fileName": file_name,
+        "documentStatus": document_status,
+        "stage": event.stage,
+        "status": event.status,
+        "message": event.message,
+        "createdAt": _iso(event.created_at),
     }
 
 
@@ -288,6 +372,11 @@ def _serialize_knowledge_base(kb: KnowledgeBase, file_count: int) -> dict[str, A
         "description": kb.description,
         "status": kb.status,
         "fileCount": file_count,
+        "embedModel": kb.embed_model,
+        "imageEmbedModel": kb.image_embed_model,
+        "embeddingDim": kb.embedding_dim,
+        "chunkSize": kb.chunk_size,
+        "chunkOverlap": kb.chunk_overlap,
         "createdAt": _iso(kb.created_at),
         "updatedAt": _iso(kb.updated_at),
     }
@@ -320,6 +409,40 @@ async def _document_count(session, kb_id: uuid.UUID) -> int:
     )
 
 
+async def _user_document_count(session, user_id: uuid.UUID) -> int:
+    return int(
+        (
+            await session.execute(
+                select(func.count(Document.id)).where(Document.user_id == user_id)
+            )
+        ).scalar_one()
+    )
+
+
+async def _user_storage_bytes(session, user_id: uuid.UUID) -> int:
+    return int(
+        (
+            await session.execute(
+                select(func.coalesce(func.sum(Document.size_bytes), 0)).where(
+                    Document.user_id == user_id
+                )
+            )
+        ).scalar_one()
+    )
+
+
+async def _knowledge_base_count(session, user_id: uuid.UUID) -> int:
+    return int(
+        (
+            await session.execute(
+                select(func.count(KnowledgeBase.id)).where(
+                    KnowledgeBase.user_id == user_id
+                )
+            )
+        ).scalar_one()
+    )
+
+
 async def _get_document(session, kb_id: uuid.UUID, doc_id: uuid.UUID) -> Document:
     document = (
         await session.execute(
@@ -333,12 +456,46 @@ async def _get_document(session, kb_id: uuid.UUID, doc_id: uuid.UUID) -> Documen
     return document
 
 
-async def _ensure_capacity(session, kb_id: uuid.UUID, quota: Quota) -> None:
+async def _assert_unique_file_name(
+    session, kb_id: uuid.UUID, file_name: str
+) -> None:
+    """A knowledge base may not contain two files with the same name."""
+    exists = (
+        await session.execute(
+            select(Document.id)
+            .where(
+                Document.knowledge_base_id == kb_id,
+                func.lower(Document.file_name) == file_name.lower(),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if exists is not None:
+        raise ApiError(
+            409, f'A file named "{file_name}" already exists in this knowledge base'
+        )
+
+
+async def _ensure_capacity(
+    session,
+    user_id: uuid.UUID,
+    kb_id: uuid.UUID,
+    quota: Quota,
+    size_bytes: int,
+) -> None:
     if await _document_count(session, kb_id) >= quota.max_files_per_kb:
         raise ApiError(
             409,
             f"This knowledge base already has the maximum of {quota.max_files_per_kb} files",
         )
+    if await _user_document_count(session, user_id) >= quota.max_files_per_user:
+        raise ApiError(
+            409,
+            f"You have reached the maximum of {quota.max_files_per_user} files",
+        )
+    used = await _user_storage_bytes(session, user_id)
+    if used + size_bytes > quota.max_storage_bytes:
+        raise ApiError(413, "You have reached your storage limit")
 
 
 # --- handlers ----------------------------------------------------------------
@@ -356,23 +513,174 @@ async def _handle_list(claims: dict[str, Any]) -> dict[str, Any]:
                 .order_by(KnowledgeBase.updated_at.desc())
             )
         ).all()
+        quota = await get_quota(session, user.id)
+        total_files = await _user_document_count(session, user.id)
+        total_storage = await _user_storage_bytes(session, user.id)
         await session.commit()
         return _json(
             200,
-            {"knowledgeBases": [_serialize_knowledge_base(kb, count) for kb, count in rows]},
+            {
+                "knowledgeBases": [
+                    _serialize_knowledge_base(kb, count) for kb, count in rows
+                ],
+                "usage": {
+                    "knowledgeBases": len(rows),
+                    "files": total_files,
+                    "storageBytes": total_storage,
+                    "limits": {
+                        "knowledgeBases": quota.max_knowledge_bases,
+                        "filesPerKnowledgeBase": quota.max_files_per_kb,
+                        "files": quota.max_files_per_user,
+                        "storageBytes": quota.max_storage_bytes,
+                        "fileBytes": quota.max_file_bytes,
+                    },
+                },
+            },
         )
+
+
+async def _handle_list_tags(claims: dict[str, Any]) -> dict[str, Any]:
+    """Distinct tag names the user has used, for autocomplete suggestions."""
+    async with get_session() as session:
+        user = await get_or_create_user(session, claims)
+        rows = (
+            await session.execute(
+                select(DocumentTag.name, DocumentTag.description)
+                .join(Document, Document.id == DocumentTag.document_id)
+                .where(Document.user_id == user.id)
+                .distinct(DocumentTag.name)
+                .order_by(DocumentTag.name, DocumentTag.created_at.desc())
+            )
+        ).all()
+        await session.commit()
+        return _json(
+            200,
+            {"tags": [{"name": name, "description": description or ""} for name, description in rows]},
+        )
+
+
+async def _handle_list_events(
+    claims: dict[str, Any], query: dict[str, str]
+) -> dict[str, Any]:
+    try:
+        limit = min(200, max(1, int(query.get("limit", "50"))))
+    except ValueError:
+        limit = 50
+
+    kb_filter = query.get("kbId")
+    kb_id: uuid.UUID | None = None
+    if kb_filter:
+        try:
+            kb_id = uuid.UUID(kb_filter)
+        except (ValueError, TypeError) as exc:
+            raise ApiError(400, "Invalid kbId") from exc
+
+    async with get_session() as session:
+        user = await get_or_create_user(session, claims)
+        statement = (
+            select(IngestionEvent, Document.file_name, Document.status)
+            .join(Document, Document.id == IngestionEvent.document_id)
+            .where(IngestionEvent.user_id == user.id)
+            .order_by(IngestionEvent.created_at.desc(), IngestionEvent.id.desc())
+            .limit(limit)
+        )
+        if kb_id is not None:
+            statement = statement.where(IngestionEvent.knowledge_base_id == kb_id)
+        rows = (await session.execute(statement)).all()
+        await session.commit()
+        return _json(
+            200,
+            {
+                "events": [
+                    _serialize_event(event, file_name, document_status)
+                    for event, file_name, document_status in rows
+                ]
+            },
+        )
+
+
+async def _maybe_ingest_local(document_id: uuid.UUID) -> bool:
+    """Run the pipeline in-process when there is no S3/SQS (local development)."""
+    if load_config().ingestion_mode != "local":
+        return False
+    document = await get_ingestion_document(document_id)
+    if document is None:
+        return False
+    await ingest_document(
+        user_id=document["user_id"],
+        knowledge_base_id=document["knowledge_base_id"],
+        document_id=document["id"],
+        s3_key=document["s3_key"],
+        file_name=document["file_name"],
+    )
+    return True
+
+
+async def _fresh_document_payload(
+    kb_id: uuid.UUID, doc_id: uuid.UUID
+) -> dict[str, Any]:
+    async with get_session() as session:
+        document = await _get_document(session, kb_id, doc_id)
+        return _serialize_document(document)
+
+
+async def _record_uploaded(document: Document) -> None:
+    await emit_event(
+        document_id=document.id,
+        knowledge_base_id=document.knowledge_base_id,
+        user_id=document.user_id,
+        stage="uploaded",
+        status="succeeded",
+        message=document.file_name,
+    )
 
 
 async def _handle_create(claims: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
     async with get_session() as session:
         user = await get_or_create_user(session, claims)
+        quota = await get_quota(session, user.id)
+        if await _knowledge_base_count(session, user.id) >= quota.max_knowledge_bases:
+            raise ApiError(
+                409,
+                f"You can create at most {quota.max_knowledge_bases} knowledge bases",
+            )
+        description = str(body.get("description") or "").strip()
+        if len(description) > MAX_DESCRIPTION_LENGTH:
+            raise ApiError(
+                400,
+                f"Description must be at most {MAX_DESCRIPTION_LENGTH} characters",
+            )
+        defaults = load_config()
         kb = KnowledgeBase(
             user_id=user.id,
             name=_validated_name(body.get("name"), "name"),
-            description=(str(body["description"]).strip() or None)
-            if body.get("description")
-            else None,
+            description=description or None,
             status="ready",
+            embed_model=_validated_model(
+                body.get("embedModel"),
+                SUPPORTED_TEXT_EMBED_MODELS,
+                "embedModel",
+                defaults.text_embed_model,
+            ),
+            image_embed_model=_validated_model(
+                body.get("imageEmbedModel"),
+                SUPPORTED_IMAGE_EMBED_MODELS,
+                "imageEmbedModel",
+                defaults.image_embed_model,
+            ),
+            embedding_dim=defaults.embedding_dim,
+            chunk_size=_validated_choice(
+                body.get("chunkSize"),
+                SUPPORTED_CHUNK_SIZES,
+                "chunkSize",
+                defaults.chunk_size,
+            ),
+            chunk_overlap=_validated_choice(
+                body.get("chunkOverlap"),
+                SUPPORTED_CHUNK_OVERLAPS,
+                "chunkOverlap",
+                defaults.chunk_overlap,
+            ),
         )
         session.add(kb)
         await session.flush()
@@ -428,7 +736,6 @@ async def _handle_presign(
         user = await get_or_create_user(session, claims)
         kb = await _get_knowledge_base(session, user.id, kb_id)
         quota = await get_quota(session, user.id)
-        await _ensure_capacity(session, kb.id, quota)
 
         file_name = _safe_filename(str(body.get("fileName") or ""))
         if not file_name or file_name == "file":
@@ -445,30 +752,56 @@ async def _handle_presign(
         _validate_file(file_name, content_type, size, quota)
         tags = _parse_tags(body.get("tags"))
 
-        doc_id = uuid.uuid4()
-        key = _build_key(user.id, kb.id, doc_id, file_name)
-        document = Document(
-            id=doc_id,
-            knowledge_base_id=kb.id,
-            user_id=user.id,
-            file_name=file_name,
-            s3_key=key,
-            content_type=content_type,
-            size_bytes=size,
-            source="upload",
-            status="pending",
-            tags=_make_tags(tags),
-        )
-        session.add(document)
-        await session.flush()
+        existing = (
+            await session.execute(
+                select(Document)
+                .options(selectinload(Document.tags))
+                .where(
+                    Document.knowledge_base_id == kb.id,
+                    func.lower(Document.file_name) == file_name.lower(),
+                )
+            )
+        ).scalar_one_or_none()
 
+        if existing is not None and existing.status != "pending":
+            raise ApiError(
+                409,
+                f'A file named "{file_name}" already exists in this knowledge base',
+            )
+
+        if existing is not None:
+            # Retry of a failed upload: reuse the pending row instead of
+            # creating a duplicate.
+            document = existing
+            document.content_type = content_type
+            document.size_bytes = size
+            document.tags = _make_tags(tags)
+        else:
+            await _ensure_capacity(session, user.id, kb.id, quota, size)
+            doc_id = uuid.uuid4()
+            document = Document(
+                id=doc_id,
+                knowledge_base_id=kb.id,
+                user_id=user.id,
+                file_name=file_name,
+                s3_key=_build_key(user.id, kb.id, doc_id, file_name),
+                content_type=content_type,
+                size_bytes=size,
+                source="upload",
+                status="pending",
+                tags=_make_tags(tags),
+            )
+            session.add(document)
+
+        await session.flush()
+        key = document.s3_key
         mode = _storage_mode()
         upload_url = _presign_put(key, content_type) if mode == "s3" else None
         await session.commit()
         return _json(
             201,
             {
-                "documentId": str(doc_id),
+                "documentId": str(document.id),
                 "key": key,
                 "mode": mode,
                 "uploadUrl": upload_url,
@@ -495,13 +828,26 @@ async def _handle_complete(
             await session.delete(document)
             await session.commit()
             raise ApiError(413, "File exceeds the maximum allowed size")
+        used = await _user_storage_bytes(session, user.id) - document.size_bytes
+        if used + size > quota.max_storage_bytes:
+            _delete_object(document.s3_key)
+            await session.delete(document)
+            await session.commit()
+            raise ApiError(413, "You have reached your storage limit")
 
         document.size_bytes = size
-        document.content_hash = hashlib.sha256(document.s3_key.encode()).hexdigest()
+        document.content_hash = _object_etag(document.s3_key) or hashlib.sha256(
+            document.s3_key.encode()
+        ).hexdigest()
         document.status = "uploaded"
         payload = _serialize_document(document)
         await session.commit()
-        return _json(200, payload)
+    await _record_uploaded(document)
+    if await _maybe_ingest_local(document.id):
+        payload = await _fresh_document_payload(
+            document.knowledge_base_id, document.id
+        )
+    return _json(200, payload)
 
 
 async def _handle_local_upload(
@@ -526,6 +872,11 @@ async def _handle_local_upload(
             await session.delete(document)
             await session.commit()
             raise ApiError(413, "File exceeds the maximum allowed size")
+        used = await _user_storage_bytes(session, user.id) - document.size_bytes
+        if used + len(data) > quota.max_storage_bytes:
+            await session.delete(document)
+            await session.commit()
+            raise ApiError(413, "You have reached your storage limit")
 
         _put_object(document.s3_key, data, document.content_type or "application/octet-stream")
         document.size_bytes = len(data)
@@ -533,7 +884,12 @@ async def _handle_local_upload(
         document.status = "uploaded"
         payload = _serialize_document(document)
         await session.commit()
-        return _json(200, payload)
+    await _record_uploaded(document)
+    if await _maybe_ingest_local(document.id):
+        payload = await _fresh_document_payload(
+            document.knowledge_base_id, document.id
+        )
+    return _json(200, payload)
 
 
 async def _handle_inline(
@@ -543,7 +899,6 @@ async def _handle_inline(
         user = await get_or_create_user(session, claims)
         kb = await _get_knowledge_base(session, user.id, kb_id)
         quota = await get_quota(session, user.id)
-        await _ensure_capacity(session, kb.id, quota)
 
         title = _validated_name(body.get("name"), "name")
         content = body.get("content")
@@ -552,10 +907,13 @@ async def _handle_inline(
         data = content.encode("utf-8")
         if len(data) > quota.max_file_bytes:
             raise ApiError(413, "Content exceeds the maximum allowed size")
+        await _ensure_capacity(session, user.id, kb.id, quota, len(data))
         tags = _parse_tags(body.get("tags"))
 
         doc_id = uuid.uuid4()
+        title = re.sub(r"\.md$", "", title, flags=re.IGNORECASE).strip() or "Untitled"
         file_name = f"{_safe_filename(title)}.md"
+        await _assert_unique_file_name(session, kb.id, file_name)
         key = _build_key(user.id, kb.id, doc_id, file_name)
         _put_object(key, data, "text/markdown")
 
@@ -576,7 +934,12 @@ async def _handle_inline(
         await session.flush()
         payload = _serialize_document(document)
         await session.commit()
-        return _json(201, payload)
+    await _record_uploaded(document)
+    if await _maybe_ingest_local(document.id):
+        payload = await _fresh_document_payload(
+            document.knowledge_base_id, document.id
+        )
+    return _json(201, payload)
 
 
 async def _handle_delete_document(
@@ -595,7 +958,13 @@ async def _handle_delete_document(
 # --- router ------------------------------------------------------------------
 
 
-def _route(claims: dict[str, Any], method: str, segments: list[str], body: dict[str, Any]):
+def _route(
+    claims: dict[str, Any],
+    method: str,
+    segments: list[str],
+    body: dict[str, Any],
+    query: dict[str, str],
+):
     if segments[:2] != ["v1", "knowledge-bases"]:
         raise ApiError(404, "Not found")
     rest = segments[2:]
@@ -605,6 +974,16 @@ def _route(claims: dict[str, Any], method: str, segments: list[str], body: dict[
             return _handle_list(claims)
         if method == "POST":
             return _handle_create(claims, body)
+        raise ApiError(405, f"Method not allowed: {method}")
+
+    if len(rest) == 1 and rest[0] == "tags":
+        if method == "GET":
+            return _handle_list_tags(claims)
+        raise ApiError(405, f"Method not allowed: {method}")
+
+    if len(rest) == 1 and rest[0] == "events":
+        if method == "GET":
+            return _handle_list_events(claims, query)
         raise ApiError(405, f"Method not allowed: {method}")
 
     kb_id = _parse_uuid(rest[0], "Knowledge base")
@@ -648,7 +1027,9 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
 
     method = _method(event)
     try:
-        coroutine = _route(claims, method, _segments(event), _body(event))
+        coroutine = _route(
+            claims, method, _segments(event), _body(event), _query(event)
+        )
         return run_async(coroutine)
     except ApiError as exc:
         return _json(exc.status, {"error": exc.message})

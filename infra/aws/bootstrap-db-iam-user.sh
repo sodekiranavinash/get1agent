@@ -100,6 +100,9 @@ export PGSSLMODE=require
 # Avoid DO $$ blocks: remote bash expands $$ to its PID before psql runs.
 # psql exits 1 on SQL errors even with ON_ERROR_STOP=0; ignore duplicate user.
 psql -c "CREATE USER ${IAM_USER};" || true
+# pgvector is needed by the ingestion migrations and requires the master
+# (rds_superuser) role, so enable it here rather than in the app migration.
+psql -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
 psql -v ON_ERROR_STOP=1 -c "GRANT rds_iam TO ${IAM_USER};"
 psql -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE ${DB_NAME} TO ${IAM_USER};"
 psql -v ON_ERROR_STOP=1 -c "GRANT USAGE ON SCHEMA public TO ${IAM_USER};"
@@ -159,8 +162,7 @@ if [[ "$bootstrap_status" != "Success" ]]; then
 fi
 
 if [[ "$STARTED_BY_SCRIPT" -eq 1 ]]; then
-  echo "Stopping jumpbox ${INSTANCE_ID}..."
-  aws ec2 stop-instances --region "$AWS_REGION" --instance-ids "$INSTANCE_ID" >/dev/null
+  echo "Jumpbox ${INSTANCE_ID} left running."
 fi
 
 echo "DB IAM user bootstrap complete."

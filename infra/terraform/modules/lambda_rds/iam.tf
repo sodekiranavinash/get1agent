@@ -21,11 +21,15 @@ resource "aws_iam_role_policy_attachment" "logs" {
 }
 
 resource "aws_iam_role_policy_attachment" "vpc" {
+  count = var.vpc_id == "" ? 0 : 1
+
   role       = aws_iam_role.lambda.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
 
 resource "aws_iam_role_policy" "rds_connect" {
+  count = var.rds_resource_id == "" || var.db_iam_username == "" ? 0 : 1
+
   name = "${var.name}-rds-connect"
   role = aws_iam_role.lambda.id
 
@@ -85,5 +89,58 @@ resource "aws_iam_role_policy" "s3_access" {
         Resource = [for arn in var.s3_bucket_arns : "${arn}/*"]
       },
     ]
+  })
+}
+
+resource "aws_iam_role_policy" "sqs_access" {
+  count = length(var.sqs_queue_arns) > 0 ? 1 : 0
+  name  = "${var.name}-sqs-access"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "ConsumeQueues"
+      Effect = "Allow"
+      Action = [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:ChangeMessageVisibility",
+      ]
+      Resource = var.sqs_queue_arns
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "step_functions_access" {
+  count = length(var.step_functions_arns) > 0 ? 1 : 0
+  name  = "${var.name}-step-functions-access"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "StartExecutions"
+      Effect   = "Allow"
+      Action   = ["states:StartExecution"]
+      Resource = var.step_functions_arns
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "bedrock_access" {
+  count = length(var.bedrock_model_arns) > 0 ? 1 : 0
+  name  = "${var.name}-bedrock-access"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "InvokeModels"
+      Effect   = "Allow"
+      Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+      Resource = var.bedrock_model_arns
+    }]
   })
 }

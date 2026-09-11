@@ -32,9 +32,15 @@ export const RouteContentReadyContext = createContext<RouteContentReady | null>(
  *   const { data, isPending } = usePageQuery('my-key', () => api.get('/...'))
  *   return <PageShell>{isPending ? <MySkeleton /> : <MyContent data={data!} />}</PageShell>
  */
-export function usePageQuery<T>(key: string, fetcher: () => Promise<T>) {
-  const query = useQuery(key, fetcher)
-  const isPending = query.isLoading || query.data === undefined
+export function usePageQuery<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  options?: { refetchOnMount?: boolean },
+) {
+  const query = useQuery(key, fetcher, options)
+  // Only treat "no data yet" as pending, so a background refetch (e.g. on
+  // remount) doesn't flash the skeleton over already-rendered content.
+  const isPending = query.data === undefined
   const routeContentReady = useContext(RouteContentReadyContext)
 
   useEffect(() => {

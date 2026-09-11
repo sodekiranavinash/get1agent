@@ -95,3 +95,10 @@ resource "aws_s3_bucket_policy" "this" {
   bucket = aws_s3_bucket.this.id
   policy = data.aws_iam_policy_document.tls_only.json
 }
+
+resource "aws_s3_bucket_notification" "eventbridge" {
+  count  = var.enable_eventbridge ? 1 : 0
+  bucket = aws_s3_bucket.this.id
+
+  eventbridge = true
+}

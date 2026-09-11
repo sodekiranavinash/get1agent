@@ -19,5 +19,5 @@ output "log_group_name" {
 }
 
 output "security_group_id" {
-  value = aws_security_group.lambda.id
+  value = try(aws_security_group.lambda[0].id, null)
 }

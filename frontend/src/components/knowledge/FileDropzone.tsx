@@ -14,6 +14,7 @@ type FileDropzoneProps = {
   disabled?: boolean
   remaining: number
   compact?: boolean
+  className?: string
 }
 
 export function FileDropzone({
@@ -22,6 +23,7 @@ export function FileDropzone({
   disabled = false,
   remaining,
   compact = false,
+  className = '',
 }: FileDropzoneProps) {
   const onDrop = useCallback(
     (accepted: File[], rejections: { file: File }[]) => {
@@ -49,7 +51,7 @@ export function FileDropzone({
         isDragActive
           ? 'border-accent bg-accent-soft/40'
           : 'border-border-strong bg-raised/20 hover:border-accent/40 hover:bg-raised/40'
-      } ${disabled || remaining <= 0 ? 'pointer-events-none opacity-60' : ''}`}
+      } ${disabled || remaining <= 0 ? 'pointer-events-none opacity-60' : ''} ${className}`}
     >
       <input {...getInputProps()} />
       <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent">

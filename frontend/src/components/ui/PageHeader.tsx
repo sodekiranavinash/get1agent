@@ -14,6 +14,13 @@ type PageHeaderProps = {
     onClick?: () => void
     disabled?: boolean
   }
+  secondaryAction?: {
+    label: string
+    icon?: ReactNode
+    onClick?: () => void
+    disabled?: boolean
+    active?: boolean
+  }
 }
 
 export function PageHeader({
@@ -22,6 +29,7 @@ export function PageHeader({
   badge,
   badgeVariant = 'accent',
   action,
+  secondaryAction,
 }: PageHeaderProps) {
   return (
     <motion.header
@@ -45,14 +53,28 @@ export function PageHeader({
           </p>
         ) : null}
       </div>
-      {action ? (
-        <Button
-          icon={action.icon}
-          onClick={action.onClick}
-          disabled={action.disabled}
-        >
-          {action.label}
-        </Button>
+      {action || secondaryAction ? (
+        <div className="flex shrink-0 items-center gap-2">
+          {secondaryAction ? (
+            <Button
+              variant={secondaryAction.active ? 'secondary' : 'outline'}
+              icon={secondaryAction.icon}
+              onClick={secondaryAction.onClick}
+              disabled={secondaryAction.disabled}
+            >
+              {secondaryAction.label}
+            </Button>
+          ) : null}
+          {action ? (
+            <Button
+              icon={action.icon}
+              onClick={action.onClick}
+              disabled={action.disabled}
+            >
+              {action.label}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
     </motion.header>
   )

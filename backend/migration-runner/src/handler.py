@@ -56,6 +56,7 @@ async def _bootstrap(event: dict[str, Any]) -> None:
     literal_user = iam_user.replace("'", "''")
 
     statements = [
+        "CREATE EXTENSION IF NOT EXISTS vector;",
         f"""
         DO $$
         BEGIN

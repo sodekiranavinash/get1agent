@@ -36,13 +36,31 @@ def upgrade() -> None:
         sa.Column(
             "max_file_bytes",
             sa.BigInteger(),
-            server_default=sa.text("52428800"),
+            server_default=sa.text("20971520"),
             nullable=False,
         ),
         sa.Column(
             "max_files_per_kb",
             sa.Integer(),
-            server_default=sa.text("10"),
+            server_default=sa.text("20"),
+            nullable=False,
+        ),
+        sa.Column(
+            "max_knowledge_bases",
+            sa.Integer(),
+            server_default=sa.text("20"),
+            nullable=False,
+        ),
+        sa.Column(
+            "max_files_per_user",
+            sa.Integer(),
+            server_default=sa.text("400"),
+            nullable=False,
+        ),
+        sa.Column(
+            "max_storage_bytes",
+            sa.BigInteger(),
+            server_default=sa.text("209715200"),
             nullable=False,
         ),
         _TS_CREATED,
@@ -54,6 +72,18 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "max_files_per_kb > 0",
             name="ck_user_quotas_max_files_per_kb_positive",
+        ),
+        sa.CheckConstraint(
+            "max_knowledge_bases > 0",
+            name="ck_user_quotas_max_knowledge_bases_positive",
+        ),
+        sa.CheckConstraint(
+            "max_files_per_user > 0",
+            name="ck_user_quotas_max_files_per_user_positive",
+        ),
+        sa.CheckConstraint(
+            "max_storage_bytes > 0",
+            name="ck_user_quotas_max_storage_bytes_positive",
         ),
         sa.ForeignKeyConstraint(
             ["user_id"],
@@ -162,6 +192,11 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name="pk_documents"),
         sa.UniqueConstraint("s3_key", name="uq_documents_s3_key"),
+        sa.UniqueConstraint(
+            "knowledge_base_id",
+            "file_name",
+            name="uq_documents_knowledge_base_id_file_name",
+        ),
     )
     op.create_index(
         "ix_documents_knowledge_base_id",
@@ -179,13 +214,9 @@ def upgrade() -> None:
         ),
         sa.Column("document_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("name", sa.String(length=64), nullable=False),
-        sa.Column("description", sa.Text(), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
         _TS_CREATED,
         _TS_UPDATED,
-        sa.CheckConstraint(
-            "char_length(description) >= 30",
-            name="ck_document_tags_description_min_length",
-        ),
         sa.ForeignKeyConstraint(
             ["document_id"],
             ["documents.id"],

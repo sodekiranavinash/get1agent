@@ -11,7 +11,7 @@ LAMBDA="${1:-}"
 case "$LAMBDA" in
   account-settings) PKGS=("sqlalchemy[asyncio]" asyncpg boto3) ;;
   health-check) PKGS=("sqlalchemy[asyncio]" asyncpg boto3) ;;
-  knowledge-bases) PKGS=("sqlalchemy[asyncio]" asyncpg boto3) ;;
+  knowledge-bases) PKGS=("sqlalchemy[asyncio]" asyncpg boto3 pymupdf python-docx openpyxl) ;;
   *)
     echo "usage: bash local/run.sh <account-settings|health-check|knowledge-bases>" >&2
     exit 2
@@ -19,8 +19,7 @@ case "$LAMBDA" in
 esac
 
 # Local overrides (DATABASE_URL, PORT, ...). Never committed.
-# Prefer `.env.local`; fall back to `.env` for anyone who copied the template
-# there instead of to `.env.local`.
+# Prefer `.env.local`; fall back to `.env`.
 ENV_FILE="$ROOT/.env.local"
 [[ -f "$ENV_FILE" ]] || ENV_FILE="$ROOT/.env"
 if [[ -f "$ENV_FILE" ]]; then

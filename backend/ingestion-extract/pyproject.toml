@@ -1,0 +1,10 @@
+[project]
+name = "get1agent-ingestion-extract"
+version = "0.1.0"
+description = "Ingestion extract stage: document parsers (pymupdf, python-docx, openpyxl)"
+requires-python = ">=3.14"
+dependencies = [
+    "pymupdf>=1.24.0",
+    "python-docx>=1.1.0",
+    "openpyxl>=3.1.0",
+]

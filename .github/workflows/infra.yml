@@ -117,6 +117,26 @@ jobs:
         run: make package
         working-directory: backend/knowledge-bases
 
+      - name: Package backend ingestion-dispatcher zip
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/ingestion-dispatcher
+
+      - name: Package backend ingestion-extract zip
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/ingestion-extract
+
+      - name: Package backend ingestion-index zip
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/ingestion-index
+
+      - name: Package backend ingestion-mark-failed zip
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/ingestion-mark-failed
+
       - name: Verify Lambda zips
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: |
@@ -132,6 +152,14 @@ jobs:
           unzip -l backend/account-settings/dist/function.zip | grep handler.py
           test -s backend/knowledge-bases/dist/function.zip
           unzip -l backend/knowledge-bases/dist/function.zip | grep handler.py
+          test -s backend/ingestion-dispatcher/dist/function.zip
+          unzip -l backend/ingestion-dispatcher/dist/function.zip | grep handler.py
+          test -s backend/ingestion-extract/dist/function.zip
+          unzip -l backend/ingestion-extract/dist/function.zip | grep handler.py
+          test -s backend/ingestion-index/dist/function.zip
+          unzip -l backend/ingestion-index/dist/function.zip | grep handler.py
+          test -s backend/ingestion-mark-failed/dist/function.zip
+          unzip -l backend/ingestion-mark-failed/dist/function.zip | grep handler.py
 
       - name: Terraform validate
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas

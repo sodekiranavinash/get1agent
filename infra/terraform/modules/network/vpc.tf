@@ -107,6 +107,49 @@ resource "aws_vpc_endpoint" "s3" {
   }
 }
 
+# Interface endpoint for Bedrock so the ingestion worker can embed without a NAT.
+resource "aws_security_group" "vpc_endpoints" {
+  count = var.enable_ingestion_endpoints ? 1 : 0
+
+  name        = "${var.name_prefix}-vpc-endpoints"
+  description = "HTTPS from VPC resources to interface endpoints"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description = "HTTPS from the VPC"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.name_prefix}-vpc-endpoints-sg"
+  }
+}
+
+resource "aws_vpc_endpoint" "bedrock_runtime" {
+  count = var.enable_ingestion_endpoints ? 1 : 0
+
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${data.aws_region.current.region}.bedrock-runtime"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints[0].id]
+  private_dns_enabled = true
+
+  tags = {
+    Name = "${var.name_prefix}-bedrock-runtime-endpoint"
+  }
+}
+
 resource "aws_db_subnet_group" "postgres" {
   name       = "${var.name_prefix}-postgres"
   subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]

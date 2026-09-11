@@ -4,8 +4,10 @@ Design reference for the document ingestion pipeline:
 **PDF → pages → markdown → chunks → embeddings → pgvector**, with idempotent
 re-ingestion when a document is re-uploaded with new content.
 
-Status: design / not yet implemented.
-Last updated: 2026-09-11.
+Status: implemented — see `AGENTS.md` → "Document ingestion" for the shipped
+architecture (S3 → EventBridge → SQS → Step Functions **Express** → worker).
+This file remains the design rationale.
+Last updated: 2026-09-12.
 
 ---
 

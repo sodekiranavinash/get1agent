@@ -49,6 +49,20 @@ module "api_gateway" {
       lambda_function_name = module.knowledge_bases[0].function_name
       authorization_type   = "JWT"
     }
+    knowledge_bases_tags = {
+      method               = "GET"
+      path                 = "/v1/knowledge-bases/tags"
+      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
+      lambda_function_name = module.knowledge_bases[0].function_name
+      authorization_type   = "JWT"
+    }
+    knowledge_bases_events = {
+      method               = "GET"
+      path                 = "/v1/knowledge-bases/events"
+      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
+      lambda_function_name = module.knowledge_bases[0].function_name
+      authorization_type   = "JWT"
+    }
     knowledge_bases_get = {
       method               = "GET"
       path                 = "/v1/knowledge-bases/{id}"

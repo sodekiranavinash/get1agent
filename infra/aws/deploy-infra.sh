@@ -46,6 +46,26 @@ if [[ ! -s "$ROOT/backend/knowledge-bases/dist/function.zip" ]]; then
   make -C "$ROOT/backend/knowledge-bases" package
 fi
 
+if [[ ! -s "$ROOT/backend/ingestion-dispatcher/dist/function.zip" ]]; then
+  echo "Packaging backend ingestion-dispatcher Lambda zip..."
+  make -C "$ROOT/backend/ingestion-dispatcher" package
+fi
+
+if [[ ! -s "$ROOT/backend/ingestion-extract/dist/function.zip" ]]; then
+  echo "Packaging backend ingestion-extract Lambda zip..."
+  make -C "$ROOT/backend/ingestion-extract" package
+fi
+
+if [[ ! -s "$ROOT/backend/ingestion-index/dist/function.zip" ]]; then
+  echo "Packaging backend ingestion-index Lambda zip..."
+  make -C "$ROOT/backend/ingestion-index" package
+fi
+
+if [[ ! -s "$ROOT/backend/ingestion-mark-failed/dist/function.zip" ]]; then
+  echo "Packaging backend ingestion-mark-failed Lambda zip..."
+  make -C "$ROOT/backend/ingestion-mark-failed" package
+fi
+
 bash "$ROOT/infra/aws/run-terraform.sh" bootstrap "$MODE"
 bash "$ROOT/infra/aws/run-terraform.sh" web "$MODE"
 bash "$ROOT/infra/aws/run-terraform.sh" prod "$MODE"
@@ -62,7 +82,7 @@ if [[ "$MODE" == "apply" ]]; then
   echo "DB access:   bash infra/aws/db-access.sh  (starts jumpbox only while in use)"
   JUMPBOX_ID="$(terraform output -raw jumpbox_instance_id 2>/dev/null || true)"
   if [[ -n "$JUMPBOX_ID" ]]; then
-    aws ec2 stop-instances --region "${AWS_REGION:-ap-south-1}" --instance-ids "$JUMPBOX_ID" >/dev/null 2>&1 || true
+    echo "Jumpbox ${JUMPBOX_ID} left running. Access: bash infra/aws/db-access.sh"
   fi
   echo ""
   echo "Auth0 API identifier: https://api.get1agent.com"

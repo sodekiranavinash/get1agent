@@ -1,7 +1,17 @@
 resource "aws_security_group" "lambda" {
+  count = var.vpc_id == "" ? 0 : 1
+
   name_prefix = "${var.name}-"
-  description = "Lambda VPC access to RDS for ${var.name}"
+  description = "Lambda VPC access for ${var.name}"
   vpc_id      = var.vpc_id
+
+  egress {
+    description = "HTTPS to AWS services via VPC endpoints (no NAT in this VPC)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
   egress {
     description     = "PostgreSQL to RDS"
@@ -21,9 +31,11 @@ resource "aws_security_group" "lambda" {
 }
 
 resource "aws_security_group_rule" "postgres_from_lambda" {
+  count = var.vpc_id == "" ? 0 : 1
+
   type                     = "ingress"
   security_group_id        = var.postgres_security_group_id
-  source_security_group_id = aws_security_group.lambda.id
+  source_security_group_id = aws_security_group.lambda[0].id
   description              = "PostgreSQL from ${var.name}"
   from_port                = 5432
   to_port                  = 5432

@@ -16,11 +16,41 @@ tools/      Go Lambda tools
 
 ## Architecture
 
-<!-- Describe components, data flow, key boundaries. Example:
 - Frontend talks to API Gateway only; never directly to RDS.
-- Lambdas share code via backend/shared/ layers.
-- Each lambda is one service all that service logic is written there
--->
+- Lambdas share code via `backend/shared/` (bundled into the `data` layer).
+- Each lambda is one service; that service's logic lives in its `src/handler.py`.
+
+### Document ingestion
+
+Uploads flow: browser PUTs to S3 via a presigned URL, then calls
+`POST /v1/knowledge-bases/{id}/documents/{docId}/complete`.
+
+- **Production** (`INGESTION_MODE=sqs`): S3 `ObjectCreated` → EventBridge → SQS
+  (`ingestion-docs` + DLQ) → `ingestion-dispatcher` (batch 5, partial batch
+  failures) → **Step Functions Express** (`ingest-{docId}-{contentHash}`) →
+  `ingestion-extract` → `ingestion-index` (any stage failure →
+  `ingestion-mark-failed`). Each stage is its own Lambda for per-stage
+  memory/timeout/IAM and clear failure visibility.
+- **Local** (`INGESTION_MODE=local`, the default): the knowledge-bases handler
+  runs the same pipeline in-process; `EMBED_MODE=local` uses deterministic fake
+  embeddings so no AWS is needed.
+- Pipeline code is shared: `backend/shared/ingestion/` (chunking, extractors,
+  embeddings, pipeline). Heavy extractor deps (`pymupdf`, `python-docx`,
+  `openpyxl`) ship in the worker zip, **not** the shared layer.
+- Embeddings: **Titan Text V2** (`amazon.titan-embed-text-v2:0`) for text chunks
+  and **Titan Multimodal G1** (`amazon.titan-embed-image-v1`) for images. They
+  are different vector spaces → separate `chunks` and `document_images` tables.
+- pgvector runs on the existing RDS; enable via migration `0003_ingestion`.
+- Ingestion config (embedding model + chunk size/overlap) is **per knowledge
+  base**, set at creation (`knowledge_bases` columns); the page-level
+  "Workspace defaults" card only pre-fills the create dialog. Changing it after
+  documents exist means re-indexing.
+- `ingestion_events` is the append-only timeline the UI reads
+  (`GET /v1/knowledge-bases/events`). The worker updates `documents.status`
+  (`processing`/`ready`/`failed`) and `knowledge_bases.status` follows.
+- The VPC has no NAT; the worker reaches Bedrock through a VPC interface
+  endpoint, and the dispatcher runs outside the VPC (it only calls Step
+  Functions).
 
 ## Conventions
 
@@ -63,7 +93,7 @@ Everything runs locally with the root `Makefile` + `local/` scripts. No Docker,
 no AWS, no Lambda deployment needed to test.
 
 ```bash
-cp .env.example .env.local      # sets DATABASE_URL (+ DB_NAME)
+# Put DATABASE_URL (+ DB_NAME) in .env.local (or .env), then:
 make dev                        # ALL local Lambdas + gateway -> http://localhost:9000
 make ui                         # React app        -> http://localhost:5173
 make gateway                    # path-routing proxy only
@@ -95,7 +125,7 @@ bash scripts/migrate.sh lambda up|down|stamp   # invoke cloud migration-runner
 - NEVER run Lambda functions via AWS or Docker locally. Test with the `make`
   targets / `local/` scripts / `scripts/migrate.sh`.
 - Do not deploy from a local machine; deployment happens via GitHub Actions.
-- Never commit secrets or `.env*` files (except `.env.example`).
+- Never commit secrets or `.env*` files.
 - Do not edit generated files (`dist/`, `node_modules/`, `.terraform/`).
 - One primary action per page. Render each primary CTA (e.g. "New Knowledge
   Base") in exactly one place — the page header (`PageHeader` `action`). Do not
@@ -103,5 +133,6 @@ bash scripts/migrate.sh lambda up|down|stamp   # invoke cloud migration-runner
   empty states should point to the existing header action instead.
 
 ## Do not touch
+
 
 <!-- Paths agents must never modify. -->

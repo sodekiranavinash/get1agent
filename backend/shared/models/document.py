@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     text,
 )
@@ -39,6 +40,7 @@ class Document(Base, TimestampMixin):
             name="status_valid",
         ),
         CheckConstraint("size_bytes >= 0", name="size_bytes_non_negative"),
+        UniqueConstraint("knowledge_base_id", "file_name"),
         Index("ix_documents_knowledge_base_id", "knowledge_base_id"),
     )
 
@@ -76,6 +78,18 @@ class Document(Base, TimestampMixin):
         String(20),
         nullable=False,
         server_default=text("'pending'"),
+    )
+    embed_model: Mapped[str | None] = mapped_column(String(128))
+    image_embed_model: Mapped[str | None] = mapped_column(String(128))
+    chunk_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    image_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
     )
 
     knowledge_base: Mapped[KnowledgeBase] = relationship(

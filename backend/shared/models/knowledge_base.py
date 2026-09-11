@@ -3,7 +3,16 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text, Uuid, text
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Uuid,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.models.base import Base, TimestampMixin
@@ -41,6 +50,31 @@ class KnowledgeBase(Base, TimestampMixin):
         String(20),
         nullable=False,
         server_default=text("'ready'"),
+    )
+    embed_model: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        server_default=text("'amazon.titan-embed-text-v2:0'"),
+    )
+    image_embed_model: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        server_default=text("'amazon.titan-embed-image-v1'"),
+    )
+    embedding_dim: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1024"),
+    )
+    chunk_size: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1024"),
+    )
+    chunk_overlap: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("128"),
     )
 
     user: Mapped[User] = relationship("User", back_populates="knowledge_bases")

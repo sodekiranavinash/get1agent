@@ -1,5 +1,5 @@
 resource "aws_instance" "jumpbox" {
-  ami                         = data.aws_ssm_parameter.amazon_linux_2023_arm.value
+  ami                         = data.aws_ssm_parameter.amazon_linux_2023.value
   instance_type               = var.ec2_instance_type
   subnet_id                   = aws_subnet.public.id
   vpc_security_group_ids      = [aws_security_group.jumpbox.id]
@@ -23,7 +23,9 @@ resource "aws_instance" "jumpbox" {
 
   lifecycle {
     create_before_destroy = true
-    ignore_changes        = [key_name]
+    # The subnet already assigns a public IP; keep the existing instance rather
+    # than replacing it on attribute drift.
+    ignore_changes = [key_name, ami, associate_public_ip_address]
   }
 
   depends_on = [
@@ -31,8 +33,8 @@ resource "aws_instance" "jumpbox" {
   ]
 }
 
-data "aws_ssm_parameter" "amazon_linux_2023_arm" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+data "aws_ssm_parameter" "amazon_linux_2023" {
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 }
 
 data "aws_region" "current" {}

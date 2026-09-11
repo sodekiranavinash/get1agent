@@ -19,6 +19,22 @@ on:
         description: Deploy knowledge-bases
         type: boolean
         default: false
+      ingestion_dispatcher:
+        description: Deploy ingestion-dispatcher
+        type: boolean
+        default: false
+      ingestion_extract:
+        description: Deploy ingestion-extract
+        type: boolean
+        default: false
+      ingestion_index:
+        description: Deploy ingestion-index
+        type: boolean
+        default: false
+      ingestion_mark_failed:
+        description: Deploy ingestion-mark-failed
+        type: boolean
+        default: false
 
 concurrency:
   group: backend-deploy
@@ -47,6 +63,10 @@ jobs:
           SELECT_MIGRATION_RUNNER: ${{ inputs.migration_runner }}
           SELECT_ACCOUNT_SETTINGS: ${{ inputs.account_settings }}
           SELECT_KNOWLEDGE_BASES: ${{ inputs.knowledge_bases }}
+          SELECT_INGESTION_DISPATCHER: ${{ inputs.ingestion_dispatcher }}
+          SELECT_INGESTION_EXTRACT: ${{ inputs.ingestion_extract }}
+          SELECT_INGESTION_INDEX: ${{ inputs.ingestion_index }}
+          SELECT_INGESTION_MARK_FAILED: ${{ inputs.ingestion_mark_failed }}
         run: |
           include="$(bash infra/aws/build-backend-matrix.sh)"
           echo "Deploying: $include"

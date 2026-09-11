@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Migration helper (standalone — intentionally NOT a make target).
 #
-# Local database (Alembic directly, uses DATABASE_URL from env or .env.local):
+# Local database (Alembic directly, uses DATABASE_URL from env, .env.local or .env):
 #   bash scripts/migrate.sh up [revision]        # upgrade head
 #   bash scripts/migrate.sh down [revision]      # downgrade -1
 #   bash scripts/migrate.sh current
@@ -38,14 +38,16 @@ fi
 CMD="${1:-up}"
 
 if [[ "$MODE" == "local" ]]; then
-  if [[ -f "$ROOT/.env.local" ]]; then
+  ENV_FILE="$ROOT/.env.local"
+  [[ -f "$ENV_FILE" ]] || ENV_FILE="$ROOT/.env"
+  if [[ -f "$ENV_FILE" ]]; then
     set -a
-    # shellcheck disable=SC1091
-    source "$ROOT/.env.local"
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
     set +a
   fi
   if [[ -z "${DATABASE_URL:-}" ]]; then
-    echo "DATABASE_URL is required. Set it in .env.local (see .env.example)." >&2
+    echo "DATABASE_URL is required. Set it in .env.local (or .env)." >&2
     exit 1
   fi
 

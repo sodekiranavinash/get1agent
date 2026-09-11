@@ -38,6 +38,38 @@
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
       "layers": ["data"]
+    },
+    {
+      "name": "ingestion-dispatcher",
+      "dir": "backend/ingestion-dispatcher",
+      "function_name": "get1agent-prod-ingestion-dispatcher",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": []
+    },
+    {
+      "name": "ingestion-extract",
+      "dir": "backend/ingestion-extract",
+      "function_name": "get1agent-prod-ingestion-extract",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": ["data"]
+    },
+    {
+      "name": "ingestion-index",
+      "dir": "backend/ingestion-index",
+      "function_name": "get1agent-prod-ingestion-index",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": ["data"]
+    },
+    {
+      "name": "ingestion-mark-failed",
+      "dir": "backend/ingestion-mark-failed",
+      "function_name": "get1agent-prod-ingestion-mark-failed",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": ["data"]
     }
   ]
 }

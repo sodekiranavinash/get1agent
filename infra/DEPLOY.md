@@ -1,6 +1,6 @@
 # Deploy get1agent on AWS
 
-**API Gateway HTTP API** handles `api.get1agent.com` with Auth0 JWT, CORS, and throttling. **On-demand EC2 jumpbox** gets a public IPv4 only while you use `db-access.sh` (stopped when idle). **Lambdas** are added as API routes in Terraform.
+**API Gateway HTTP API** handles `api.get1agent.com` with Auth0 JWT, CORS, and throttling. **EC2 jumpbox** (`t3.micro`, always running) has a public IPv4 for `db-access.sh`. **Lambdas** are added as API routes in Terraform.
 
 | Stack | Region | Resources |
 |-------|--------|-----------|
@@ -75,7 +75,7 @@ EC2 jumpbox (on-demand, public IPv4 only while running) → RDS PostgreSQL
 | Component | Role |
 |-----------|------|
 | **API Gateway** | Auth0 JWT, CORS, per-route + stage throttling, access logs |
-| **EC2 jumpbox** | Started by `db-access.sh`; SSM tunnel to RDS; **stopped on exit** (no IPv4 bill while idle) |
+| **EC2 jumpbox** | Always-on `t3.micro`; SSM tunnel to RDS for `db-access.sh` |
 | **RDS** | `get1agent` database for app/Lambdas |
 
 ---
@@ -148,26 +148,26 @@ Lambdas must handle **API Gateway HTTP API v2** events (not raw JSON).
 
 ---
 
-## Local DB access (on-demand, minimal cost)
+## Local DB access
 
-Public IPv4 costs **~$0.005/hr only while the jumpbox is running**. The script stops EC2 when you exit (releases the IP).
+The jumpbox (`t3.micro`) runs continuously and is never stopped on exit. Public IPv4 costs ~$0.005/hr.
 
 ```bash
-# Credentials (no EC2 start)
+# Credentials
 bash infra/aws/db-access.sh --show-creds
 
-# Start jumpbox → tunnel localhost:15432 → RDS → stop jumpbox on Ctrl+C
+# Tunnel localhost:15432 → RDS (jumpbox keeps running)
 bash infra/aws/db-access.sh
 ```
 
 **DBeaver:** host `localhost`, port `15432`, SSH tab **OFF**, SSL require.
 
 ```bash
-# Stop jumpbox manually if needed
+# Stop jumpbox manually if needed (releases public IPv4)
 bash infra/aws/db-access.sh --stop
 ```
 
-RDS is **private** — reachable from VPC Lambdas and the jumpbox while it is running.
+RDS is **private** — reachable from VPC Lambdas and the always-on jumpbox.
 
 ---
 
@@ -194,9 +194,9 @@ Terraform state lives in a dedicated S3 bucket (created automatically before any
 |---------|-----------|
 | API Gateway HTTP API | 1M requests/month (12 months) |
 | Lambda | 1M requests/month |
-| EC2 `t4g.micro` (stop when idle via `db-access.sh`) | 750 hours/month |
+| EC2 `t3.micro` (always on) | 750 hours/month |
 | RDS `db.t4g.micro` | 750 hours/month |
-| Public IPv4 | ~$0.005/hr **only while jumpbox is running** |
+| Public IPv4 | ~$0.005/hr (always-on jumpbox) |
 | CloudWatch logs | 5 GB ingestion |
 | SSM Parameter Store (SecureString) | Standard parameters are free |
 

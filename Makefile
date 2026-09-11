@@ -12,8 +12,7 @@
 # Migrations are a separate script (not a make target):
 #   bash scripts/migrate.sh up|down|current|history|revision
 #
-# Copy .env.example to .env.local first (sets DATABASE_URL, optional PORT).
-
+# Set DATABASE_URL (and optional PORT) in .env.local or .env first.
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
@@ -31,7 +30,7 @@ help:
 	@echo "  make knowledge-bases    Run knowledge-bases Lambda locally (localhost:9004)"
 	@echo ""
 	@echo "  Migrations:  bash scripts/migrate.sh up|down|current|history|revision"
-	@echo "  Tip: copy .env.example to .env.local and set DATABASE_URL."
+	@echo "  Tip: set DATABASE_URL in .env.local or .env."
 
 ui:
 	cd frontend && npm run dev

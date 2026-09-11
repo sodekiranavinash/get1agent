@@ -23,6 +23,11 @@ TARGETS=()
   TARGETS+=(-target='module.account_settings[0]')
   TARGETS+=(-target='module.knowledge_storage[0]')
   TARGETS+=(-target='module.knowledge_bases[0]')
+  TARGETS+=(-target='module.ingestion_extract[0]')
+  TARGETS+=(-target='module.ingestion_index[0]')
+  TARGETS+=(-target='module.ingestion_mark_failed[0]')
+  TARGETS+=(-target='module.ingestion[0]')
+  TARGETS+=(-target='module.ingestion_dispatcher[0]')
 }
 [[ "${APPLY_TOOL_LAMBDAS:-false}" == "true" ]] && TARGETS+=(-target=module.challan_extractor)
 
@@ -55,6 +60,18 @@ if [[ "$need_backend_artifacts" == true ]]; then
   if [[ ! -s "$ROOT/backend/knowledge-bases/dist/function.zip" ]]; then
     make -C "$ROOT/backend/knowledge-bases" package
   fi
+  if [[ ! -s "$ROOT/backend/ingestion-dispatcher/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/ingestion-dispatcher" package
+  fi
+  if [[ ! -s "$ROOT/backend/ingestion-extract/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/ingestion-extract" package
+  fi
+  if [[ ! -s "$ROOT/backend/ingestion-index/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/ingestion-index" package
+  fi
+  if [[ ! -s "$ROOT/backend/ingestion-mark-failed/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/ingestion-mark-failed" package
+  fi
 fi
 
 export PROD_TARGETS="${TARGETS[*]}"
@@ -69,6 +86,6 @@ if [[ "${APPLY_NETWORK:-false}" == "true" || ${#TARGETS[@]} -eq 0 ]]; then
   terraform init -input=false >/dev/null
   JUMPBOX_ID="$(terraform output -raw jumpbox_instance_id 2>/dev/null || true)"
   if [[ -n "$JUMPBOX_ID" ]]; then
-    aws ec2 stop-instances --region "${AWS_REGION:-ap-south-1}" --instance-ids "$JUMPBOX_ID" >/dev/null 2>&1 || true
+    echo "Jumpbox ${JUMPBOX_ID} left running. Access: bash infra/aws/db-access.sh"
   fi
 fi

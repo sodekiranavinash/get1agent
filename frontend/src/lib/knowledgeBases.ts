@@ -1,14 +1,32 @@
 import { useApiClient, type ApiClient } from './api'
-import { invalidateQuery } from './query'
+import { invalidateQuery, useQuery } from './query'
 import { usePageQuery } from '../hooks/usePageQuery'
 
 export const KNOWLEDGE_BASES_QUERY_KEY = 'knowledge-bases'
+export const TAG_SUGGESTIONS_QUERY_KEY = 'knowledge-base-tags'
+export const INGESTION_EVENTS_QUERY_KEY = 'ingestion-events'
 
 // Keep these in sync with backend/knowledge-bases/src/handler.py.
-export const MAX_FILES_PER_KB = 10
-export const MAX_FILE_BYTES = 50 * 1024 * 1024
+// Up to 20 knowledge bases x 20 files x 20 MB, capped at 200 MB storage/user.
+export const MAX_KNOWLEDGE_BASES = 20
+export const MAX_FILES_PER_KB = 20
+export const MAX_FILES_PER_USER = 400
+export const MAX_FILE_BYTES = 20 * 1024 * 1024
+export const MAX_STORAGE_BYTES = 200 * 1024 * 1024
 export const MAX_TAGS_PER_DOCUMENT = 10
-export const MIN_TAG_DESCRIPTION_LENGTH = 30
+export const MAX_NAME_LENGTH = 255
+export const MAX_DESCRIPTION_LENGTH = 1000
+export const MAX_TAG_NAME_LENGTH = 64
+export const MAX_TAG_DESCRIPTION_LENGTH = 500
+
+// Ingestion defaults. Keep in sync with backend/shared/ingestion/config.py.
+export const TEXT_EMBED_MODEL = 'amazon.titan-embed-text-v2:0'
+export const IMAGE_EMBED_MODEL = 'amazon.titan-embed-image-v1'
+export const EMBEDDING_DIM = 1024
+export const CHUNK_SIZES = [512, 1024, 2048] as const
+export const CHUNK_OVERLAPS = [0, 128, 256] as const
+export const DEFAULT_CHUNK_SIZE = 1024
+export const DEFAULT_CHUNK_OVERLAP = 128
 
 export const ACCEPTED_MIME: Record<string, string[]> = {
   'application/pdf': ['.pdf'],
@@ -49,6 +67,11 @@ export type KnowledgeBase = {
   description: string | null
   status: KnowledgeBaseStatus
   fileCount: number
+  embedModel: string
+  imageEmbedModel: string
+  embeddingDim: number
+  chunkSize: number
+  chunkOverlap: number
   createdAt: string
   updatedAt: string
 }
@@ -61,15 +84,57 @@ export type KnowledgeBaseDocument = {
   sizeBytes: number
   source: 'upload' | 'inline'
   status: DocumentStatus
+  chunkCount: number
+  imageCount: number
   tags: DocumentTag[]
   createdAt: string
   updatedAt: string
   downloadUrl: string | null
 }
 
+export type IngestionStage =
+  | 'uploaded'
+  | 'extracted'
+  | 'chunked'
+  | 'embedding'
+  | 'indexed'
+  | 'failed'
+
+export type IngestionEventStatus = 'started' | 'succeeded' | 'failed'
+
+export type IngestionEvent = {
+  id: number
+  documentId: string
+  knowledgeBaseId: string
+  fileName: string
+  documentStatus: DocumentStatus
+  stage: IngestionStage
+  status: IngestionEventStatus
+  message: string | null
+  createdAt: string
+}
+
 export type KnowledgeBaseDetail = {
   knowledgeBase: KnowledgeBase
   documents: KnowledgeBaseDocument[]
+}
+
+export type KnowledgeBaseUsage = {
+  knowledgeBases: number
+  files: number
+  storageBytes: number
+  limits: {
+    knowledgeBases: number
+    filesPerKnowledgeBase: number
+    files: number
+    storageBytes: number
+    fileBytes: number
+  }
+}
+
+export type KnowledgeBaseList = {
+  knowledgeBases: KnowledgeBase[]
+  usage: KnowledgeBaseUsage
 }
 
 export type PresignResult = {
@@ -95,6 +160,20 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+export function formatRelative(iso: string): string {
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return 'just now'
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000))
+  if (seconds < 60) return 'just now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round(hours / 24)
+  if (days < 30) return `${days}d ago`
+  return new Date(iso).toLocaleDateString()
 }
 
 export function validateFile(
@@ -158,7 +237,12 @@ export function uploadToPresignedUrl(
 
 export async function createKnowledgeBase(
   api: ApiClient,
-  payload: { name: string; description?: string },
+  payload: {
+    name: string
+    description?: string
+    chunkSize?: number
+    chunkOverlap?: number
+  },
 ): Promise<KnowledgeBase> {
   return api.post<KnowledgeBase>('/v1/knowledge-bases', payload)
 }
@@ -241,14 +325,52 @@ export async function createInlineDocument(
 export function useKnowledgeBases() {
   const api = useApiClient()
 
-  return usePageQuery(KNOWLEDGE_BASES_QUERY_KEY, async () => {
-    const response = await api.get<{ knowledgeBases: KnowledgeBase[] }>(
-      '/v1/knowledge-bases',
-    )
-    return response.knowledgeBases
-  })
+  return usePageQuery(
+    KNOWLEDGE_BASES_QUERY_KEY,
+    () => api.get<KnowledgeBaseList>('/v1/knowledge-bases'),
+    { refetchOnMount: true },
+  )
 }
 
 export function invalidateKnowledgeBases(): void {
   invalidateQuery(KNOWLEDGE_BASES_QUERY_KEY)
+}
+
+/** Recent ingestion events (upload -> extract -> chunk -> embed -> index). */
+export function useIngestionEvents() {
+  const api = useApiClient()
+
+  return useQuery(
+    INGESTION_EVENTS_QUERY_KEY,
+    async () => {
+      const response = await api.get<{ events: IngestionEvent[] }>(
+        '/v1/knowledge-bases/events?limit=50',
+      )
+      return response.events
+    },
+    { refetchOnMount: true },
+  )
+}
+
+export function invalidateIngestionEvents(): void {
+  invalidateQuery(INGESTION_EVENTS_QUERY_KEY)
+}
+
+/** Distinct tags the user has used before, for autocomplete in the tag editor. */
+export function useTagSuggestions(): {
+  tags: DocumentTag[]
+  refetch: () => void
+} {
+  const api = useApiClient()
+  const query = useQuery(TAG_SUGGESTIONS_QUERY_KEY, async () => {
+    const response = await api.get<{ tags: DocumentTag[] }>(
+      '/v1/knowledge-bases/tags',
+    )
+    return response.tags
+  })
+  return { tags: query.data ?? [], refetch: query.refetch }
+}
+
+export function invalidateTagSuggestions(): void {
+  invalidateQuery(TAG_SUGGESTIONS_QUERY_KEY)
 }

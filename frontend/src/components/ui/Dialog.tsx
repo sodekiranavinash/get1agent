@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import * as RadixDialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 
-type DialogSize = 'md' | 'lg' | 'xl'
+type DialogSize = 'md' | 'lg' | 'xl' | '2xl'
 
 type DialogProps = {
   open: boolean
@@ -10,6 +10,8 @@ type DialogProps = {
   title: string
   description?: string
   size?: DialogSize
+  banner?: ReactNode
+  contentClassName?: string
   children: ReactNode
   footer?: ReactNode
 }
@@ -18,6 +20,7 @@ const sizeStyles: Record<DialogSize, string> = {
   md: 'max-w-lg',
   lg: 'max-w-2xl',
   xl: 'max-w-4xl',
+  '2xl': 'max-w-6xl',
 }
 
 export function Dialog({
@@ -26,6 +29,8 @@ export function Dialog({
   title,
   description,
   size = 'lg',
+  banner,
+  contentClassName = '',
   children,
   footer,
 }: DialogProps) {
@@ -34,7 +39,7 @@ export function Dialog({
       <RadixDialog.Portal>
         <RadixDialog.Overlay className="dialog-overlay fixed inset-0 z-50 bg-black/65 backdrop-blur-sm" />
         <RadixDialog.Content
-          className={`dialog-content fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border-strong bg-surface shadow-panel focus:outline-none ${sizeStyles[size]}`}
+          className={`dialog-content fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border-strong bg-surface shadow-panel focus:outline-none ${sizeStyles[size]} ${contentClassName}`}
         >
           <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
             <div className="min-w-0">
@@ -54,6 +59,10 @@ export function Dialog({
               <X className="h-4 w-4" />
             </RadixDialog.Close>
           </div>
+
+          {banner ? (
+            <div className="border-b border-border px-6 py-3">{banner}</div>
+          ) : null}
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 scrollbar-thin">
             {children}

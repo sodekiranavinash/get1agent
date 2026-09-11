@@ -40,6 +40,12 @@ variable "enable_backend_lambdas" {
   description = "Terraform backend Lambdas (e.g. health-check; requires Network + RDS)"
 }
 
+variable "enable_ingestion" {
+  type        = bool
+  default     = false
+  description = "S3 -> EventBridge -> SQS -> Step Functions ingestion pipeline"
+}
+
 variable "rds_db_name" {
   type    = string
   default = "get1agent"

@@ -1,10 +1,14 @@
 locals {
-  backend_python_runtime = "python3.14"
-  layer_data_zip         = abspath("${path.module}/../../../../backend/layers/data/dist/layer.zip")
-  health_check_zip       = abspath("${path.module}/../../../../backend/health-check/dist/function.zip")
-  migration_runner_zip   = abspath("${path.module}/../../../../backend/migration-runner/dist/function.zip")
-  account_settings_zip   = abspath("${path.module}/../../../../backend/account-settings/dist/function.zip")
-  knowledge_bases_zip    = abspath("${path.module}/../../../../backend/knowledge-bases/dist/function.zip")
+  backend_python_runtime   = "python3.14"
+  layer_data_zip           = abspath("${path.module}/../../../../backend/layers/data/dist/layer.zip")
+  health_check_zip         = abspath("${path.module}/../../../../backend/health-check/dist/function.zip")
+  migration_runner_zip     = abspath("${path.module}/../../../../backend/migration-runner/dist/function.zip")
+  account_settings_zip     = abspath("${path.module}/../../../../backend/account-settings/dist/function.zip")
+  knowledge_bases_zip      = abspath("${path.module}/../../../../backend/knowledge-bases/dist/function.zip")
+  ingestion_dispatcher_zip = abspath("${path.module}/../../../../backend/ingestion-dispatcher/dist/function.zip")
+  ingestion_extract_zip    = abspath("${path.module}/../../../../backend/ingestion-extract/dist/function.zip")
+  ingestion_index_zip      = abspath("${path.module}/../../../../backend/ingestion-index/dist/function.zip")
+  ingestion_fail_zip       = abspath("${path.module}/../../../../backend/ingestion-mark-failed/dist/function.zip")
 }
 
 check "layer_data_zip_exists" {
@@ -39,6 +43,34 @@ check "knowledge_bases_zip_exists" {
   assert {
     condition     = !var.enable_backend_lambdas || fileexists(local.knowledge_bases_zip)
     error_message = "Knowledge bases zip not found at ${local.knowledge_bases_zip}. Run: make -C backend/knowledge-bases package"
+  }
+}
+
+check "ingestion_dispatcher_zip_exists" {
+  assert {
+    condition     = !var.enable_ingestion || fileexists(local.ingestion_dispatcher_zip)
+    error_message = "Dispatcher zip not found at ${local.ingestion_dispatcher_zip}. Run: make -C backend/ingestion-dispatcher package"
+  }
+}
+
+check "ingestion_extract_zip_exists" {
+  assert {
+    condition     = !var.enable_ingestion || fileexists(local.ingestion_extract_zip)
+    error_message = "Extract zip not found at ${local.ingestion_extract_zip}. Run: make -C backend/ingestion-extract package"
+  }
+}
+
+check "ingestion_index_zip_exists" {
+  assert {
+    condition     = !var.enable_ingestion || fileexists(local.ingestion_index_zip)
+    error_message = "Index zip not found at ${local.ingestion_index_zip}. Run: make -C backend/ingestion-index package"
+  }
+}
+
+check "ingestion_fail_zip_exists" {
+  assert {
+    condition     = !var.enable_ingestion || fileexists(local.ingestion_fail_zip)
+    error_message = "Mark-failed zip not found at ${local.ingestion_fail_zip}. Run: make -C backend/ingestion-mark-failed package"
   }
 }
 
@@ -178,6 +210,41 @@ module "knowledge_bases" {
   s3_bucket_arns             = [module.knowledge_storage[0].bucket_arn]
 
   environment = {
+    DB_HOST        = module.rds[0].postgres_endpoint
+    DB_PORT        = tostring(module.rds[0].postgres_port)
+    DB_NAME        = module.rds[0].postgres_db_name
+    DB_IAM_USER    = module.rds[0].db_iam_username
+    S3_BUCKET      = module.knowledge_storage[0].bucket_name
+    S3_REGION      = var.aws_region
+    INGESTION_MODE = "sqs"
+  }
+
+  depends_on = [module.layer_data, module.knowledge_storage]
+}
+
+module "ingestion_extract" {
+  count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-ingestion-extract"
+  filename         = local.ingestion_extract_zip
+  source_code_hash = try(filebase64sha256(local.ingestion_extract_zip), "")
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_data[0].arn]
+
+  memory_size = 1024
+  timeout     = 300
+
+  vpc_id                     = module.network[0].vpc_id
+  subnet_ids                 = module.network[0].private_subnet_ids
+  postgres_security_group_id = module.network[0].postgres_security_group_id
+  aws_region                 = var.aws_region
+  rds_resource_id            = module.rds[0].postgres_resource_id
+  db_iam_username            = module.rds[0].db_iam_username
+  s3_bucket_arns             = [module.knowledge_storage[0].bucket_arn]
+
+  environment = {
     DB_HOST     = module.rds[0].postgres_endpoint
     DB_PORT     = tostring(module.rds[0].postgres_port)
     DB_NAME     = module.rds[0].postgres_db_name
@@ -187,4 +254,117 @@ module "knowledge_bases" {
   }
 
   depends_on = [module.layer_data, module.knowledge_storage]
+}
+
+module "ingestion_index" {
+  count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-ingestion-index"
+  filename         = local.ingestion_index_zip
+  source_code_hash = try(filebase64sha256(local.ingestion_index_zip), "")
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_data[0].arn]
+
+  memory_size = 1024
+  timeout     = 300
+
+  vpc_id                     = module.network[0].vpc_id
+  subnet_ids                 = module.network[0].private_subnet_ids
+  postgres_security_group_id = module.network[0].postgres_security_group_id
+  aws_region                 = var.aws_region
+  rds_resource_id            = module.rds[0].postgres_resource_id
+  db_iam_username            = module.rds[0].db_iam_username
+  s3_bucket_arns             = [module.knowledge_storage[0].bucket_arn]
+
+  bedrock_model_arns = [
+    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0",
+    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-image-v1",
+  ]
+
+  environment = {
+    DB_HOST           = module.rds[0].postgres_endpoint
+    DB_PORT           = tostring(module.rds[0].postgres_port)
+    DB_NAME           = module.rds[0].postgres_db_name
+    DB_IAM_USER       = module.rds[0].db_iam_username
+    S3_BUCKET         = module.knowledge_storage[0].bucket_name
+    S3_REGION         = var.aws_region
+    EMBED_MODE        = "bedrock"
+    BEDROCK_REGION    = var.aws_region
+    TEXT_EMBED_MODEL  = "amazon.titan-embed-text-v2:0"
+    IMAGE_EMBED_MODEL = "amazon.titan-embed-image-v1"
+  }
+
+  depends_on = [module.layer_data, module.knowledge_storage]
+}
+
+module "ingestion_mark_failed" {
+  count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-ingestion-mark-failed"
+  filename         = local.ingestion_fail_zip
+  source_code_hash = try(filebase64sha256(local.ingestion_fail_zip), "")
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_data[0].arn]
+
+  memory_size = 256
+  timeout     = 30
+
+  vpc_id                     = module.network[0].vpc_id
+  subnet_ids                 = module.network[0].private_subnet_ids
+  postgres_security_group_id = module.network[0].postgres_security_group_id
+  aws_region                 = var.aws_region
+  rds_resource_id            = module.rds[0].postgres_resource_id
+  db_iam_username            = module.rds[0].db_iam_username
+
+  environment = {
+    DB_HOST     = module.rds[0].postgres_endpoint
+    DB_PORT     = tostring(module.rds[0].postgres_port)
+    DB_NAME     = module.rds[0].postgres_db_name
+    DB_IAM_USER = module.rds[0].db_iam_username
+  }
+
+  depends_on = [module.layer_data]
+}
+
+module "ingestion" {
+  count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
+  source = "../../modules/ingestion"
+
+  name_prefix              = "get1agent-prod"
+  bucket_name              = module.knowledge_storage[0].bucket_name
+  extract_function_arn     = module.ingestion_extract[0].function_arn
+  index_function_arn       = module.ingestion_index[0].function_arn
+  mark_failed_function_arn = module.ingestion_mark_failed[0].function_arn
+
+  tags = { Service = "ingestion" }
+}
+
+module "ingestion_dispatcher" {
+  count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-ingestion-dispatcher"
+  filename         = local.ingestion_dispatcher_zip
+  source_code_hash = try(filebase64sha256(local.ingestion_dispatcher_zip), "")
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = []
+
+  memory_size = 256
+  timeout     = 30
+
+  event_source_queue_arn      = module.ingestion[0].queue_arn
+  enable_event_source_mapping = var.enable_ingestion
+  sqs_queue_arns              = [module.ingestion[0].queue_arn]
+  step_functions_arns         = [module.ingestion[0].state_machine_arn]
+
+  environment = {
+    STATE_MACHINE_ARN = module.ingestion[0].state_machine_arn
+  }
+
+  depends_on = [module.ingestion]
 }

@@ -72,3 +72,13 @@ output "knowledge_bases_bucket_name" {
   description = "S3 bucket holding knowledge base documents"
   value       = try(module.knowledge_storage[0].bucket_name, null)
 }
+
+output "ingestion_queue_url" {
+  description = "SQS queue feeding the ingestion pipeline"
+  value       = try(module.ingestion[0].queue_url, null)
+}
+
+output "ingestion_state_machine_arn" {
+  description = "Step Functions Express state machine for ingestion"
+  value       = try(module.ingestion[0].state_machine_arn, null)
+}

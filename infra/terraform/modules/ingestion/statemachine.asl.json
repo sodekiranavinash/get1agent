@@ -1,0 +1,120 @@
+{
+  "Comment": "Ingest one document: Extract -> Index. Any stage failure records which stage failed, then marks the document failed.",
+  "StartAt": "Extract",
+  "States": {
+    "Extract": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${extract_function_arn}",
+        "Payload": {
+          "documentId.$": "$.documentId",
+          "knowledgeBaseId.$": "$.knowledgeBaseId",
+          "userId.$": "$.userId",
+          "s3Key.$": "$.s3Key"
+        }
+      },
+      "ResultSelector": {
+        "extracted.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["DocumentNotReady"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 5,
+          "BackoffRate": 2.0
+        },
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "ExtractFailed"
+        }
+      ],
+      "Next": "Index"
+    },
+    "Index": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${index_function_arn}",
+        "Payload": {
+          "documentId.$": "$.documentId",
+          "knowledgeBaseId.$": "$.knowledgeBaseId",
+          "userId.$": "$.userId",
+          "textKey.$": "$.extracted.textKey",
+          "images.$": "$.extracted.images"
+        }
+      },
+      "ResultSelector": {
+        "indexed.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "IndexFailed"
+        }
+      ],
+      "End": true
+    },
+    "ExtractFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "documentId.$": "$.documentId",
+        "knowledgeBaseId.$": "$.knowledgeBaseId",
+        "userId.$": "$.userId",
+        "error.$": "$.error",
+        "stage": "extract"
+      },
+      "Next": "MarkFailed"
+    },
+    "IndexFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "documentId.$": "$.documentId",
+        "knowledgeBaseId.$": "$.knowledgeBaseId",
+        "userId.$": "$.userId",
+        "error.$": "$.error",
+        "stage": "index"
+      },
+      "Next": "MarkFailed"
+    },
+    "MarkFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${mark_failed_function_arn}",
+        "Payload": {
+          "documentId.$": "$.documentId",
+          "knowledgeBaseId.$": "$.knowledgeBaseId",
+          "userId.$": "$.userId",
+          "stage.$": "$.stage",
+          "error.$": "$.error"
+        }
+      },
+      "ResultPath": null,
+      "Next": "Failed"
+    },
+    "Failed": {
+      "Type": "Fail",
+      "Error": "IngestionFailed",
+      "Cause": "Document ingestion failed"
+    }
+  }
+}

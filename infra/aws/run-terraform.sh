@@ -106,6 +106,10 @@ run_env() {
     local migration_zip="$ROOT/backend/migration-runner/dist/function.zip"
     local account_zip="$ROOT/backend/account-settings/dist/function.zip"
     local knowledge_zip="$ROOT/backend/knowledge-bases/dist/function.zip"
+    local dispatcher_zip="$ROOT/backend/ingestion-dispatcher/dist/function.zip"
+    local extract_zip="$ROOT/backend/ingestion-extract/dist/function.zip"
+    local index_zip="$ROOT/backend/ingestion-index/dist/function.zip"
+    local fail_zip="$ROOT/backend/ingestion-mark-failed/dist/function.zip"
     local need_tool=false need_backend=false
 
     if [[ -z "${PROD_TARGETS:-}" ]]; then
@@ -113,7 +117,7 @@ run_env() {
       need_backend=true
     else
       [[ "$PROD_TARGETS" == *challan_extractor* ]] && need_tool=true
-      [[ "$PROD_TARGETS" == *layer_data* || "$PROD_TARGETS" == *health_check* || "$PROD_TARGETS" == *knowledge_bases* ]] && need_backend=true
+      [[ "$PROD_TARGETS" == *layer_data* || "$PROD_TARGETS" == *health_check* || "$PROD_TARGETS" == *knowledge_bases* || "$PROD_TARGETS" == *ingestion* ]] && need_backend=true
     fi
 
     if [[ "$need_tool" == true && ! -s "$tool_zip" ]]; then
@@ -146,10 +150,34 @@ run_env() {
       echo "Run: make -C backend/knowledge-bases package" >&2
       exit 1
     fi
+    if [[ "$need_backend" == true && ! -s "$dispatcher_zip" ]]; then
+      echo "Backend ingestion-dispatcher zip missing or empty: $dispatcher_zip" >&2
+      echo "Run: make -C backend/ingestion-dispatcher package" >&2
+      exit 1
+    fi
+    if [[ "$need_backend" == true && ! -s "$extract_zip" ]]; then
+      echo "Backend ingestion-extract zip missing or empty: $extract_zip" >&2
+      echo "Run: make -C backend/ingestion-extract package" >&2
+      exit 1
+    fi
+    if [[ "$need_backend" == true && ! -s "$index_zip" ]]; then
+      echo "Backend ingestion-index zip missing or empty: $index_zip" >&2
+      echo "Run: make -C backend/ingestion-index package" >&2
+      exit 1
+    fi
+    if [[ "$need_backend" == true && ! -s "$fail_zip" ]]; then
+      echo "Backend ingestion-mark-failed zip missing or empty: $fail_zip" >&2
+      echo "Run: make -C backend/ingestion-mark-failed package" >&2
+      exit 1
+    fi
     [[ "$need_tool" == true ]] && echo "Tool Lambda zip: $tool_zip ($(wc -c <"$tool_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Data layer zip: $layer_zip ($(wc -c <"$layer_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Health-check zip: $health_zip ($(wc -c <"$health_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Knowledge-bases zip: $knowledge_zip ($(wc -c <"$knowledge_zip") bytes)"
+    [[ "$need_backend" == true ]] && echo "Ingestion-dispatcher zip: $dispatcher_zip ($(wc -c <"$dispatcher_zip") bytes)"
+    [[ "$need_backend" == true ]] && echo "Ingestion-extract zip: $extract_zip ($(wc -c <"$extract_zip") bytes)"
+    [[ "$need_backend" == true ]] && echo "Ingestion-index zip: $index_zip ($(wc -c <"$index_zip") bytes)"
+    [[ "$need_backend" == true ]] && echo "Ingestion-mark-failed zip: $fail_zip ($(wc -c <"$fail_zip") bytes)"
   fi
 
   init_s3
