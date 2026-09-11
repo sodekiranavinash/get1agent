@@ -36,7 +36,8 @@ Loading is handled in one place per concern — never hand-roll timers per page.
   `RouteGate` in `layouts/MainLayout.tsx` shows a page-shaped skeleton for at
   least `PAGE_SKELETON_MIN_MS` before revealing the page. The shape comes from
   `components/ui/RouteSkeleton.tsx`. Tune the timing in exactly one spot:
-  `frontend/src/hooks/usePageQuery.ts`.
+  `frontend/src/hooks/usePageQuery.ts`. If the page's data is ready sooner, the
+  skeleton is dropped immediately (no waiting out the remaining time).
 - **Page data:** fetch with `usePageQuery(key, fetcher)`
   (`frontend/src/hooks/usePageQuery.ts`). Render a **shaped skeleton** while
   `isPending`, inside a single `<PageShell>`:

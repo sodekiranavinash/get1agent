@@ -2,6 +2,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react'
@@ -10,7 +11,10 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { AppFooter } from '../components/layout/AppFooter'
 import { SidebarProvider, useSidebar } from '../components/layout/SidebarProvider'
 import { RouteSkeleton } from '../components/ui/RouteSkeleton'
-import { PAGE_SKELETON_MIN_MS } from '../hooks/usePageQuery'
+import {
+  PAGE_SKELETON_MIN_MS,
+  RouteContentReadyContext,
+} from '../hooks/usePageQuery'
 import { Sidebar } from './Sidebar'
 
 /** Signals that the suspended lazy route above it has finished loading. */
@@ -29,13 +33,16 @@ function RouteReady({
 
 /**
  * Renders exactly one page-shaped skeleton per route change and keeps it
- * mounted until both the shared minimum time has elapsed and the lazy route
- * has resolved. Content is revealed underneath, so the shimmer never restarts.
+ * mounted until the shared minimum time has elapsed and the lazy route has
+ * resolved. If the page reports that its data is ready sooner, the skeleton is
+ * dropped immediately so loaded content is never hidden behind the animation.
  */
 function RouteGate({ children }: { children: ReactNode }) {
   const [minElapsed, setMinElapsed] = useState(false)
   const [contentReady, setContentReady] = useState(false)
+  const [dataReady, setDataReady] = useState(false)
   const handleReady = useCallback(() => setContentReady(true), [])
+  const reportReady = useCallback(() => setDataReady(true), [])
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -45,28 +52,35 @@ function RouteGate({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer)
   }, [])
 
-  const showSkeleton = !minElapsed || !contentReady
+  const showSkeleton = !contentReady || (!dataReady && !minElapsed)
+
+  const routeContentReady = useMemo(
+    () => ({ reportReady }),
+    [reportReady],
+  )
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <Suspense fallback={null}>
-        <RouteReady onReady={handleReady}>
-          <div
-            className={`transition-opacity duration-300 ${
-              showSkeleton ? 'pointer-events-none opacity-0' : 'opacity-100'
-            }`}
-          >
-            {children}
-          </div>
-        </RouteReady>
-      </Suspense>
+    <RouteContentReadyContext.Provider value={routeContentReady}>
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <Suspense fallback={null}>
+          <RouteReady onReady={handleReady}>
+            <div
+              className={`transition-opacity duration-300 ${
+                showSkeleton ? 'pointer-events-none opacity-0' : 'opacity-100'
+              }`}
+            >
+              {children}
+            </div>
+          </RouteReady>
+        </Suspense>
 
-      {showSkeleton ? (
-        <div className="absolute inset-0 z-10 flex flex-col bg-canvas">
-          <RouteSkeleton />
-        </div>
-      ) : null}
-    </div>
+        {showSkeleton ? (
+          <div className="absolute inset-0 z-10 flex flex-col bg-canvas">
+            <RouteSkeleton />
+          </div>
+        ) : null}
+      </div>
+    </RouteContentReadyContext.Provider>
   )
 }
 

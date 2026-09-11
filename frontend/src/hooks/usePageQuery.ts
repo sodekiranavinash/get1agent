@@ -1,3 +1,4 @@
+import { createContext, useContext, useEffect } from 'react'
 import { useQuery } from '../lib/query'
 
 /**
@@ -5,8 +6,23 @@ import { useQuery } from '../lib/query'
  * place to tune the app-wide loading feel — it keeps the shimmer from flashing.
  *
  * Applied on every route change by `RouteGate` in `layouts/MainLayout.tsx`.
+ * A page that loads real data can short-circuit the remaining time by reporting
+ * readiness through `RouteContentReadyContext`.
  */
 export const PAGE_SKELETON_MIN_MS = 1000
+
+type RouteContentReady = {
+  reportReady: () => void
+}
+
+/**
+ * Provided by `RouteGate`. Pages that fetch data call `reportReady` once the
+ * data has settled, so the route skeleton can be dropped immediately instead of
+ * waiting out the remaining minimum animation time.
+ */
+export const RouteContentReadyContext = createContext<RouteContentReady | null>(
+  null,
+)
 
 /**
  * Standard page data hook. Wraps `useQuery` and adds the "no data yet" notion
@@ -19,6 +35,11 @@ export const PAGE_SKELETON_MIN_MS = 1000
 export function usePageQuery<T>(key: string, fetcher: () => Promise<T>) {
   const query = useQuery(key, fetcher)
   const isPending = query.isLoading || query.data === undefined
+  const routeContentReady = useContext(RouteContentReadyContext)
+
+  useEffect(() => {
+    if (!isPending) routeContentReady?.reportReady()
+  }, [isPending, routeContentReady])
 
   return { ...query, isPending }
 }
