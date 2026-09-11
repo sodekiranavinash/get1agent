@@ -6,11 +6,13 @@ import { Spinner } from '../components/ui/Spinner'
 type AuthStatusScreenProps = {
   children: ReactNode
   tone?: 'default' | 'error'
+  action?: ReactNode
 }
 
 export function AuthStatusScreen({
   children,
   tone = 'default',
+  action,
 }: AuthStatusScreenProps) {
   return (
     <main className="relative flex min-h-screen items-center justify-center app-mesh-bg px-6">
@@ -30,6 +32,7 @@ export function AuthStatusScreen({
           >
             {children}
           </p>
+          {action ? <div className="mt-6 flex justify-center">{action}</div> : null}
         </Card>
       </motion.div>
     </main>
