@@ -1,7 +1,6 @@
 import { Link, NavLink } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
-import { SidebarThemeSwitcher } from '../components/layout/SidebarThemeSwitcher'
 import { SidebarUserSection } from '../components/layout/SidebarUserSection'
 import { useSidebar } from '../components/layout/SidebarProvider'
 import { useTheme } from '../theme/ThemeProvider'
@@ -17,7 +16,7 @@ export function Sidebar() {
   const logoSrc = theme === 'light' ? '/white_logo.png' : '/dark_logo.png'
 
   return (
-    <nav className="flex h-full flex-col overflow-hidden">
+    <nav className="flex h-full flex-col overflow-visible">
       <div
         className={`shrink-0 border-b border-border/60 ${
           effectiveCollapsed ? 'px-2 py-3' : 'px-3 py-3.5'
@@ -137,11 +136,10 @@ export function Sidebar() {
       </div>
 
       <div
-        className={`shrink-0 space-y-3 border-t border-border/60 bg-surface/50 py-3 backdrop-blur-sm ${
-          effectiveCollapsed ? 'flex flex-col items-center px-2' : 'px-3'
+        className={`relative z-30 shrink-0 border-t border-border/60 bg-surface/50 py-3 backdrop-blur-sm ${
+          effectiveCollapsed ? 'px-2' : 'px-3'
         }`}
       >
-        <SidebarThemeSwitcher collapsed={effectiveCollapsed} />
         <SidebarUserSection collapsed={effectiveCollapsed} />
       </div>
     </nav>
