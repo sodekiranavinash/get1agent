@@ -9,7 +9,6 @@ import {
   LayoutDashboard,
   MessageSquare,
   Plug,
-  Workflow,
 } from 'lucide-react'
 
 export type SidebarLink = {
