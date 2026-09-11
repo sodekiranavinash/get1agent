@@ -19,6 +19,7 @@ tools/      Go Lambda tools
 <!-- Describe components, data flow, key boundaries. Example:
 - Frontend talks to API Gateway only; never directly to RDS.
 - Lambdas share code via backend/shared/ layers.
+- Each lambda is one service all that service logic is written there
 -->
 
 ## Conventions
@@ -96,6 +97,10 @@ bash scripts/migrate.sh lambda up|down|stamp   # invoke cloud migration-runner
 - Do not deploy from a local machine; deployment happens via GitHub Actions.
 - Never commit secrets or `.env*` files (except `.env.example`).
 - Do not edit generated files (`dist/`, `node_modules/`, `.terraform/`).
+- One primary action per page. Render each primary CTA (e.g. "New Knowledge
+  Base") in exactly one place — the page header (`PageHeader` `action`). Do not
+  duplicate the same action in empty states, cards, or secondary sections;
+  empty states should point to the existing header action instead.
 
 ## Do not touch
 

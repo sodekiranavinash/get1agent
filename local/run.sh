@@ -2,7 +2,7 @@
 # Run a Lambda handler locally over HTTP (no AWS, no Docker, no layers).
 # Each Lambda gets its own uv-managed environment with just its dependencies.
 #
-# Usage: bash local/run.sh <account-settings|health-check>
+# Usage: bash local/run.sh <account-settings|health-check|knowledge-bases>
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,8 +11,9 @@ LAMBDA="${1:-}"
 case "$LAMBDA" in
   account-settings) PKGS=("sqlalchemy[asyncio]" asyncpg boto3) ;;
   health-check) PKGS=("sqlalchemy[asyncio]" asyncpg boto3) ;;
+  knowledge-bases) PKGS=("sqlalchemy[asyncio]" asyncpg boto3) ;;
   *)
-    echo "usage: bash local/run.sh <account-settings|health-check>" >&2
+    echo "usage: bash local/run.sh <account-settings|health-check|knowledge-bases>" >&2
     exit 2
     ;;
 esac
@@ -31,6 +32,10 @@ fi
 
 export PYTHONPATH="$ROOT/backend${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONUNBUFFERED=1
+
+# Local stand-in for S3: when S3_BUCKET is unset the knowledge-bases Lambda
+# stores uploaded bytes under this directory instead of AWS.
+export LOCAL_STORAGE_DIR="${LOCAL_STORAGE_DIR:-$ROOT/local/.storage}"
 
 ARGS=()
 for pkg in "${PKGS[@]}"; do

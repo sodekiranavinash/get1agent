@@ -131,3 +131,6 @@ override.tf.json
 
 # Local overrides
 *.local
+
+# Local dev storage (stand-in for S3)
+local/.storage/

@@ -74,3 +74,9 @@ variable "enable_api_custom_domain" {
   type    = bool
   default = true
 }
+
+variable "knowledge_bases_bucket_name" {
+  type        = string
+  default     = "get1agent-prod-knowledge-bases"
+  description = "Private S3 bucket for knowledge base documents"
+}

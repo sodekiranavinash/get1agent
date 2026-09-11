@@ -105,6 +105,7 @@ run_env() {
     local health_zip="$ROOT/backend/health-check/dist/function.zip"
     local migration_zip="$ROOT/backend/migration-runner/dist/function.zip"
     local account_zip="$ROOT/backend/account-settings/dist/function.zip"
+    local knowledge_zip="$ROOT/backend/knowledge-bases/dist/function.zip"
     local need_tool=false need_backend=false
 
     if [[ -z "${PROD_TARGETS:-}" ]]; then
@@ -112,7 +113,7 @@ run_env() {
       need_backend=true
     else
       [[ "$PROD_TARGETS" == *challan_extractor* ]] && need_tool=true
-      [[ "$PROD_TARGETS" == *layer_data* || "$PROD_TARGETS" == *health_check* ]] && need_backend=true
+      [[ "$PROD_TARGETS" == *layer_data* || "$PROD_TARGETS" == *health_check* || "$PROD_TARGETS" == *knowledge_bases* ]] && need_backend=true
     fi
 
     if [[ "$need_tool" == true && ! -s "$tool_zip" ]]; then
@@ -140,9 +141,15 @@ run_env() {
       echo "Run: make -C backend/account-settings package" >&2
       exit 1
     fi
+    if [[ "$need_backend" == true && ! -s "$knowledge_zip" ]]; then
+      echo "Backend knowledge-bases zip missing or empty: $knowledge_zip" >&2
+      echo "Run: make -C backend/knowledge-bases package" >&2
+      exit 1
+    fi
     [[ "$need_tool" == true ]] && echo "Tool Lambda zip: $tool_zip ($(wc -c <"$tool_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Data layer zip: $layer_zip ($(wc -c <"$layer_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Health-check zip: $health_zip ($(wc -c <"$health_zip") bytes)"
+    [[ "$need_backend" == true ]] && echo "Knowledge-bases zip: $knowledge_zip ($(wc -c <"$knowledge_zip") bytes)"
   fi
 
   init_s3

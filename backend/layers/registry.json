@@ -30,6 +30,14 @@
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
       "layers": ["data"]
+    },
+    {
+      "name": "knowledge-bases",
+      "dir": "backend/knowledge-bases",
+      "function_name": "get1agent-prod-knowledge-bases",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": ["data"]
     }
   ]
 }

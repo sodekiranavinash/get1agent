@@ -35,5 +35,68 @@ module "api_gateway" {
       lambda_function_name = module.account_settings[0].function_name
       authorization_type   = "JWT"
     }
+    knowledge_bases_list = {
+      method               = "GET"
+      path                 = "/v1/knowledge-bases"
+      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
+      lambda_function_name = module.knowledge_bases[0].function_name
+      authorization_type   = "JWT"
+    }
+    knowledge_bases_create = {
+      method               = "POST"
+      path                 = "/v1/knowledge-bases"
+      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
+      lambda_function_name = module.knowledge_bases[0].function_name
+      authorization_type   = "JWT"
+    }
+    knowledge_bases_get = {
+      method               = "GET"
+      path                 = "/v1/knowledge-bases/{id}"
+      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
+      lambda_function_name = module.knowledge_bases[0].function_name
+      authorization_type   = "JWT"
+    }
+    knowledge_bases_delete = {
+      method               = "DELETE"
+      path                 = "/v1/knowledge-bases/{id}"
+      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
+      lambda_function_name = module.knowledge_bases[0].function_name
+      authorization_type   = "JWT"
+    }
+    knowledge_bases_presign = {
+      method               = "POST"
+      path                 = "/v1/knowledge-bases/{id}/documents/presign"
+      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
+      lambda_function_name = module.knowledge_bases[0].function_name
+      authorization_type   = "JWT"
+    }
+    knowledge_bases_inline = {
+      method               = "POST"
+      path                 = "/v1/knowledge-bases/{id}/documents/inline"
+      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
+      lambda_function_name = module.knowledge_bases[0].function_name
+      authorization_type   = "JWT"
+    }
+    knowledge_bases_complete = {
+      method               = "POST"
+      path                 = "/v1/knowledge-bases/{id}/documents/{docId}/complete"
+      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
+      lambda_function_name = module.knowledge_bases[0].function_name
+      authorization_type   = "JWT"
+    }
+    knowledge_bases_local_upload = {
+      method               = "POST"
+      path                 = "/v1/knowledge-bases/{id}/documents/{docId}/upload"
+      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
+      lambda_function_name = module.knowledge_bases[0].function_name
+      authorization_type   = "JWT"
+    }
+    knowledge_bases_document_delete = {
+      method               = "DELETE"
+      path                 = "/v1/knowledge-bases/{id}/documents/{docId}"
+      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
+      lambda_function_name = module.knowledge_bases[0].function_name
+      authorization_type   = "JWT"
+    }
   } : {}
 }

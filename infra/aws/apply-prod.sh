@@ -21,6 +21,8 @@ TARGETS=()
   TARGETS+=(-target='module.health_check[0]')
   TARGETS+=(-target='module.migration_runner[0]')
   TARGETS+=(-target='module.account_settings[0]')
+  TARGETS+=(-target='module.knowledge_storage[0]')
+  TARGETS+=(-target='module.knowledge_bases[0]')
 }
 [[ "${APPLY_TOOL_LAMBDAS:-false}" == "true" ]] && TARGETS+=(-target=module.challan_extractor)
 
@@ -49,6 +51,9 @@ if [[ "$need_backend_artifacts" == true ]]; then
   fi
   if [[ ! -s "$ROOT/backend/account-settings/dist/function.zip" ]]; then
     make -C "$ROOT/backend/account-settings" package
+  fi
+  if [[ ! -s "$ROOT/backend/knowledge-bases/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/knowledge-bases" package
   fi
 fi
 

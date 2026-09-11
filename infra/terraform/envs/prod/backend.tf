@@ -4,6 +4,7 @@ locals {
   health_check_zip       = abspath("${path.module}/../../../../backend/health-check/dist/function.zip")
   migration_runner_zip   = abspath("${path.module}/../../../../backend/migration-runner/dist/function.zip")
   account_settings_zip   = abspath("${path.module}/../../../../backend/account-settings/dist/function.zip")
+  knowledge_bases_zip    = abspath("${path.module}/../../../../backend/knowledge-bases/dist/function.zip")
 }
 
 check "layer_data_zip_exists" {
@@ -31,6 +32,13 @@ check "account_settings_zip_exists" {
   assert {
     condition     = !var.enable_backend_lambdas || fileexists(local.account_settings_zip)
     error_message = "Account settings zip not found at ${local.account_settings_zip}. Run: make -C backend/account-settings package"
+  }
+}
+
+check "knowledge_bases_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.knowledge_bases_zip)
+    error_message = "Knowledge bases zip not found at ${local.knowledge_bases_zip}. Run: make -C backend/knowledge-bases package"
   }
 }
 
@@ -145,4 +153,38 @@ module "account_settings" {
   }
 
   depends_on = [module.layer_data]
+}
+
+module "knowledge_bases" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-knowledge-bases"
+  filename         = local.knowledge_bases_zip
+  source_code_hash = filebase64sha256(local.knowledge_bases_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_data[0].arn]
+
+  memory_size = 512
+  timeout     = 30
+
+  vpc_id                     = module.network[0].vpc_id
+  subnet_ids                 = module.network[0].private_subnet_ids
+  postgres_security_group_id = module.network[0].postgres_security_group_id
+  aws_region                 = var.aws_region
+  rds_resource_id            = module.rds[0].postgres_resource_id
+  db_iam_username            = module.rds[0].db_iam_username
+  s3_bucket_arns             = [module.knowledge_storage[0].bucket_arn]
+
+  environment = {
+    DB_HOST     = module.rds[0].postgres_endpoint
+    DB_PORT     = tostring(module.rds[0].postgres_port)
+    DB_NAME     = module.rds[0].postgres_db_name
+    DB_IAM_USER = module.rds[0].db_iam_username
+    S3_BUCKET   = module.knowledge_storage[0].bucket_name
+    S3_REGION   = var.aws_region
+  }
+
+  depends_on = [module.layer_data, module.knowledge_storage]
 }

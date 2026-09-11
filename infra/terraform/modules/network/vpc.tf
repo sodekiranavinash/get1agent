@@ -95,6 +95,18 @@ resource "aws_route_table_association" "private_b" {
   route_table_id = aws_route_table.private.id
 }
 
+# Free gateway endpoint so VPC Lambdas can reach S3 without a NAT gateway.
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.${data.aws_region.current.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.private.id]
+
+  tags = {
+    Name = "${var.name_prefix}-s3-endpoint"
+  }
+}
+
 resource "aws_db_subnet_group" "postgres" {
   name       = "${var.name_prefix}-postgres"
   subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]

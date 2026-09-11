@@ -63,3 +63,27 @@ resource "aws_iam_role_policy" "ssm_read" {
     ]
   })
 }
+
+resource "aws_iam_role_policy" "s3_access" {
+  count = length(var.s3_bucket_arns) > 0 ? 1 : 0
+  name  = "${var.name}-s3-access"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ListBuckets"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = var.s3_bucket_arns
+      },
+      {
+        Sid      = "ObjectAccess"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = [for arn in var.s3_bucket_arns : "${arn}/*"]
+      },
+    ]
+  })
+}

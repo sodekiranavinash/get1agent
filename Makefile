@@ -17,7 +17,7 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help ui dev gateway account-settings health-check
+.PHONY: help ui dev gateway account-settings health-check knowledge-bases
 
 help:
 	@echo "get1agent local dev"
@@ -28,6 +28,7 @@ help:
 	@echo ""
 	@echo "  make account-settings   Run account-settings Lambda locally (localhost:9001)"
 	@echo "  make health-check       Run health-check Lambda locally (localhost:9003)"
+	@echo "  make knowledge-bases    Run knowledge-bases Lambda locally (localhost:9004)"
 	@echo ""
 	@echo "  Migrations:  bash scripts/migrate.sh up|down|current|history|revision"
 	@echo "  Tip: copy .env.example to .env.local and set DATABASE_URL."
@@ -46,3 +47,6 @@ account-settings:
 
 health-check:
 	bash local/run.sh health-check
+
+knowledge-bases:
+	bash local/run.sh knowledge-bases

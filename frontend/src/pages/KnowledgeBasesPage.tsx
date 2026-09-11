@@ -1,121 +1,21 @@
-import { useMemo, useState } from 'react'
-import {
-  AlertCircle,
-  CheckCircle2,
-  FileStack,
-  Paperclip,
-  Plus,
-  Upload,
-  X,
-} from 'lucide-react'
+import { useState } from 'react'
+import { FileStack, Paperclip, Plus, Settings2 } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
+import { Skeleton } from '../components/ui/Skeleton'
 import { Spinner } from '../components/ui/Spinner'
-
-type KnowledgeBaseStatus = 'ready' | 'processing' | 'failed'
-
-type KnowledgeBase = {
-  id: string
-  name: string
-  description: string
-  fileCount: number
-  status: KnowledgeBaseStatus
-  attachedTo: { agents: number; workflows: number }
-  updatedAt: string
-}
-
-type IngestionEvent = {
-  id: string
-  knowledgeBaseId: string
-  message: string
-  detail?: string
-  status: 'active' | 'done' | 'error'
-  time: string
-}
-
-const knowledgeBases: KnowledgeBase[] = [
-  {
-    id: 'kb-product',
-    name: 'Product Documentation',
-    description: 'Specs, API docs, and release notes for RAG retrieval.',
-    fileCount: 24,
-    status: 'ready',
-    attachedTo: { agents: 2, workflows: 0 },
-    updatedAt: '2 days ago',
-  },
-  {
-    id: 'kb-sales',
-    name: 'Q3 Sales Reports',
-    description: 'PDF exports and spreadsheets from the sales team.',
-    fileCount: 5,
-    status: 'processing',
-    attachedTo: { agents: 0, workflows: 0 },
-    updatedAt: 'Just now',
-  },
-  {
-    id: 'kb-hr',
-    name: 'HR Policies',
-    description: 'Handbooks, benefits guides, and onboarding material.',
-    fileCount: 8,
-    status: 'ready',
-    attachedTo: { agents: 0, workflows: 1 },
-    updatedAt: '1 week ago',
-  },
-  {
-    id: 'kb-legal',
-    name: 'Legal Contracts',
-    description: 'Vendor agreements pending review and indexing.',
-    fileCount: 2,
-    status: 'failed',
-    attachedTo: { agents: 0, workflows: 0 },
-    updatedAt: '3 hours ago',
-  },
-]
-
-const ingestionEvents: IngestionEvent[] = [
-  {
-    id: 'ev-1',
-    knowledgeBaseId: 'kb-sales',
-    message: 'Upload received',
-    detail: '5 files queued',
-    status: 'done',
-    time: '2m ago',
-  },
-  {
-    id: 'ev-2',
-    knowledgeBaseId: 'kb-sales',
-    message: 'Extracting text',
-    detail: 'Parsing PDFs and spreadsheets',
-    status: 'done',
-    time: '1m ago',
-  },
-  {
-    id: 'ev-3',
-    knowledgeBaseId: 'kb-sales',
-    message: 'Chunking documents',
-    detail: '142 segments created',
-    status: 'done',
-    time: '45s ago',
-  },
-  {
-    id: 'ev-4',
-    knowledgeBaseId: 'kb-sales',
-    message: 'Generating embeddings',
-    detail: 'Batch 2 of 3',
-    status: 'active',
-    time: 'Now',
-  },
-  {
-    id: 'ev-5',
-    knowledgeBaseId: 'kb-sales',
-    message: 'Building vector index',
-    status: 'active',
-    time: 'Pending',
-  },
-]
+import { FileDropzone } from '../components/knowledge/FileDropzone'
+import { CreateKnowledgeBaseDialog } from '../components/knowledge/CreateKnowledgeBaseDialog'
+import { KnowledgeBaseDetailDialog } from '../components/knowledge/KnowledgeBaseDetailDialog'
+import {
+  MAX_FILES_PER_KB,
+  useKnowledgeBases,
+  type KnowledgeBase,
+  type KnowledgeBaseStatus,
+} from '../lib/knowledgeBases'
 
 const statusConfig: Record<
   KnowledgeBaseStatus,
@@ -126,15 +26,64 @@ const statusConfig: Record<
   failed: { variant: 'warning', label: 'Failed' },
 }
 
-export function KnowledgeBasesPage() {
-  const [dismissedBanner, setDismissedBanner] = useState(false)
+function formatRelative(iso: string): string {
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return 'just now'
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000))
+  if (seconds < 60) return 'just now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round(hours / 24)
+  if (days < 30) return `${days}d ago`
+  return new Date(iso).toLocaleDateString()
+}
 
-  const processingCount = knowledgeBases.filter((kb) => kb.status === 'processing').length
-  const activeEvents = useMemo(
-    () => ingestionEvents.filter((event) => event.knowledgeBaseId === 'kb-sales'),
-    [],
+function KnowledgeBasesSkeleton() {
+  return (
+    <PageShell className="!py-0">
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="border-b border-border px-6 py-5 lg:px-8">
+            <div className="space-y-3">
+              <Skeleton className="h-5 w-20 rounded-full" />
+              <Skeleton className="h-8 w-48" />
+              <Skeleton className="h-4 w-96 max-w-full" />
+            </div>
+          </div>
+          <div className="flex-1 px-6 py-6 lg:px-8">
+            <Skeleton className="mb-6 h-40 w-full rounded-2xl" />
+            <div className="grid gap-4 lg:grid-cols-2">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <Skeleton key={index} className="h-40 w-full rounded-2xl" />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </PageShell>
   )
-  const showEventsPanel = processingCount > 0
+}
+
+export function KnowledgeBasesPage() {
+  const { data, isPending, refetch } = useKnowledgeBases()
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createTab, setCreateTab] = useState<'write' | 'upload'>('write')
+  const [createFiles, setCreateFiles] = useState<File[] | undefined>(undefined)
+  const [detailId, setDetailId] = useState<string | null>(null)
+
+  const knowledgeBases = data ?? []
+  const processing = knowledgeBases.filter((kb) => kb.status === 'processing')
+  const totalFiles = knowledgeBases.reduce((sum, kb) => sum + kb.fileCount, 0)
+
+  const openCreate = (tab: 'write' | 'upload', files?: File[]) => {
+    setCreateTab(tab)
+    setCreateFiles(files)
+    setCreateOpen(true)
+  }
+
+  if (isPending) return <KnowledgeBasesSkeleton />
 
   return (
     <PageShell className="!py-0">
@@ -143,196 +92,188 @@ export function KnowledgeBasesPage() {
           <div className="border-b border-border px-6 py-5 lg:px-8">
             <PageHeader
               title="Knowledge"
-              description="Upload documents for RAG. Attach ready knowledge bases to agents and workflows only."
+              description="Write knowledge or upload documents for RAG. Attach ready knowledge bases to agents only."
               badge="Agents"
-              action={{ label: 'New Knowledge Base', icon: <Plus className="h-4 w-4" /> }}
+              action={{
+                label: 'New Knowledge Base',
+                icon: <Plus className="h-4 w-4" />,
+                onClick: () => openCreate('write'),
+              }}
             />
           </div>
 
           <div className="flex-1 overflow-y-auto px-6 py-6 scrollbar-thin lg:px-8">
-            {!dismissedBanner && processingCount > 0 ? (
-              <div className="mb-6 flex items-start justify-between gap-4 rounded-2xl border border-accent/25 bg-accent-soft/40 px-4 py-3">
-                <div className="flex items-start gap-3">
-                  <Spinner size="xs" className="mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-foreground">
-                      Ingestion in progress for Q3 Sales Reports
-                    </p>
-                    <p className="mt-1 text-xs text-muted">
-                      {showEventsPanel
-                        ? 'Live processing events are streaming on the right.'
-                        : 'Resize the window to see live ingestion events.'}
-                    </p>
-                  </div>
-                </div>
+            <div className="mb-6">
+              <FileDropzone
+                remaining={MAX_FILES_PER_KB}
+                onFiles={(files) => openCreate('upload', files)}
+              />
+              <p className="mt-2 text-center text-xs text-muted">
+                Prefer to type?{' '}
                 <button
                   type="button"
-                  onClick={() => setDismissedBanner(true)}
-                  className="rounded-md p-1 text-subtle transition-colors hover:bg-raised hover:text-foreground"
-                  aria-label="Dismiss ingestion notice"
+                  onClick={() => openCreate('write')}
+                  className="font-semibold text-accent hover:text-accent-hover"
                 >
-                  <X className="h-4 w-4" />
+                  Write knowledge directly
                 </button>
-              </div>
-            ) : null}
-
-            <Card
-              padding="lg"
-              className="mb-6 border-dashed border-border-strong bg-raised/20 text-center"
-            >
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-soft text-accent">
-                <Upload className="h-6 w-6" strokeWidth={1.5} />
-              </div>
-              <h3 className="mt-4 text-base font-semibold text-foreground">Upload documents</h3>
-              <p className="mx-auto mt-2 max-w-md text-sm text-muted">
-                Drop PDFs, DOCX, CSV, or TXT files. We chunk, embed, and index them for retrieval
-                once processing completes.
+                .
               </p>
-              <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-                <Button icon={<Upload className="h-4 w-4" />}>Choose Files</Button>
-                <Button variant="outline" icon={<Plus className="h-4 w-4" />}>
-                  Create Knowledge Base
-                </Button>
-              </div>
-            </Card>
+            </div>
 
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold text-foreground">Your knowledge bases</h2>
+              <h2 className="text-sm font-semibold text-foreground">
+                Your knowledge bases
+              </h2>
               <p className="text-xs text-muted">
-                {knowledgeBases.filter((kb) => kb.status === 'ready').length} ready to attach
+                {knowledgeBases.length} total · {totalFiles} files
               </p>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              {knowledgeBases.map((kb) => {
-                const status = statusConfig[kb.status]
-                const attachmentLabel =
-                  kb.attachedTo.agents + kb.attachedTo.workflows === 0
-                    ? 'Not attached'
-                    : [
-                        kb.attachedTo.agents > 0 ? `${kb.attachedTo.agents} agents` : null,
-                        kb.attachedTo.workflows > 0 ? `${kb.attachedTo.workflows} workflows` : null,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')
+            {knowledgeBases.length === 0 ? (
+              <Card padding="lg" className="text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-soft text-accent">
+                  <FileStack className="h-6 w-6" strokeWidth={1.5} />
+                </div>
+                <h3 className="mt-4 text-base font-semibold text-foreground">
+                  No knowledge bases yet
+                </h3>
+                <p className="mx-auto mt-2 max-w-md text-sm text-muted">
+                  Create your first knowledge base with the{' '}
+                  <span className="font-semibold text-foreground">
+                    New Knowledge Base
+                  </span>{' '}
+                  button above — write a note or upload documents.
+                </p>
+              </Card>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {knowledgeBases.map((kb: KnowledgeBase) => {
+                  const status = statusConfig[kb.status] ?? statusConfig.ready
+                  return (
+                    <Card key={kb.id} hover padding="lg">
+                      <div className="flex items-start gap-4">
+                        <div
+                          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-raised ${
+                            kb.status === 'ready'
+                              ? 'text-success'
+                              : kb.status === 'processing'
+                                ? 'text-accent'
+                                : 'text-warning'
+                          }`}
+                        >
+                          <FileStack className="h-6 w-6" strokeWidth={1.5} />
+                        </div>
 
-                return (
-                  <Card key={kb.id} hover padding="lg">
-                    <div className="flex items-start gap-4">
-                      <div
-                        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-raised ${
-                          kb.status === 'ready'
-                            ? 'text-success'
-                            : kb.status === 'processing'
-                              ? 'text-accent'
-                              : 'text-warning'
-                        }`}
-                      >
-                        <FileStack className="h-6 w-6" strokeWidth={1.5} />
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <h3 className="text-base font-semibold text-foreground">{kb.name}</h3>
-                            <p className="mt-1 text-sm leading-relaxed text-muted">{kb.description}</p>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <h3 className="truncate text-base font-semibold text-foreground">
+                                {kb.name}
+                              </h3>
+                              <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted">
+                                {kb.description || 'No description'}
+                              </p>
+                            </div>
+                            <Badge
+                              variant={status.variant}
+                              dot={kb.status === 'processing'}
+                            >
+                              {status.label}
+                            </Badge>
                           </div>
-                          <Badge variant={status.variant} dot={kb.status === 'processing'}>
-                            {status.label}
-                          </Badge>
-                        </div>
 
-                        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted">
-                          <span className="inline-flex items-center gap-1.5">
-                            <Paperclip className="h-3.5 w-3.5" />
-                            {kb.fileCount} files
-                          </span>
-                          <span>{attachmentLabel}</span>
-                          <span>Updated {kb.updatedAt}</span>
-                        </div>
+                          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted">
+                            <span className="inline-flex items-center gap-1.5">
+                              <Paperclip className="h-3.5 w-3.5" />
+                              {kb.fileCount} / {MAX_FILES_PER_KB} files
+                            </span>
+                            <span>Updated {formatRelative(kb.updatedAt)}</span>
+                          </div>
 
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {kb.status === 'ready' ? (
-                            <>
-                              <Button size="sm">Attach to Agent</Button>
-                              <Button variant="outline" size="sm">
-                                Attach to Workflow
-                              </Button>
-                            </>
-                          ) : kb.status === 'processing' ? (
-                            <Button variant="outline" size="sm" disabled>
-                              Available after ingestion
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              icon={<Settings2 className="h-3.5 w-3.5" />}
+                              onClick={() => setDetailId(kb.id)}
+                            >
+                              Manage files
                             </Button>
-                          ) : (
-                            <Button variant="secondary" size="sm">
-                              Retry Ingestion
-                            </Button>
-                          )}
-                          <Button variant="ghost" size="sm">
-                            Manage Files
-                          </Button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </Card>
-                )
-              })}
-            </div>
+                    </Card>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
 
-        {showEventsPanel ? (
+        {processing.length > 0 ? (
           <aside className="hidden w-80 shrink-0 border-l border-border bg-surface/80 p-5 backdrop-blur-xl xl:block">
             <div className="flex items-center gap-2">
               <Spinner size="xs" />
-              <h3 className="text-sm font-semibold text-foreground">Ingestion Events</h3>
+              <h3 className="text-sm font-semibold text-foreground">
+                Ingestion Events
+              </h3>
             </div>
-            <p className="mt-1 text-xs text-muted">Live RAG pipeline for Q3 Sales Reports</p>
+            <p className="mt-1 text-xs text-muted">
+              Live RAG pipeline for processing knowledge bases
+            </p>
 
             <div className="mt-5 space-y-2">
-              {activeEvents.map((event) => (
+              {processing.map((kb) => (
                 <div
-                  key={event.id}
+                  key={kb.id}
                   className="rounded-xl border border-border bg-raised/50 px-3 py-2.5"
                 >
                   <div className="flex items-center gap-2">
-                    {event.status === 'done' ? (
-                      <CheckCircle2 className="h-3.5 w-3.5 text-success" strokeWidth={1.75} />
-                    ) : event.status === 'error' ? (
-                      <AlertCircle className="h-3.5 w-3.5 text-warning" strokeWidth={1.75} />
-                    ) : (
-                      <Spinner size="xs" />
-                    )}
-                    <span className="text-xs font-semibold text-foreground">{event.message}</span>
-                    <Badge
-                      variant={
-                        event.status === 'done'
-                          ? 'success'
-                          : event.status === 'error'
-                            ? 'warning'
-                            : 'accent'
-                      }
-                      dot={event.status === 'active'}
-                    >
-                      {event.status}
+                    <Spinner size="xs" />
+                    <span className="text-xs font-semibold text-foreground">
+                      {kb.name}
+                    </span>
+                    <Badge variant="accent" dot>
+                      processing
                     </Badge>
                   </div>
-                  {event.detail ? (
-                    <p className="mt-1 pl-5 text-xs text-muted">{event.detail}</p>
-                  ) : null}
-                  <p className="mt-1 pl-5 text-[10px] text-subtle">{event.time}</p>
+                  <p className="mt-1 pl-5 text-xs text-muted">
+                    {kb.fileCount} file{kb.fileCount === 1 ? '' : 's'} in the
+                    pipeline
+                  </p>
                 </div>
               ))}
             </div>
 
             <p className="mt-5 rounded-xl border border-border bg-raised/30 px-3 py-2.5 text-xs leading-relaxed text-muted">
               Knowledge bases become attachable only after status is{' '}
-              <span className="font-semibold text-success">Ready</span>. Agents and workflows can
-              reference them for retrieval during runs.
+              <span className="font-semibold text-success">Ready</span>. Agents
+              can reference them for retrieval during runs.
             </p>
           </aside>
         ) : null}
       </div>
+
+      <CreateKnowledgeBaseDialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          setCreateOpen(open)
+          if (!open) setCreateFiles(undefined)
+        }}
+        initialTab={createTab}
+        initialFiles={createFiles}
+        onCreated={refetch}
+      />
+
+      <KnowledgeBaseDetailDialog
+        open={detailId !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetailId(null)
+        }}
+        knowledgeBaseId={detailId}
+        onChanged={refetch}
+      />
     </PageShell>
   )
 }

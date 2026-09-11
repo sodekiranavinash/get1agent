@@ -1,6 +1,7 @@
 {
   "port": 9000,
   "services": [
-    { "name": "account-settings", "port": 9001, "prefixes": ["/v1/user"] }
-    ]
+    { "name": "account-settings", "port": 9001, "prefixes": ["/v1/user"] },
+    { "name": "knowledge-bases", "port": 9004, "prefixes": ["/v1/knowledge-bases"] }
+  ]
 }

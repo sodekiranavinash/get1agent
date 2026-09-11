@@ -15,6 +15,10 @@ on:
         description: Deploy account-settings
         type: boolean
         default: false
+      knowledge_bases:
+        description: Deploy knowledge-bases
+        type: boolean
+        default: false
 
 concurrency:
   group: backend-deploy
@@ -42,6 +46,7 @@ jobs:
           SELECT_HEALTH_CHECK: ${{ inputs.health_check }}
           SELECT_MIGRATION_RUNNER: ${{ inputs.migration_runner }}
           SELECT_ACCOUNT_SETTINGS: ${{ inputs.account_settings }}
+          SELECT_KNOWLEDGE_BASES: ${{ inputs.knowledge_bases }}
         run: |
           include="$(bash infra/aws/build-backend-matrix.sh)"
           echo "Deploying: $include"

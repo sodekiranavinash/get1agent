@@ -92,6 +92,12 @@ variable "ssm_parameter_names" {
   description = "SSM parameter names this Lambda may read (for admin/bootstrap tasks)"
 }
 
+variable "s3_bucket_arns" {
+  type        = list(string)
+  default     = []
+  description = "S3 bucket ARNs this Lambda may read/write (for uploads and object management)"
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

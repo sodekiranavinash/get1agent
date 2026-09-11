@@ -29,6 +29,11 @@ LAMBDAS: dict[str, dict[str, Any]] = {
         "mode": "direct",
         "port": 9003,
     },
+    "knowledge-bases": {
+        "handler": "backend/knowledge-bases/src/handler.py",
+        "mode": "http",
+        "port": 9004,
+    },
 }
 
 
@@ -56,12 +61,13 @@ def decode_claims(auth_header: str | None) -> dict | None:
 
 def build_http_event(method: str, path: str, headers: dict[str, str], body: str) -> dict:
     claims = decode_claims(headers.get("authorization"))
+    path_only, _, query = path.partition("?")
     event: dict[str, Any] = {
         "version": "2.0",
-        "rawPath": path,
-        "rawQueryString": "",
+        "rawPath": path_only,
+        "rawQueryString": query,
         "headers": {key.lower(): value for key, value in headers.items()},
-        "requestContext": {"http": {"method": method, "path": path}},
+        "requestContext": {"http": {"method": method, "path": path_only}},
         "body": body or None,
         "isBase64Encoded": False,
     }
@@ -77,7 +83,9 @@ def make_server(name: str, lambda_handler: Callable[[dict, Any], dict], mode: st
         def _cors(self) -> None:
             self.send_header("access-control-allow-origin", "*")
             self.send_header("access-control-allow-headers", "authorization, content-type")
-            self.send_header("access-control-allow-methods", "GET, POST, OPTIONS")
+            self.send_header(
+                "access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+            )
 
         def do_OPTIONS(self) -> None:  # noqa: N802
             self.send_response(204)
@@ -113,6 +121,9 @@ def make_server(name: str, lambda_handler: Callable[[dict, Any], dict], mode: st
 
         do_GET = _handle
         do_POST = _handle
+        do_PUT = _handle
+        do_PATCH = _handle
+        do_DELETE = _handle
 
         def log_message(self, fmt: str, *args: Any) -> None:
             print(f"[{name}] {self.command} {self.path}")
@@ -133,6 +144,10 @@ def main() -> int:
 
     print(f"[{name}] listening on http://localhost:{port} (mode={config['mode']})")
     print(f"[{name}] DATABASE_URL={'set' if os.environ.get('DATABASE_URL') else 'NOT set'}")
+    bucket = os.environ.get("S3_BUCKET")
+    print(
+        f"[{name}] storage={'s3://' + bucket if bucket else 'local disk (S3_BUCKET unset)'}"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, String, Text, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from shared.models.document import Document
+    from shared.models.knowledge_base import KnowledgeBase
+    from shared.models.user_quota import UserQuota
 
 
 class User(Base, TimestampMixin):
@@ -38,5 +44,21 @@ class User(Base, TimestampMixin):
         "UserNotificationPreferences",
         back_populates="user",
         uselist=False,
+        cascade="all, delete-orphan",
+    )
+    quota: Mapped[UserQuota] = relationship(
+        "UserQuota",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    knowledge_bases: Mapped[list[KnowledgeBase]] = relationship(
+        "KnowledgeBase",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    documents: Mapped[list[Document]] = relationship(
+        "Document",
+        back_populates="user",
         cascade="all, delete-orphan",
     )

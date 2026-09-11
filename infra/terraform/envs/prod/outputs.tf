@@ -67,3 +67,8 @@ output "postgres_connection_parameter_name" {
   description = "SSM path for connection JSON (SecureString)"
   value       = try(module.rds[0].postgres_connection_parameter_name, null)
 }
+
+output "knowledge_bases_bucket_name" {
+  description = "S3 bucket holding knowledge base documents"
+  value       = try(module.knowledge_storage[0].bucket_name, null)
+}

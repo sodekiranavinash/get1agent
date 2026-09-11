@@ -112,6 +112,11 @@ jobs:
         run: make package
         working-directory: backend/account-settings
 
+      - name: Package backend knowledge-bases zip
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/knowledge-bases
+
       - name: Verify Lambda zips
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: |
@@ -125,6 +130,8 @@ jobs:
           unzip -l backend/migration-runner/dist/function.zip | grep 'versions/'
           test -s backend/account-settings/dist/function.zip
           unzip -l backend/account-settings/dist/function.zip | grep handler.py
+          test -s backend/knowledge-bases/dist/function.zip
+          unzip -l backend/knowledge-bases/dist/function.zip | grep handler.py
 
       - name: Terraform validate
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
