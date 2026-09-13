@@ -4,5 +4,8 @@ module "network" {
 
   name_prefix = "get1agent-prod"
 
-  enable_ingestion_endpoints = var.enable_ingestion
+  # Embedding runs in `ingestion-embed`, outside the VPC, so it reaches Bedrock
+  # over the public internet. The in-VPC workers only need S3 (free gateway
+  # endpoint) + RDS, so the paid Bedrock interface endpoint is no longer needed.
+  enable_ingestion_endpoints = false
 }
