@@ -31,11 +31,18 @@ print(d["host"], d["port"], d["dbname"], d["username"], d["password"])
 
 export DATABASE_URL="postgresql+asyncpg://${USER}:${PASS}@${HOST}:${PORT}/${DB}?ssl=require"
 
+# SSM RunShellScript may run without HOME set; default it before using $HOME.
+export HOME="${HOME:-/root}"
 export PATH="$HOME/.local/bin:$PATH"
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
 fi
+
+# macOS tar bundles AppleDouble (._*) metadata as real files; on Linux they
+# become files that Alembic loads as revisions and fail on embedded null bytes.
+find . -name '._*' -delete 2>/dev/null || true
+find . -name '.DS_Store' -delete 2>/dev/null || true
 
 cd backend/migrations
 echo "[migrate] $ACTION $REVISION against ${HOST}:${PORT}/${DB}"

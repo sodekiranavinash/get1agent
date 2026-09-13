@@ -66,6 +66,7 @@ jobs:
         run: |
           tar czf migrations.tgz \
             --exclude='.venv' --exclude='__pycache__' \
+            --exclude='._*' --exclude='.DS_Store' \
             backend/migrations backend/services/shared infra/scripts/migrate-remote.sh
           ls -lh migrations.tgz
 
