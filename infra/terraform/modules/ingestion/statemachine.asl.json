@@ -56,8 +56,14 @@
         }
       },
       "ResultSelector": {
-        "embedded.$": "$.Payload"
+        "embeddingsKey.$": "$.Payload.embeddingsKey",
+        "chunkCount.$": "$.Payload.chunkCount",
+        "imageCount.$": "$.Payload.imageCount",
+        "dimension.$": "$.Payload.dimension",
+        "textModel.$": "$.Payload.textModel",
+        "imageModel.$": "$.Payload.imageModel"
       },
+      "ResultPath": "$.embedded",
       "Retry": [
         {
           "ErrorEquals": ["States.TaskFailed"],

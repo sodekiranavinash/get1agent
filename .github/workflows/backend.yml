@@ -15,6 +15,26 @@ on:
         description: Deploy knowledge-bases
         type: boolean
         default: false
+      get_user_knowledge_bases:
+        description: Deploy get-user-knowledge-bases
+        type: boolean
+        default: false
+      retrieval_query:
+        description: Deploy retrieval-query
+        type: boolean
+        default: false
+      search_user_knowledge_bases:
+        description: Deploy search-user-knowledge-bases
+        type: boolean
+        default: false
+      knowledge_mcp:
+        description: Deploy knowledge-mcp
+        type: boolean
+        default: false
+      mcp_tester:
+        description: Deploy mcp-tester (admin MCP client)
+        type: boolean
+        default: false
       ingestion_dispatcher:
         description: Deploy ingestion-dispatcher
         type: boolean
@@ -66,6 +86,11 @@ jobs:
           SELECT_HEALTH_CHECK: ${{ inputs.health_check }}
           SELECT_ACCOUNT_SETTINGS: ${{ inputs.account_settings }}
           SELECT_KNOWLEDGE_BASES: ${{ inputs.knowledge_bases }}
+          SELECT_GET_USER_KNOWLEDGE_BASES: ${{ inputs.get_user_knowledge_bases }}
+          SELECT_RETRIEVAL_QUERY: ${{ inputs.retrieval_query }}
+          SELECT_SEARCH_USER_KNOWLEDGE_BASES: ${{ inputs.search_user_knowledge_bases }}
+          SELECT_KNOWLEDGE_MCP: ${{ inputs.knowledge_mcp }}
+          SELECT_MCP_TESTER: ${{ inputs.mcp_tester }}
           SELECT_INGESTION_DISPATCHER: ${{ inputs.ingestion_dispatcher }}
           SELECT_INGESTION_EXTRACT: ${{ inputs.ingestion_extract }}
           SELECT_INGESTION_EMBED: ${{ inputs.ingestion_embed }}

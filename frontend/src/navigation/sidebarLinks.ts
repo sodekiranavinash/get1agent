@@ -16,15 +16,15 @@ export type SidebarLink = {
   label: string
   tooltip?: string
   icon: LucideIcon
-  section?: 'workspace' | 'agents' | 'workflows' | 'manage'
+  section?: string
 }
 
-export const sidebarSections = {
+export const sidebarSections: Record<string, string> = {
   workspace: 'Workspace',
   agents: 'Agents',
   workflows: 'Workflows',
   manage: 'Manage',
-} as const
+}
 
 export const sidebarLinks: SidebarLink[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, section: 'workspace' },
@@ -81,7 +81,7 @@ export const sidebarLinks: SidebarLink[] = [
   { to: '/insights', label: 'Insights', icon: BarChart3, section: 'manage' },
 ]
 
-export const sectionOrder: Array<keyof typeof sidebarSections> = [
+export const sectionOrder: string[] = [
   'workspace',
   'agents',
   'workflows',

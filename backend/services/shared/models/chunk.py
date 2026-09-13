@@ -35,6 +35,7 @@ class Chunk(Base, TimestampMixin):
         UniqueConstraint("document_id", "chunk_hash"),
         Index("ix_chunks_document_id", "document_id"),
         Index("ix_chunks_knowledge_base_id", "knowledge_base_id"),
+        Index("ix_chunks_parent_id", "parent_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -42,6 +43,12 @@ class Chunk(Base, TimestampMixin):
         Uuid(as_uuid=True),
         ForeignKey("documents.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    # The larger context unit (page/section) this child belongs to. NULL only
+    # for documents indexed before parent-document retrieval existed.
+    parent_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("document_parents.id", ondelete="CASCADE"),
     )
     knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -61,4 +68,8 @@ class Chunk(Base, TimestampMixin):
     token_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )
+    # 1-based source page range for paginated documents (PDFs); NULL otherwise.
+    # Retrieval uses these to cite "page N" and deep-link into the PDF.
+    page: Mapped[int | None] = mapped_column(Integer)
+    page_end: Mapped[int | None] = mapped_column(Integer)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))

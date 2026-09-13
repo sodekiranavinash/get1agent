@@ -580,6 +580,30 @@ function FallbackSkeleton() {
   )
 }
 
+function AdminIntegrationsSkeleton() {
+  return (
+    <PageShell className="!py-0">
+      <div className="pt-6 pb-10 lg:pt-8">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="mt-3 h-4 w-96" />
+        <div className="mt-8 grid gap-6 lg:grid-cols-[280px_1fr]">
+          <Card padding="md">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <Skeleton key={index} className="mb-2 h-14 w-full rounded-xl" />
+            ))}
+          </Card>
+          <Card padding="lg">
+            <Skeleton className="h-5 w-64" />
+            <Skeleton className="mt-4 h-10 w-full rounded-xl" />
+            <Skeleton className="mt-3 h-10 w-full rounded-xl" />
+            <Skeleton className="mt-3 h-10 w-2/3 rounded-xl" />
+          </Card>
+        </div>
+      </div>
+    </PageShell>
+  )
+}
+
 /**
  * Page-shaped skeleton used as the single suspense/entry fallback while a
  * route's code loads. Each branch mirrors the destination page's layout.
@@ -610,6 +634,8 @@ export function RouteSkeleton() {
       return <KnowledgeBasesSkeleton />
     case '/tools':
       return <ToolsSkeleton />
+    case '/admin/mcp-tools':
+      return <AdminIntegrationsSkeleton />
     case '/privacy':
       return <PrivacySkeleton />
     case '/settings':

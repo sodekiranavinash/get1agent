@@ -1,6 +1,7 @@
 locals {
   backend_python_runtime   = "python3.14"
   layer_data_zip           = abspath("${path.module}/../../../../backend/services/layers/data/dist/layer.zip")
+  layer_ai_zip             = abspath("${path.module}/../../../../backend/services/layers/ai/dist/layer.zip")
   health_check_zip         = abspath("${path.module}/../../../../backend/services/health-check/dist/function.zip")
   account_settings_zip     = abspath("${path.module}/../../../../backend/services/account-settings/dist/function.zip")
   knowledge_bases_zip      = abspath("${path.module}/../../../../backend/services/knowledge-bases/dist/function.zip")
@@ -10,12 +11,24 @@ locals {
   ingestion_index_zip      = abspath("${path.module}/../../../../backend/services/ingestion-index/dist/function.zip")
   ingestion_fail_zip       = abspath("${path.module}/../../../../backend/services/ingestion-mark-failed/dist/function.zip")
   ingestion_watchdog_zip   = abspath("${path.module}/../../../../backend/services/ingestion-watchdog/dist/function.zip")
+  get_user_kb_zip          = abspath("${path.module}/../../../../backend/services/get-user-knowledge-bases/dist/function.zip")
+  retrieval_query_zip      = abspath("${path.module}/../../../../backend/services/retrieval-query/dist/function.zip")
+  search_user_kb_zip       = abspath("${path.module}/../../../../backend/services/search-user-knowledge-bases/dist/function.zip")
+  knowledge_mcp_zip        = abspath("${path.module}/../../../../backend/services/knowledge-mcp/dist/function.zip")
+  mcp_tester_zip           = abspath("${path.module}/../../../../backend/services/admin/mcp-tester/dist/function.zip")
 }
 
 check "layer_data_zip_exists" {
   assert {
     condition     = !var.enable_backend_lambdas || fileexists(local.layer_data_zip)
     error_message = "Backend data layer zip not found at ${local.layer_data_zip}. Run: bash infra/aws/build-backend-layers.sh"
+  }
+}
+
+check "layer_ai_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.layer_ai_zip)
+    error_message = "Backend ai layer zip not found at ${local.layer_ai_zip}. Run: bash infra/aws/build-backend-layers.sh"
   }
 }
 
@@ -82,6 +95,41 @@ check "ingestion_watchdog_zip_exists" {
   }
 }
 
+check "get_user_kb_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.get_user_kb_zip)
+    error_message = "get-user-knowledge-bases zip not found at ${local.get_user_kb_zip}. Run: make -C backend/services/get-user-knowledge-bases package"
+  }
+}
+
+check "retrieval_query_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.retrieval_query_zip)
+    error_message = "retrieval-query zip not found at ${local.retrieval_query_zip}. Run: make -C backend/services/retrieval-query package"
+  }
+}
+
+check "search_user_kb_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.search_user_kb_zip)
+    error_message = "search-user-knowledge-bases zip not found at ${local.search_user_kb_zip}. Run: make -C backend/services/search-user-knowledge-bases package"
+  }
+}
+
+check "knowledge_mcp_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.knowledge_mcp_zip)
+    error_message = "knowledge-mcp zip not found at ${local.knowledge_mcp_zip}. Run: make -C backend/services/knowledge-mcp package"
+  }
+}
+
+check "mcp_tester_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.mcp_tester_zip)
+    error_message = "mcp-tester zip not found at ${local.mcp_tester_zip}. Run: make -C backend/services/admin/mcp-tester package"
+  }
+}
+
 check "backend_lambdas_need_network_and_rds" {
   assert {
     condition     = !var.enable_backend_lambdas || (var.enable_network && var.enable_rds)
@@ -98,6 +146,17 @@ module "layer_data" {
   source_code_hash    = filebase64sha256(local.layer_data_zip)
   compatible_runtimes = [local.backend_python_runtime]
   description         = "SQLAlchemy async + asyncpg + alembic + shared/db + models"
+}
+
+module "layer_ai" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_layer"
+
+  name                = "get1agent-prod-layer-ai"
+  filename            = local.layer_ai_zip
+  source_code_hash    = filebase64sha256(local.layer_ai_zip)
+  compatible_runtimes = [local.backend_python_runtime]
+  description         = "AI/MCP shared helpers: admin/user role checks + MCP JSON-RPC client"
 }
 
 module "health_check" {
@@ -141,7 +200,7 @@ module "account_settings" {
   source_code_hash = filebase64sha256(local.account_settings_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn]
+  layer_arns       = [module.layer_data[0].arn, module.layer_ai[0].arn]
 
   memory_size = 256
   timeout     = 15
@@ -160,7 +219,7 @@ module "account_settings" {
     DB_IAM_USER = module.rds[0].db_iam_username
   }
 
-  depends_on = [module.layer_data]
+  depends_on = [module.layer_data, module.layer_ai]
 }
 
 module "knowledge_bases" {
@@ -172,7 +231,7 @@ module "knowledge_bases" {
   source_code_hash = filebase64sha256(local.knowledge_bases_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn]
+  layer_arns       = [module.layer_data[0].arn, module.layer_ai[0].arn]
 
   memory_size = 512
   timeout     = 30
@@ -195,7 +254,167 @@ module "knowledge_bases" {
     INGESTION_MODE = "sqs"
   }
 
-  depends_on = [module.layer_data, module.knowledge_storage]
+  depends_on = [module.layer_data, module.layer_ai, module.knowledge_storage]
+}
+
+module "get_user_knowledge_bases" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-get-user-knowledge-bases"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.get_user_kb_zip
+  source_code_hash = filebase64sha256(local.get_user_kb_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_data[0].arn]
+
+  memory_size = 512
+  timeout     = 30
+
+  vpc_id                     = module.network[0].vpc_id
+  subnet_ids                 = module.network[0].private_subnet_ids
+  postgres_security_group_id = module.network[0].postgres_security_group_id
+  aws_region                 = var.aws_region
+  rds_resource_id            = module.rds[0].postgres_resource_id
+  db_iam_username            = module.rds[0].db_iam_username
+
+  environment = {
+    DB_HOST     = module.rds[0].postgres_endpoint
+    DB_PORT     = tostring(module.rds[0].postgres_port)
+    DB_NAME     = module.rds[0].postgres_db_name
+    DB_IAM_USER = module.rds[0].db_iam_username
+  }
+
+  depends_on = [module.layer_data]
+}
+
+module "retrieval_query" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-retrieval-query"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.retrieval_query_zip
+  source_code_hash = filebase64sha256(local.retrieval_query_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_data[0].arn]
+
+  memory_size = 512
+  timeout     = 30
+
+  vpc_id                     = module.network[0].vpc_id
+  subnet_ids                 = module.network[0].private_subnet_ids
+  postgres_security_group_id = module.network[0].postgres_security_group_id
+  aws_region                 = var.aws_region
+  rds_resource_id            = module.rds[0].postgres_resource_id
+  db_iam_username            = module.rds[0].db_iam_username
+
+  environment = {
+    DB_HOST     = module.rds[0].postgres_endpoint
+    DB_PORT     = tostring(module.rds[0].postgres_port)
+    DB_NAME     = module.rds[0].postgres_db_name
+    DB_IAM_USER = module.rds[0].db_iam_username
+  }
+
+  depends_on = [module.layer_data]
+}
+
+module "search_user_knowledge_bases" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-search-user-knowledge-bases"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.search_user_kb_zip
+  source_code_hash = filebase64sha256(local.search_user_kb_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_data[0].arn]
+
+  memory_size = 1024
+  timeout     = 60
+
+  # Outside the VPC: embeds + reranks over the public internet, then invokes the
+  # in-VPC retrieval-query worker. Mirrors the ingestion-embed split.
+  bedrock_model_arns = [
+    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0",
+  ]
+  bedrock_rerank_arns = [
+    "arn:aws:bedrock:${var.rerank_region}::foundation-model/${var.rerank_model}",
+  ]
+  lambda_invoke_arns = [module.retrieval_query[0].function_arn]
+
+  environment = {
+    EMBED_MODE               = "bedrock"
+    BEDROCK_REGION           = var.aws_region
+    TEXT_EMBED_MODEL         = "amazon.titan-embed-text-v2:0"
+    RETRIEVAL_QUERY_FUNCTION = module.retrieval_query[0].function_name
+    RERANK_MODE              = "bedrock"
+    RERANK_REGION            = var.rerank_region
+    RERANK_MODEL_ARN         = "arn:aws:bedrock:${var.rerank_region}::foundation-model/${var.rerank_model}"
+  }
+
+  depends_on = [module.layer_data, module.retrieval_query]
+}
+
+module "knowledge_mcp" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-knowledge-mcp"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.knowledge_mcp_zip
+  source_code_hash = filebase64sha256(local.knowledge_mcp_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_ai[0].arn]
+
+  memory_size = 512
+  timeout     = 60
+
+  lambda_invoke_arns = [
+    module.get_user_knowledge_bases[0].function_arn,
+    module.search_user_knowledge_bases[0].function_arn,
+  ]
+
+  environment = {
+    GET_USER_KB_FUNCTION    = module.get_user_knowledge_bases[0].function_name
+    SEARCH_USER_KB_FUNCTION = module.search_user_knowledge_bases[0].function_name
+    AWS_REGION              = var.aws_region
+  }
+
+  depends_on = [
+    module.layer_ai,
+    module.get_user_knowledge_bases,
+    module.search_user_knowledge_bases,
+  ]
+}
+
+module "mcp_tester" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-mcp-tester"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.mcp_tester_zip
+  source_code_hash = filebase64sha256(local.mcp_tester_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_ai[0].arn]
+
+  memory_size = 512
+  timeout     = 60
+
+  lambda_invoke_arns = [module.knowledge_mcp[0].function_arn]
+
+  environment = {
+    MCP_FUNCTION = module.knowledge_mcp[0].function_name
+    AWS_REGION   = var.aws_region
+  }
+
+  depends_on = [module.layer_ai, module.knowledge_mcp]
 }
 
 module "ingestion_extract" {

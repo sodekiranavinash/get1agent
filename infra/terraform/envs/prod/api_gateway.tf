@@ -112,5 +112,26 @@ module "api_gateway" {
       lambda_function_name = module.knowledge_bases[0].function_name
       authorization_type   = "JWT"
     }
+    knowledge_mcp = {
+      method               = "POST"
+      path                 = "/mcp"
+      lambda_invoke_arn    = module.knowledge_mcp[0].invoke_arn
+      lambda_function_name = module.knowledge_mcp[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_mcp_tools = {
+      method               = "GET"
+      path                 = "/v1/admin/mcp/tools"
+      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
+      lambda_function_name = module.mcp_tester[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_mcp_call = {
+      method               = "POST"
+      path                 = "/v1/admin/mcp/call"
+      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
+      lambda_function_name = module.mcp_tester[0].function_name
+      authorization_type   = "JWT"
+    }
   } : {}
 }

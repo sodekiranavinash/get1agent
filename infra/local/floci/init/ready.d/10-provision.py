@@ -41,6 +41,8 @@ DATABASE_URL = os.environ.get(
 # Local embedding backend (real vectors, no Bedrock).
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 LOCAL_EMBED_MODEL = os.environ.get("LOCAL_EMBED_MODEL", "mxbai-embed-large")
+# Local cross-encoder reranker (TEI), mirrors Bedrock Rerank.
+RERANK_URL = os.environ.get("LOCAL_RERANK_URL", "http://reranker:80/rerank")
 
 AUTH0_ISSUER = os.environ.get("AUTH0_ISSUER", "https://get1agent.us.auth0.com/")
 AUTH0_AUDIENCE = os.environ.get("AUTH0_AUDIENCE", "https://api.get1agent.com")
@@ -60,6 +62,11 @@ FUNCTIONS = {
     "dispatcher": "get1agent-local-ingestion-dispatcher",
     "knowledge_bases": "get1agent-local-knowledge-bases",
     "account_settings": "get1agent-local-account-settings",
+    "get_user_kb": "get1agent-local-get-user-knowledge-bases",
+    "retrieval_query": "get1agent-local-retrieval-query",
+    "search_user_kb": "get1agent-local-search-user-knowledge-bases",
+    "knowledge_mcp": "get1agent-local-knowledge-mcp",
+    "mcp_tester": "get1agent-local-mcp-tester",
 }
 
 # Mirrors infra/terraform/envs/prod/api_gateway.tf.
@@ -80,6 +87,13 @@ ROUTES = {
         ("POST", "/v1/knowledge-bases/{id}/documents/{docId}/complete"),
         ("POST", "/v1/knowledge-bases/{id}/documents/{docId}/upload"),
         ("DELETE", "/v1/knowledge-bases/{id}/documents/{docId}"),
+    ],
+    "knowledge_mcp": [
+        ("POST", "/mcp"),
+    ],
+    "mcp_tester": [
+        ("GET", "/v1/admin/mcp/tools"),
+        ("POST", "/v1/admin/mcp/call"),
     ],
 }
 
@@ -208,15 +222,15 @@ def ensure_watchdog_rule(events, function_arn: str) -> None:
 # --- lambda ------------------------------------------------------------------
 
 
-def ensure_layer(lm) -> str:
-    with open(f"{ROOT}/backend/services/layers/data/dist/layer.zip", "rb") as handle:
+def ensure_layer(lm, name: str, zip_path: str) -> str:
+    with open(zip_path, "rb") as handle:
         content = handle.read()
     response = lm.publish_layer_version(
-        LayerName="get1agent-local-layer-data",
+        LayerName=name,
         Content={"ZipFile": content},
         CompatibleRuntimes=[RUNTIME],
     )
-    log(f"published data layer {response['LayerVersionArn']}")
+    log(f"published layer {name} {response['LayerVersionArn']}")
     return response["LayerVersionArn"]
 
 
@@ -392,6 +406,7 @@ def ensure_http_api(apigw, function_arns: dict[str, str]) -> str:
 def main() -> int:
     required = [
         f"{ROOT}/backend/services/layers/data/dist/layer.zip",
+        f"{ROOT}/backend/services/layers/ai/dist/layer.zip",
         f"{ROOT}/backend/services/ingestion-extract/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-embed/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-index/dist/function.zip",
@@ -400,6 +415,11 @@ def main() -> int:
         f"{ROOT}/backend/services/ingestion-dispatcher/dist/function.zip",
         f"{ROOT}/backend/services/knowledge-bases/dist/function.zip",
         f"{ROOT}/backend/services/account-settings/dist/function.zip",
+        f"{ROOT}/backend/services/get-user-knowledge-bases/dist/function.zip",
+        f"{ROOT}/backend/services/retrieval-query/dist/function.zip",
+        f"{ROOT}/backend/services/search-user-knowledge-bases/dist/function.zip",
+        f"{ROOT}/backend/services/knowledge-mcp/dist/function.zip",
+        f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
     ]
     for path in required:
         if not os.path.exists(path):
@@ -417,7 +437,16 @@ def main() -> int:
     queue_url, queue_arn = ensure_queues(sqs)
     ensure_rule(events, queue_arn)
 
-    layer_arn = ensure_layer(lm)
+    layer_arn = ensure_layer(
+        lm,
+        "get1agent-local-layer-data",
+        f"{ROOT}/backend/services/layers/data/dist/layer.zip",
+    )
+    ai_layer_arn = ensure_layer(
+        lm,
+        "get1agent-local-layer-ai",
+        f"{ROOT}/backend/services/layers/ai/dist/layer.zip",
+    )
 
     worker_env = {
         "DATABASE_URL": DATABASE_URL,
@@ -505,7 +534,7 @@ def main() -> int:
         lm,
         FUNCTIONS["knowledge_bases"],
         f"{ROOT}/backend/services/knowledge-bases/dist/function.zip",
-        layers=[layer_arn],
+        layers=[layer_arn, ai_layer_arn],
         environment=api_env,
         timeout=30,
         memory=512,
@@ -514,7 +543,7 @@ def main() -> int:
         lm,
         FUNCTIONS["account_settings"],
         f"{ROOT}/backend/services/account-settings/dist/function.zip",
-        layers=[layer_arn],
+        layers=[layer_arn, ai_layer_arn],
         environment={
             "DATABASE_URL": DATABASE_URL,
             "AWS_REGION": REGION,
@@ -524,9 +553,74 @@ def main() -> int:
         memory=512,
     )
 
+    ensure_function(
+        lm,
+        FUNCTIONS["get_user_kb"],
+        f"{ROOT}/backend/services/get-user-knowledge-bases/dist/function.zip",
+        layers=[layer_arn],
+        environment=api_env,
+        timeout=30,
+        memory=512,
+    )
+    ensure_function(
+        lm,
+        FUNCTIONS["retrieval_query"],
+        f"{ROOT}/backend/services/retrieval-query/dist/function.zip",
+        layers=[layer_arn],
+        environment=api_env,
+        timeout=30,
+        memory=512,
+    )
+    ensure_function(
+        lm,
+        FUNCTIONS["search_user_kb"],
+        f"{ROOT}/backend/services/search-user-knowledge-bases/dist/function.zip",
+        layers=[layer_arn],
+        environment={
+            **worker_env,
+            "RETRIEVAL_QUERY_FUNCTION": FUNCTIONS["retrieval_query"],
+            "RERANK_MODE": "local",
+            "LOCAL_RERANK_URL": RERANK_URL,
+        },
+        timeout=60,
+        memory=1024,
+    )
+    mcp_arn = ensure_function(
+        lm,
+        FUNCTIONS["knowledge_mcp"],
+        f"{ROOT}/backend/services/knowledge-mcp/dist/function.zip",
+        layers=[ai_layer_arn],
+        environment={
+            "GET_USER_KB_FUNCTION": FUNCTIONS["get_user_kb"],
+            "SEARCH_USER_KB_FUNCTION": FUNCTIONS["search_user_kb"],
+            "AWS_REGION": REGION,
+            "AWS_DEFAULT_REGION": REGION,
+        },
+        timeout=60,
+        memory=512,
+    )
+    mcp_tester_arn = ensure_function(
+        lm,
+        FUNCTIONS["mcp_tester"],
+        f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
+        layers=[ai_layer_arn],
+        environment={
+            "MCP_FUNCTION": FUNCTIONS["knowledge_mcp"],
+            "AWS_REGION": REGION,
+            "AWS_DEFAULT_REGION": REGION,
+        },
+        timeout=60,
+        memory=512,
+    )
+
     api_id = ensure_http_api(
         apigw,
-        {"knowledge_bases": kb_arn, "account_settings": account_arn},
+        {
+            "knowledge_bases": kb_arn,
+            "account_settings": account_arn,
+            "knowledge_mcp": mcp_arn,
+            "mcp_tester": mcp_tester_arn,
+        },
     )
 
     log("done. resources:")

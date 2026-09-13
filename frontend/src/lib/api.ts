@@ -1,5 +1,6 @@
 import { useAuth0 } from '@auth0/auth0-react'
 import { useEffect } from 'react'
+import { readActiveView } from '../auth/view'
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? 'https://api.get1agent.com'
@@ -57,6 +58,9 @@ export function createApiClient(getToken: TokenGetter): ApiClient {
       ...init,
       headers: {
         accept: 'application/json',
+        // Tells the backend which view (user/admin) this request is for; the
+        // backend validates it against the token's actual roles.
+        'x-active-view': readActiveView(),
         ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
         authorization: `Bearer ${token}`,
         ...headers,

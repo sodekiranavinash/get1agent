@@ -80,3 +80,15 @@ variable "enable_xray" {
   default     = true
   description = "X-Ray tracing on the ingestion workers and state machine (records sampled traces)"
 }
+
+variable "rerank_region" {
+  type        = string
+  default     = "us-west-2"
+  description = "Region hosting the Bedrock rerank model (not available in ap-south-1)"
+}
+
+variable "rerank_model" {
+  type        = string
+  default     = "amazon.rerank-v1:0"
+  description = "Bedrock rerank model id"
+}

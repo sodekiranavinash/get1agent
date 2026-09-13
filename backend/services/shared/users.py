@@ -64,3 +64,17 @@ async def get_or_create_user(session: AsyncSession, claims: dict[str, Any]) -> U
     )
 
     return user
+
+
+async def get_user_by_sub(session: AsyncSession, sub: str | None) -> User | None:
+    """Look up a user by Auth0 subject without creating one.
+
+    The retrieval tools run on behalf of an already-onboarded user; a missing
+    row is a caller error, not a reason to provision an account.
+    """
+    normalized = str(sub or "").strip()
+    if not normalized:
+        return None
+    return (
+        await session.execute(select(User).where(User.auth0_sub == normalized))
+    ).scalar_one_or_none()

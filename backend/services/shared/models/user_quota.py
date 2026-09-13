@@ -12,12 +12,12 @@ if TYPE_CHECKING:
     from shared.models.user import User
 
 # User-level defaults. Rows in `user_quotas` override these per user.
-# Up to 20 knowledge bases x 20 files x 20 MB, capped at 200 MB storage/user.
-DEFAULT_MAX_KNOWLEDGE_BASES = 20
-DEFAULT_MAX_FILES_PER_KB = 20
-DEFAULT_MAX_FILES_PER_USER = 400
-DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MB
-DEFAULT_MAX_STORAGE_BYTES = 200 * 1024 * 1024  # 200 MB
+# Up to 10 knowledge bases x 25 files x 10 MB, capped at 100 MB storage/user.
+DEFAULT_MAX_KNOWLEDGE_BASES = 10
+DEFAULT_MAX_FILES_PER_KB = 25
+DEFAULT_MAX_FILES_PER_USER = 250
+DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+DEFAULT_MAX_STORAGE_BYTES = 100 * 1024 * 1024  # 100 MB
 
 
 class UserQuota(Base, TimestampMixin):
@@ -44,27 +44,27 @@ class UserQuota(Base, TimestampMixin):
     max_file_bytes: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,
-        server_default=text("20971520"),
+        server_default=text("10485760"),
     )
     max_files_per_kb: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        server_default=text("20"),
+        server_default=text("25"),
     )
     max_knowledge_bases: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        server_default=text("20"),
+        server_default=text("10"),
     )
     max_files_per_user: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        server_default=text("400"),
+        server_default=text("250"),
     )
     max_storage_bytes: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,
-        server_default=text("209715200"),
+        server_default=text("104857600"),
     )
 
     user: Mapped[User] = relationship("User", back_populates="quota")

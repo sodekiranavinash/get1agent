@@ -15,6 +15,12 @@ backend/
 infra/             Terraform, deploy scripts, local Floci stack + migrations
 ```
 
+## Current status
+
+- Bedrock model quota limits are currently hit; a support ticket has been raised.
+  Continue app development against the code we already have (local Floci with
+  `EMBED_MODE=local`); do not block on Bedrock.
+
 ## Architecture
 
 - Frontend talks to API Gateway only; never directly to RDS.
@@ -77,6 +83,88 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - No CloudWatch alarms are provisioned (monitoring will live in an admin panel).
 - X-Ray (`enable_xray`, default true) traces the ingestion workers + state
   machine. Lambda log retention is 7 days (`log_retention_days`).
+
+### Retrieval & MCP tools
+
+- Two agent tools, plus an internal worker, share code in
+  `backend/services/shared/retrieval/` (bundled in the data layer):
+  - `get-user-knowledge-bases` (in VPC) — resolves the caller's knowledge bases
+    by name/id and returns KBs, documents, and tags. Metadata only, no search.
+  - `search-user-knowledge-bases` (**outside** VPC) — embeds the query (Titan V2
+    prod / Ollama local), invokes `retrieval-query`, optionally reranks, and
+    shapes chunks + sources.
+  - `retrieval-query` (in VPC) — internal only; resolves the user + KBs and runs
+    hybrid search. Never exposed to the agent.
+- **Hybrid search is always on**: a pgvector cosine leg (`chunks.embedding`,
+  HNSW) and a Postgres FTS leg (`chunks.content_tsv`, generated `tsvector` +
+  GIN) are fused with Reciprocal Rank Fusion, then hydrated with `ts_headline`
+  snippets. `documents.status = 'ready'` is always required. The lexical leg
+  builds an **OR/prefix** tsquery (`personal:* | project:*`); the default
+  `websearch_to_tsquery` ANDs every term and effectively disables the leg for
+  natural-language questions.
+- **Small-to-big retrieval**: only the small child chunks are embedded and
+  searched. Each child points at a `document_parents` row — a PDF source page
+  (a huge page becomes several parents sharing the page number), or a
+  fixed-size window for non-paginated formats. Results return the parent's full
+  `content` for context, the precise `matchedContent` child, and the child's
+  highlighted `snippet`; parents are deduplicated per document/page. Default
+  child size is **384 tokens** with 64 overlap, so children always fit every
+  embedder window (`mxbai-embed-large` truncates past 512).
+- **Rerank is opt-in** (`rerank: true`) and uses Bedrock Rerank
+  (`amazon.rerank-v1:0`, `us-west-2` — not available in `ap-south-1`) from the
+  outside-VPC orchestrator. Locally `RERANK_MODE=local` calls a HuggingFace TEI
+  cross-encoder (`reranker` container, `POST /rerank`); if it is unreachable the
+  RRF order is returned instead of failing the search.
+- **Identity is passed in the event** (`auth0Sub`), not a JWT: the tools are
+  invoked directly via `lambda:InvokeFunction` (no API Gateway routes). Only the
+  caller's IAM role may invoke them.
+- `knowledge-mcp` is the MCP server (`awslabs.mcp-lambda-handler`, stateless)
+  exposing both tools over `POST /mcp` behind the Auth0 JWT authorizer, and via
+  the direct Lambda invoke transport. It reads `auth0Sub` from the JWT claims
+  and forwards it to the tool Lambdas.
+- Knowledge base names follow **S3-bucket-style rules** (lowercase letters,
+  digits and hyphens; 3–63 chars; must start/end alphanumeric) and are unique
+  per user (`uq_knowledge_bases_user_name`); the create handler returns `409` on
+  a duplicate. Per-user limits: **30 knowledge bases, 50 files each, 100 MB
+  storage** (`shared/models/user_quota.py`, migration `0007_quota_limits`).
+
+### Admin console & strict role separation
+
+- **Admin** is an Auth0 role. The Login Action copies `event.authorization.roles`
+  onto namespaced custom claims on both tokens:
+  `https://get1agent.com/roles` and `https://get1agent.com/isAdmin`. Assign the
+  `admin` role to a user in Auth0; re-login refreshes the tokens.
+- Shared role logic lives in the **`ai` Lambda layer**
+  (`backend/services/layers/ai/ai/auth.py`): `is_admin_claims`, `require_admin`
+  (admin Lambdas) and `require_user` (user Lambdas). The layer also holds the
+  thin MCP JSON-RPC client (`ai/mcp_client.py`).
+- **View-based access, enforced server-side** — the frontend is only a UX gate.
+  A user with several roles (e.g. `admin`) picks a **view** after login; the
+  SPA sends it on every request as `x-active-view` (`user` | `admin`), and the
+  backend validates it against the token's real roles:
+  - `require_user` (user view): `knowledge-bases`, `account-settings`, and the
+    `knowledge-mcp` **HTTP** path. An admin who chose the user view is allowed,
+    which is how they add data before testing it.
+  - `require_admin` (admin view): `mcp-tester`. A normal user can never set the
+    admin view.
+  - No header → falls back to `admin` if the token has the admin role, else
+    `user` (keeps direct invokes/curl working).
+- Admin code is kept separate: frontend UI under `frontend/src/admin/`, backend
+  Lambda under `backend/services/admin/mcp-tester/`. The shared role/view logic
+  lives in `frontend/src/auth/` and `backend/services/layers/ai/ai/auth.py`.
+- Frontend routing (`frontend/src/App.tsx`): `RequireAuth` → `SelectViewPage`
+  (`/select-view`, shown when more than one view is available) → `RequireUser`
+  (main app) or `RequireAdmin` (`/admin`). `RoleRedirect` sends `/` and
+  `/administration` to the selected view's home. A fresh Auth0 login clears the
+  stored view; reloads keep it. The account menu has **Switch view**.
+- **`mcp-tester`** (`GET /v1/admin/mcp/tools`, `POST /v1/admin/mcp/call`) is the
+  MCP *client*: it reads the admin claim + `sub`, builds MCP JSON-RPC, and
+  invokes `knowledge-mcp` over its direct-invoke transport. The admin UI
+  (`frontend/src/admin/pages/AdminIntegrationsPage.tsx`) lists tools via
+  `tools/list`, renders an argument form from each tool's `inputSchema`, and
+  shows the raw request/response.
+- The `ai` layer has **no third-party dependencies** (stdlib + boto3 from the
+  runtime), so `knowledge-mcp` stays lightweight while gaining role checks.
 
 ## Conventions
 
@@ -163,6 +251,11 @@ make floci-down       # stop and remove
 - Ingestion runs with `EMBED_MODE=local`: real 1024-dim vectors from an Ollama
   container (`mxbai-embed-large`), so no Bedrock is needed. `make floci` pulls
   the model; `EMBED_MODE=bedrock` (production) uses Titan instead.
+- Rerank runs with `RERANK_MODE=local`: a HuggingFace TEI container
+  (`reranker`, `POST /rerank`) scores candidates with a cross-encoder
+  (`cross-encoder/ms-marco-MiniLM-L6-v2` by default, configurable via
+  `LOCAL_RERANK_MODEL`). `make floci` starts it and waits for `/health`.
+  `RERANK_MODE=bedrock` (production) uses Amazon Rerank instead.
 - After changing Lambda code: `make floci-build` then `make floci-up`
   (provisioning is re-run on every boot).
 - `infra/scripts/migrate.sh` still handles generic local migrations; `make

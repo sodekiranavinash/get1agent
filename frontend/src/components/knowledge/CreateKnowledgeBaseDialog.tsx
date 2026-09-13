@@ -8,26 +8,25 @@ import {
   FilePlus2,
   Loader2,
   PenLine,
-  Scissors,
   Upload,
   X,
 } from 'lucide-react'
 import { Dialog } from '../ui/Dialog'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
-import { Segmented } from '../ui/Segmented'
 import { FileDropzone } from './FileDropzone'
 import { TagEditor } from './TagEditor'
 import { useApiClient } from '../../lib/api'
 import {
-  CHUNK_OVERLAPS,
-  CHUNK_SIZES,
+  CHUNK_OVERLAP_POINTS,
+  CHUNK_SIZE_POINTS,
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CHUNK_SIZE,
   MAX_DESCRIPTION_LENGTH,
   MAX_FILES_PER_KB,
   MAX_FILE_BYTES,
   MAX_NAME_LENGTH,
+  MAX_OVERLAP_RATIO,
   completeUpload,
   createInlineDocument,
   createKnowledgeBase,
@@ -39,6 +38,7 @@ import {
   uploadToPresignedUrl,
   useTagSuggestions,
   validateFile,
+  validateKnowledgeBaseName,
   type DocumentTag,
 } from '../../lib/knowledgeBases'
 
@@ -93,6 +93,51 @@ function readFileAsText(file: File): Promise<string> {
   })
 }
 
+type PointOption = {
+  value: string | number
+  label: string
+  disabled?: boolean
+}
+
+type PointSelectorProps = {
+  options: PointOption[]
+  value: string | number
+  disabled?: boolean
+  onChange: (value: string | number) => void
+}
+
+/** Evenly-spaced, selectable points (no free-form values). */
+function PointSelector({
+  options,
+  value,
+  disabled = false,
+  onChange,
+}: PointSelectorProps) {
+  return (
+    <div className="flex gap-1">
+      {options.map((option) => {
+        const active = value === option.value
+        const blocked = disabled || option.disabled
+        return (
+          <button
+            key={String(option.value)}
+            type="button"
+            disabled={blocked}
+            onClick={() => onChange(option.value)}
+            className={`flex-1 rounded-lg border px-1.5 py-1.5 text-[11px] font-semibold tabular-nums transition-colors ${
+              active
+                ? 'border-accent/40 bg-accent-soft text-accent'
+                : 'border-border bg-raised text-muted hover:border-accent/25 hover:text-foreground'
+            } ${blocked ? 'cursor-not-allowed opacity-40' : ''}`}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export function CreateKnowledgeBaseDialog({
   open,
   onOpenChange,
@@ -122,6 +167,19 @@ export function CreateKnowledgeBaseDialog({
   const [chunkOverlap, setChunkOverlap] = useState<number>(
     DEFAULT_CHUNK_OVERLAP,
   )
+
+  const maxOverlap = Math.floor(chunkSize * MAX_OVERLAP_RATIO)
+
+  const selectChunkSize = (next: number) => {
+    setChunkSize(next)
+    const limit = Math.floor(next * MAX_OVERLAP_RATIO)
+    if (chunkOverlap > limit) {
+      const fallback = [...CHUNK_OVERLAP_POINTS]
+        .filter((point) => point <= limit)
+        .pop()
+      setChunkOverlap(fallback ?? 0)
+    }
+  }
 
   useEffect(() => {
     if (!open) return
@@ -288,10 +346,13 @@ export function CreateKnowledgeBaseDialog({
   const handleSubmit = async () => {
     setError(null)
     setNameInvalid(false)
-    if (!addingToExisting && !name.trim()) {
-      setNameInvalid(true)
-      setError('Knowledge base name is required')
-      return
+    if (!addingToExisting) {
+      const nameError = validateKnowledgeBaseName(name)
+      if (nameError) {
+        setNameInvalid(true)
+        setError(nameError)
+        return
+      }
     }
     if (hasWrittenContent && hasUploads) {
       setError('Use either written files or uploads, not both')
@@ -455,13 +516,16 @@ export function CreateKnowledgeBaseDialog({
                   setError(null)
                 }
               }}
-              placeholder="e.g. Product Documentation"
+              placeholder="e.g. product-documentation"
               maxLength={MAX_NAME_LENGTH}
               disabled={Boolean(kbId)}
               className={`h-10 w-full rounded-xl border bg-canvas px-3 text-sm text-foreground outline-none transition-colors placeholder:text-subtle focus:border-accent/50 disabled:opacity-60 ${
                 nameInvalid ? 'border-warning' : 'border-border'
               }`}
             />
+            <p className="mt-1.5 text-[11px] text-subtle">
+              Lowercase letters, numbers and hyphens only (3–63 characters).
+            </p>
           </label>
           <label className="block">
             <span className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted">
@@ -487,42 +551,53 @@ export function CreateKnowledgeBaseDialog({
         ) : null}
 
         {!addingToExisting ? (
-        <div className="rounded-xl border border-border bg-raised/30 p-3">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted">
-            <Scissors className="h-3.5 w-3.5" />
-            Chunking
-          </div>
+        <details className="rounded-xl border border-border bg-raised/30 px-3 py-2">
+          <summary className="cursor-pointer text-[11px] font-medium text-subtle transition-colors select-none hover:text-muted">
+            Advanced · chunking ({chunkSize} / {chunkOverlap})
+          </summary>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <div>
-              <span className="mb-1.5 block text-[11px] font-medium text-muted">
-                Chunk size (tokens)
-              </span>
-              <Segmented
-                options={CHUNK_SIZES}
+            <div className="rounded-lg border border-border bg-surface/40 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-medium text-muted">
+                  Chunk size
+                </span>
+                <span className="text-[11px] font-semibold tabular-nums text-foreground">
+                  {chunkSize} tokens
+                </span>
+              </div>
+              <PointSelector
+                options={CHUNK_SIZE_POINTS.map((value) => ({
+                  value,
+                  label: String(value),
+                }))}
                 value={chunkSize}
-                onChange={setChunkSize}
-                size="sm"
                 disabled={Boolean(kbId)}
+                onChange={(next) => selectChunkSize(Number(next))}
               />
             </div>
-            <div>
-              <span className="mb-1.5 block text-[11px] font-medium text-muted">
-                Chunk overlap (tokens)
-              </span>
-              <Segmented
-                options={CHUNK_OVERLAPS}
+
+            <div className="rounded-lg border border-border bg-surface/40 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-medium text-muted">
+                  Chunk overlap
+                </span>
+                <span className="text-[11px] font-semibold tabular-nums text-foreground">
+                  {chunkOverlap} tokens
+                </span>
+              </div>
+              <PointSelector
+                options={CHUNK_OVERLAP_POINTS.map((value) => ({
+                  value,
+                  label: String(value),
+                  disabled: value > maxOverlap,
+                }))}
                 value={chunkOverlap}
-                onChange={setChunkOverlap}
-                size="sm"
                 disabled={Boolean(kbId)}
+                onChange={(next) => setChunkOverlap(Number(next))}
               />
             </div>
           </div>
-          <p className="mt-2 text-[11px] leading-relaxed text-subtle">
-            Fixed at creation — every file in this knowledge base follows the
-            same chunking.
-          </p>
-        </div>
+        </details>
         ) : null}
 
         <div className="inline-flex rounded-xl border border-border bg-raised/40 p-1">

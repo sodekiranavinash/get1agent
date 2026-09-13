@@ -145,6 +145,38 @@ resource "aws_iam_role_policy" "bedrock_access" {
   })
 }
 
+resource "aws_iam_role_policy" "bedrock_rerank" {
+  count = length(var.bedrock_rerank_arns) > 0 ? 1 : 0
+  name  = "${var.name}-bedrock-rerank"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "RerankModels"
+      Effect   = "Allow"
+      Action   = ["bedrock:Rerank"]
+      Resource = var.bedrock_rerank_arns
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "lambda_invoke" {
+  count = length(var.lambda_invoke_arns) > 0 ? 1 : 0
+  name  = "${var.name}-lambda-invoke"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "InvokeFunctions"
+      Effect   = "Allow"
+      Action   = ["lambda:InvokeFunction"]
+      Resource = var.lambda_invoke_arns
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "xray" {
   count = var.tracing_mode == "Active" ? 1 : 0
   name  = "${var.name}-xray"

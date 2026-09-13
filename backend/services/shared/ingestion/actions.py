@@ -129,6 +129,12 @@ async def extract_action(event: dict[str, Any]) -> dict[str, Any]:
             f"{extracted.chunk_count} chunk"
             f"{'s' if extracted.chunk_count != 1 else ''} "
             f"· {config.chunk_size}/{config.chunk_overlap}"
+            + (
+                f" · {extracted.parent_count} page/window"
+                f"{'s' if extracted.parent_count != 1 else ''}"
+                if extracted.parent_count
+                else ""
+            )
         ),
         details=extracted.chunk_stats,
     )
@@ -255,9 +261,10 @@ async def index_action(event: dict[str, Any]) -> dict[str, Any]:
         details={
             "vectors": indexed.chunk_count + indexed.image_count,
             "chunks": indexed.chunk_count,
+            "parents": indexed.parent_count,
             "images": indexed.image_count,
             "dimension": config.embedding_dim,
-            "tables": ["chunks", "document_images"],
+            "tables": ["chunks", "document_parents", "document_images"],
         },
     )
     logger.info(
@@ -268,7 +275,11 @@ async def index_action(event: dict[str, Any]) -> dict[str, Any]:
             "stage": "indexed",
         },
     )
-    return {"chunkCount": indexed.chunk_count, "imageCount": indexed.image_count}
+    return {
+        "chunkCount": indexed.chunk_count,
+        "imageCount": indexed.image_count,
+        "parentCount": indexed.parent_count,
+    }
 
 
 async def mark_failed_action(event: dict[str, Any]) -> dict[str, Any]:

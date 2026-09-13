@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select, text
 
 from shared.db.session import get_session
-from shared.ingestion.chunking import chunk_text
+from shared.ingestion.chunking import chunk_parents
 from shared.ingestion.config import IngestionConfig, load_config
 from shared.ingestion.embeddings import embed_images, embed_texts
 from shared.ingestion.extractors import Extraction, extract
@@ -30,15 +30,30 @@ _IMAGE_CONTENT_TYPES = {
     "webp": "image/webp",
 }
 
+_INSERT_PARENT = text(
+    """
+    INSERT INTO document_parents (
+        document_id, knowledge_base_id, user_id, ordinal, page, page_end,
+        content, token_count
+    )
+    VALUES (
+        :document_id, :knowledge_base_id, :user_id, :ordinal, :page, :page_end,
+        :content, :token_count
+    )
+    RETURNING id
+    """
+)
+
 _INSERT_CHUNK = text(
     """
     INSERT INTO chunks (
         document_id, knowledge_base_id, user_id, ordinal, chunk_hash,
-        content, token_count, embedding
+        content, token_count, page, page_end, parent_id, embedding
     )
     VALUES (
         :document_id, :knowledge_base_id, :user_id, :ordinal, :chunk_hash,
-        :content, :token_count, CAST(CAST(:embedding AS text) AS vector)
+        :content, :token_count, :page, :page_end, :parent_id,
+        CAST(CAST(:embedding AS text) AS vector)
     )
     ON CONFLICT (document_id, chunk_hash) DO NOTHING
     """
@@ -75,6 +90,10 @@ class ExtractedDocument:
     def chunk_count(self) -> int:
         return int(self.chunk_stats.get("chunks", 0))
 
+    @property
+    def parent_count(self) -> int:
+        return int(self.chunk_stats.get("parents", 0))
+
 
 @dataclass
 class EmbeddedDocument:
@@ -92,6 +111,7 @@ class EmbeddedDocument:
 class IndexedDocument:
     chunk_count: int
     image_count: int
+    parent_count: int = 0
 
 
 def _as_uuid(value: str | uuid.UUID) -> uuid.UUID:
@@ -104,6 +124,32 @@ def _vector_literal(values: list[float]) -> str:
 
 def _derived_prefix(user_id: str, kb_id: str, document_id: str) -> str:
     return f"{user_id}/{kb_id}/{document_id}/{DERIVED_DIR}"
+
+
+def _chunk_records(payload: dict) -> list[dict]:
+    """Normalize a staged ``chunks.json`` payload into chunk records.
+
+    Newer payloads store ``{"text", "page", "pageEnd", "parentOrdinal"}``
+    objects; older in-flight executions stored bare strings, so accept both.
+    """
+    records: list[dict] = []
+    for item in payload.get("chunks") or []:
+        if isinstance(item, dict):
+            records.append(item)
+        else:
+            records.append(
+                {"text": item, "page": None, "pageEnd": None, "parentOrdinal": None}
+            )
+    return records
+
+
+def _parent_records(payload: dict) -> list[dict]:
+    """Normalize a staged ``chunks.json`` payload into parent records."""
+    return [
+        item
+        for item in payload.get("parents") or []
+        if isinstance(item, dict) and item.get("text")
+    ]
 
 
 async def load_config_for_knowledge_base(
@@ -317,17 +363,48 @@ def extract_document(
     # Chunking is pure CPU: do it here (the extract worker is in the VPC and
     # already loaded the per-KB chunk settings) so the embed worker can stay
     # outside the VPC and just turn text into vectors.
-    chunks = chunk_text(extraction.text, config.chunk_size, config.chunk_overlap)
+    # PDFs carry per-page text, so chunks are tagged with the source page range
+    # that retrieval citations can link back to. Other formats have no pages.
+    # Small-to-big: embed/search the small children, but return the page (PDF)
+    # or a fixed-size window (other formats) as context once a child matches.
+    parents = chunk_parents(
+        extraction.text,
+        chunk_size=config.chunk_size,
+        overlap=config.chunk_overlap,
+        parent_size=config.parent_size,
+        page_texts=extraction.page_texts,
+    )
+    parent_records: list[dict] = []
+    chunk_records: list[dict] = []
+    for ordinal, parent in enumerate(parents):
+        parent_records.append(
+            {
+                "ordinal": ordinal,
+                "page": parent.page,
+                "pageEnd": parent.page_end,
+                "text": parent.text,
+            }
+        )
+        for child in parent.children:
+            chunk_records.append(
+                {
+                    "text": child.text,
+                    "page": child.page,
+                    "pageEnd": child.page_end,
+                    "parentOrdinal": ordinal,
+                }
+            )
     chunks_key = f"{prefix}/{CHUNKS_FILENAME}"
     storage.put_bytes(
         chunks_key,
-        json.dumps({"chunks": chunks}).encode("utf-8"),
+        json.dumps({"parents": parent_records, "chunks": chunk_records}).encode("utf-8"),
         "application/json",
     )
     chunk_stats = {
-        "chunks": len(chunks),
-        "characters": sum(len(chunk) for chunk in chunks),
-        "tokens": sum(max(1, len(chunk) // 4) for chunk in chunks),
+        "chunks": len(chunk_records),
+        "parents": len(parent_records),
+        "characters": sum(len(record["text"]) for record in chunk_records),
+        "tokens": sum(max(1, len(record["text"]) // 4) for record in chunk_records),
         "chunkSize": config.chunk_size,
         "chunkOverlap": config.chunk_overlap,
     }
@@ -373,7 +450,8 @@ def embed_document(
     worker to persist.
     """
     payload = json.loads(storage.get_bytes(chunks_key).decode("utf-8"))
-    chunks = payload.get("chunks") or []
+    records = _chunk_records(payload)
+    chunks = [record["text"] for record in records]
     chunk_vectors = embed_texts(chunks, config)
 
     image_vectors: list[list[float]] = []
@@ -416,9 +494,9 @@ async def index_document(
     images: list[dict],
 ) -> IndexedDocument:
     """Persist the embed stage's vectors (and chunk text) into pgvector."""
-    chunks = json.loads(storage.get_bytes(chunks_key).decode("utf-8")).get(
-        "chunks"
-    ) or []
+    payload = json.loads(storage.get_bytes(chunks_key).decode("utf-8"))
+    records = _chunk_records(payload)
+    parents = _parent_records(payload)
     artifact = json.loads(storage.get_bytes(embeddings_key).decode("utf-8"))
     chunk_vectors = artifact.get("chunkVectors") or []
     image_vectors = artifact.get("imageVectors") or []
@@ -450,15 +528,41 @@ async def index_document(
     user_uuid = _as_uuid(user_id)
 
     async with get_session() as session:
+        # Children reference parents, so clear them first (parents also cascade).
         await session.execute(
             text("DELETE FROM chunks WHERE document_id = :id"), {"id": document_uuid}
+        )
+        await session.execute(
+            text("DELETE FROM document_parents WHERE document_id = :id"),
+            {"id": document_uuid},
         )
         await session.execute(
             text("DELETE FROM document_images WHERE document_id = :id"),
             {"id": document_uuid},
         )
 
-        for ordinal, (chunk, vector) in enumerate(zip(chunks, chunk_vectors)):
+        # Insert parents first and remember ordinal -> id for the children.
+        parent_ids: dict[int, int] = {}
+        for parent in parents:
+            ordinal = int(parent.get("ordinal", len(parent_ids)))
+            result = await session.execute(
+                _INSERT_PARENT,
+                {
+                    "document_id": document_uuid,
+                    "knowledge_base_id": kb_uuid,
+                    "user_id": user_uuid,
+                    "ordinal": ordinal,
+                    "page": parent.get("page"),
+                    "page_end": parent.get("pageEnd"),
+                    "content": parent["text"],
+                    "token_count": max(1, len(parent["text"]) // 4),
+                },
+            )
+            parent_ids[ordinal] = result.scalar_one()
+
+        for ordinal, (record, vector) in enumerate(zip(records, chunk_vectors)):
+            chunk = record["text"]
+            parent_ordinal = record.get("parentOrdinal")
             await session.execute(
                 _INSERT_CHUNK,
                 {
@@ -469,6 +573,13 @@ async def index_document(
                     "chunk_hash": hashlib.sha256(chunk.encode("utf-8")).hexdigest(),
                     "content": chunk,
                     "token_count": max(1, len(chunk) // 4),
+                    "page": record.get("page"),
+                    "page_end": record.get("pageEnd"),
+                    "parent_id": (
+                        parent_ids.get(int(parent_ordinal))
+                        if parent_ordinal is not None
+                        else None
+                    ),
                     "embedding": _vector_literal(vector),
                 },
             )
@@ -491,4 +602,8 @@ async def index_document(
 
         await session.commit()
 
-    return IndexedDocument(chunk_count=len(chunks), image_count=len(image_vectors))
+    return IndexedDocument(
+        chunk_count=len(records),
+        image_count=len(image_vectors),
+        parent_count=len(parents),
+    )

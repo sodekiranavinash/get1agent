@@ -13,8 +13,17 @@ DEFAULT_LOCAL_EMBED_URL = "http://ollama:11434"
 # (frontend/src/lib/knowledgeBases.ts).
 SUPPORTED_TEXT_EMBED_MODELS = (DEFAULT_TEXT_EMBED_MODEL,)
 SUPPORTED_IMAGE_EMBED_MODELS = (DEFAULT_IMAGE_EMBED_MODEL,)
-SUPPORTED_CHUNK_SIZES = (512, 1024, 2048)
-SUPPORTED_CHUNK_OVERLAPS = (0, 128, 256)
+SUPPORTED_CHUNK_SIZES = (256, 384, 512, 768, 1024)
+SUPPORTED_CHUNK_OVERLAPS = (0, 32, 64, 128, 256)
+
+# Child chunks are embedded and searched; parents are returned for context.
+# 512 is the research-backed default (Azure/Pinecone) and stays within every
+# embedder window in production (Titan V2); local mxbai truncates past 512.
+DEFAULT_CHUNK_SIZE = 512
+DEFAULT_CHUNK_OVERLAP = 64
+# Fixed-size parent window for non-paginated formats. Paginated formats use the
+# source page as the parent instead.
+DEFAULT_PARENT_SIZE = 1500
 
 
 def _int(name: str, default: int) -> int:
@@ -35,6 +44,7 @@ class IngestionConfig:
     embedding_dim: int
     chunk_size: int
     chunk_overlap: int
+    parent_size: int
     max_images_per_doc: int
     min_image_bytes: int
     min_image_dimension: int
@@ -63,8 +73,9 @@ def load_config() -> IngestionConfig:
             "IMAGE_EMBED_MODEL", DEFAULT_IMAGE_EMBED_MODEL
         ),
         embedding_dim=_int("EMBED_DIM", DEFAULT_EMBEDDING_DIM),
-        chunk_size=_int("CHUNK_SIZE", 1024),
-        chunk_overlap=_int("CHUNK_OVERLAP", 128),
+        chunk_size=_int("CHUNK_SIZE", DEFAULT_CHUNK_SIZE),
+        chunk_overlap=_int("CHUNK_OVERLAP", DEFAULT_CHUNK_OVERLAP),
+        parent_size=_int("PARENT_SIZE", DEFAULT_PARENT_SIZE),
         max_images_per_doc=_int("MAX_IMAGES_PER_DOC", 50),
         min_image_bytes=_int("MIN_IMAGE_BYTES", 5 * 1024),
         min_image_dimension=_int("MIN_IMAGE_DIMENSION", 100),

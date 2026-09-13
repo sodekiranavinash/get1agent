@@ -128,6 +128,18 @@ variable "bedrock_model_arns" {
   description = "Bedrock model ARNs this Lambda may invoke"
 }
 
+variable "bedrock_rerank_arns" {
+  type        = list(string)
+  default     = []
+  description = "Bedrock rerank model ARNs this Lambda may call with bedrock:Rerank"
+}
+
+variable "lambda_invoke_arns" {
+  type        = list(string)
+  default     = []
+  description = "Lambda function ARNs this Lambda may invoke"
+}
+
 variable "event_source_queue_arn" {
   type        = string
   default     = ""

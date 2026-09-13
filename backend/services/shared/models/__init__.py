@@ -2,6 +2,7 @@ from shared.models.base import Base
 from shared.models.chunk import Chunk
 from shared.models.document import Document
 from shared.models.document_image import DocumentImage
+from shared.models.document_parent import DocumentParent
 from shared.models.document_tag import DocumentTag
 from shared.models.ingestion_event import IngestionEvent
 from shared.models.knowledge_base import KnowledgeBase
@@ -15,6 +16,7 @@ __all__ = [
     "Chunk",
     "Document",
     "DocumentImage",
+    "DocumentParent",
     "DocumentTag",
     "IngestionEvent",
     "KnowledgeBase",

@@ -10,14 +10,14 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
+from ai.auth import AuthError, require_user
 from shared.db.engine import run_async
 from shared.db.session import get_session
 from shared.ingestion import emit_event, load_config
 from shared.ingestion.config import (
-    SUPPORTED_CHUNK_OVERLAPS,
-    SUPPORTED_CHUNK_SIZES,
     SUPPORTED_IMAGE_EMBED_MODELS,
     SUPPORTED_TEXT_EMBED_MODELS,
 )
@@ -240,17 +240,54 @@ def _validated_name(value: Any, label: str) -> str:
     return name
 
 
-def _validated_choice(
-    value: Any, allowed: tuple[int, ...], label: str, default: int
+# Knowledge base names follow S3-bucket-style rules so they are URL/command
+# friendly and unambiguous when referenced by name from the MCP tools.
+KB_NAME_MIN = 3
+KB_NAME_MAX = 63
+_KB_NAME_CHARS = re.compile(r"^[a-z0-9-]+$")
+_KB_NAME_EDGES = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+
+
+def _validated_kb_name(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ApiError(400, "Knowledge base name is required")
+    name = value.strip()
+    if len(name) < KB_NAME_MIN:
+        raise ApiError(400, f"Name must be at least {KB_NAME_MIN} characters")
+    if len(name) > KB_NAME_MAX:
+        raise ApiError(400, f"Name must be at most {KB_NAME_MAX} characters")
+    if not _KB_NAME_CHARS.match(name):
+        raise ApiError(
+            400,
+            "Name can only contain lowercase letters, numbers and hyphens "
+            "(no spaces or special characters)",
+        )
+    if not _KB_NAME_EDGES.match(name):
+        raise ApiError(400, "Name must start and end with a letter or number")
+    return name
+
+
+# Chunking bounds. The UI offers presets but any value in range is accepted so
+# a knowledge base can be tuned to its content (see the create dialog help).
+MIN_CHUNK_SIZE = 128
+MAX_CHUNK_SIZE = 4096
+MIN_CHUNK_OVERLAP = 0
+MAX_CHUNK_OVERLAP = 2048
+
+
+def _validated_int_range(
+    value: Any, label: str, default: int, minimum: int, maximum: int
 ) -> int:
     if value is None or value == "":
         return default
     try:
         number = int(value)
     except (TypeError, ValueError) as exc:
-        raise ApiError(400, f"{label} must be one of {list(allowed)}") from exc
-    if number not in allowed:
-        raise ApiError(400, f"{label} must be one of {list(allowed)}")
+        raise ApiError(400, f"{label} must be a whole number") from exc
+    if number < minimum or number > maximum:
+        raise ApiError(
+            400, f"{label} must be between {minimum} and {maximum} tokens"
+        )
     return number
 
 
@@ -612,10 +649,39 @@ async def _handle_create(claims: dict[str, Any], body: dict[str, Any]) -> dict[s
                 400,
                 f"Description must be at most {MAX_DESCRIPTION_LENGTH} characters",
             )
+        name = _validated_kb_name(body.get("name"))
+        duplicate = (
+            await session.execute(
+                select(KnowledgeBase.id)
+                .where(
+                    KnowledgeBase.user_id == user.id,
+                    func.lower(KnowledgeBase.name) == name.lower(),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if duplicate is not None:
+            raise ApiError(409, f'A knowledge base named "{name}" already exists')
         defaults = load_config()
+        chunk_size = _validated_int_range(
+            body.get("chunkSize"),
+            "chunkSize",
+            defaults.chunk_size,
+            MIN_CHUNK_SIZE,
+            MAX_CHUNK_SIZE,
+        )
+        chunk_overlap = _validated_int_range(
+            body.get("chunkOverlap"),
+            "chunkOverlap",
+            defaults.chunk_overlap,
+            MIN_CHUNK_OVERLAP,
+            MAX_CHUNK_OVERLAP,
+        )
+        if chunk_overlap >= chunk_size:
+            raise ApiError(400, "chunkOverlap must be smaller than chunkSize")
         kb = KnowledgeBase(
             user_id=user.id,
-            name=_validated_name(body.get("name"), "name"),
+            name=name,
             description=description or None,
             status="ready",
             embed_model=_validated_model(
@@ -631,21 +697,18 @@ async def _handle_create(claims: dict[str, Any], body: dict[str, Any]) -> dict[s
                 defaults.image_embed_model,
             ),
             embedding_dim=defaults.embedding_dim,
-            chunk_size=_validated_choice(
-                body.get("chunkSize"),
-                SUPPORTED_CHUNK_SIZES,
-                "chunkSize",
-                defaults.chunk_size,
-            ),
-            chunk_overlap=_validated_choice(
-                body.get("chunkOverlap"),
-                SUPPORTED_CHUNK_OVERLAPS,
-                "chunkOverlap",
-                defaults.chunk_overlap,
-            ),
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
         session.add(kb)
-        await session.flush()
+        try:
+            await session.flush()
+        except IntegrityError as exc:
+            # The unique (user_id, lower(name)) index catches a concurrent create.
+            await session.rollback()
+            raise ApiError(
+                409, f'A knowledge base named "{name}" already exists'
+            ) from exc
         payload = _serialize_knowledge_base(kb, 0)
         await session.commit()
         return _json(201, payload)
@@ -933,6 +996,11 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
     claims = _claims(event)
     if not claims:
         return _json(401, {"error": "Unauthorized"})
+    # Strict separation: admins must be in the user view to use this API.
+    try:
+        require_user(claims, event)
+    except AuthError as exc:
+        return _json(exc.status, {"error": exc.message})
 
     method = _method(event)
     try:

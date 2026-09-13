@@ -18,8 +18,14 @@ COMPOSE := docker compose --env-file .env -f infra/local/floci/docker-compose.ym
 FLOCI_API_URL := http://get1agent.execute-api.localhost.floci.io:4566
 LOCAL_EMBED_MODEL ?= mxbai-embed-large
 
+# Local cross-encoder reranker (TEI). TEI's CPU image is amd64; Apple Silicon
+# runs it under Rosetta. Override RERANKER_IMAGE to pin a different tag.
+RERANKER_IMAGE ?= ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+RERANKER_PORT ?= 8080
+export RERANKER_IMAGE RERANKER_PORT
+
 .PHONY: help ui floci floci-env floci-artifacts floci-build floci-up floci-wait \
-	floci-embed floci-reload floci-down floci-logs floci-migrate floci-migrate-down
+	floci-embed floci-rerank floci-reload floci-down floci-logs floci-migrate floci-migrate-down
 
 help:
 	@echo "get1agent local dev (Floci)"
@@ -59,11 +65,17 @@ floci-build:
 	$(MAKE) -C backend/services/ingestion-watchdog package
 	$(MAKE) -C backend/services/knowledge-bases package
 	$(MAKE) -C backend/services/account-settings package
+	$(MAKE) -C backend/services/get-user-knowledge-bases package
+	$(MAKE) -C backend/services/retrieval-query package
+	$(MAKE) -C backend/services/search-user-knowledge-bases package
+	$(MAKE) -C backend/services/knowledge-mcp package
+	$(MAKE) -C backend/services/admin/mcp-tester package
 
 # Build only if any artifact is missing (fast first run).
 floci-artifacts:
 	@missing=0; \
 	for f in backend/services/layers/data/dist/layer.zip \
+		backend/services/layers/ai/dist/layer.zip \
 		backend/services/ingestion-dispatcher/dist/function.zip \
 		backend/services/ingestion-extract/dist/function.zip \
 		backend/services/ingestion-embed/dist/function.zip \
@@ -71,7 +83,12 @@ floci-artifacts:
 		backend/services/ingestion-mark-failed/dist/function.zip \
 		backend/services/ingestion-watchdog/dist/function.zip \
 		backend/services/knowledge-bases/dist/function.zip \
-		backend/services/account-settings/dist/function.zip; do \
+		backend/services/account-settings/dist/function.zip \
+		backend/services/get-user-knowledge-bases/dist/function.zip \
+		backend/services/retrieval-query/dist/function.zip \
+		backend/services/search-user-knowledge-bases/dist/function.zip \
+		backend/services/knowledge-mcp/dist/function.zip \
+		backend/services/admin/mcp-tester/dist/function.zip; do \
 		[ -f "$$f" ] || missing=1; \
 	done; \
 	if [ "$$missing" = "1" ]; then \
@@ -99,6 +116,12 @@ floci-embed: floci-env
 	@until $(COMPOSE) exec -T ollama ollama list >/dev/null 2>&1; do sleep 2; done
 	$(COMPOSE) exec -T ollama ollama pull $(LOCAL_EMBED_MODEL)
 
+# Wait for the local reranker to download its model and pass /health.
+floci-rerank: floci-env
+	@echo "waiting for reranker (first run downloads the model)..."
+	@until curl -fsS "http://localhost:$(RERANKER_PORT)/health" >/dev/null 2>&1; do sleep 3; done
+	@echo "reranker ready on http://localhost:$(RERANKER_PORT)"
+
 floci-down: floci-env
 	$(COMPOSE) down
 
@@ -117,6 +140,7 @@ floci: floci-env
 	$(MAKE) floci-up
 	$(MAKE) floci-wait
 	$(MAKE) floci-embed
+	$(MAKE) floci-rerank
 	$(MAKE) floci-migrate
 	@echo ""
 	@echo "Floci stack ready."

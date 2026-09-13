@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai.auth import AuthError, require_user
 from shared.db.engine import run_async
 from shared.db.session import get_session
 from shared.models import User, UserNotificationPreferences, UserSettings
@@ -201,6 +202,11 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
     claims = _claims(event)
     if not claims:
         return _json(401, {"error": "Unauthorized"})
+    # Strict separation: admins must be in the user view to use this API.
+    try:
+        require_user(claims, event)
+    except AuthError as exc:
+        return _json(exc.status, {"error": exc.message})
 
     method = _method(event)
     try:

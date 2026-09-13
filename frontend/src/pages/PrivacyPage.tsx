@@ -7,6 +7,7 @@ export function PrivacyPage() {
       <PageHeader
         title="Privacy Statement"
         description="How we collect, use, and protect your information."
+        badge="Legal"
       />
 
       <div className="prose prose-sm mt-8 max-w-3xl space-y-6 text-muted">

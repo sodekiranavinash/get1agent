@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { Auth0ProviderWithNavigate } from './auth/Auth0ProviderWithNavigate.tsx'
+import { ViewProvider } from './auth/ViewProvider.tsx'
 import { ThemeProvider } from './theme/ThemeProvider.tsx'
 import './index.css'
 import App from './App.tsx'
@@ -11,7 +12,9 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <ThemeProvider>
         <Auth0ProviderWithNavigate>
-          <App />
+          <ViewProvider>
+            <App />
+          </ViewProvider>
         </Auth0ProviderWithNavigate>
       </ThemeProvider>
     </BrowserRouter>

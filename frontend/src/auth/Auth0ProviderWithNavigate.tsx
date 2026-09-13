@@ -2,6 +2,7 @@ import { useCallback, useMemo, type ReactNode } from 'react'
 import { Auth0Provider, type AppState } from '@auth0/auth0-react'
 import { useNavigate } from 'react-router-dom'
 import { AUTH_PATHS, authAbsoluteUrl } from './authUrls'
+import { clearStoredView } from './view'
 
 const AUTH0_DOMAIN = import.meta.env.VITE_AUTH0_DOMAIN
 const AUTH0_CLIENT_ID = import.meta.env.VITE_AUTH0_CLIENT_ID
@@ -18,6 +19,8 @@ export function Auth0ProviderWithNavigate({
 
   const onRedirectCallback = useCallback(
     (appState?: AppState) => {
+      // Fresh login: forget the previous view so the user chooses again.
+      clearStoredView()
       navigate(appState?.returnTo || '/dashboard', { replace: true })
     },
     [navigate],

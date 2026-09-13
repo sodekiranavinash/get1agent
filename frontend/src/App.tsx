@@ -1,5 +1,10 @@
 import { lazy } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
+import { RequireAdmin } from './auth/RequireAdmin'
+import { RequireUser } from './auth/RequireUser'
+import { RoleRedirect } from './auth/RoleRedirect'
+import { SelectViewPage } from './auth/SelectViewPage'
+import { AdminLayout } from './admin/layouts/AdminLayout'
 import { RequireAuth } from './auth/RequireAuth'
 import { MainLayout } from './layouts/MainLayout'
 import { CallbackPage } from './pages/CallbackPage'
@@ -54,6 +59,11 @@ const SettingsPage = lazy(() =>
 const PrivacyPage = lazy(() =>
   import('./pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage })),
 )
+const AdminIntegrationsPage = lazy(() =>
+  import('./admin/pages/AdminIntegrationsPage').then((m) => ({
+    default: m.AdminIntegrationsPage,
+  })),
+)
 
 function App() {
   return (
@@ -62,25 +72,38 @@ function App() {
       <Route path="/authorization/callback" element={<CallbackPage />} />
       <Route path="/logout" element={<LogoutPage />} />
       <Route element={<RequireAuth />}>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route
-          path="/administration"
-          element={<Navigate to="/usage" replace />}
-        />
-        <Route element={<MainLayout />}>
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/agent-builder" element={<AgentBuilderPage />} />
-          <Route path="/workflow-builder" element={<WorkflowBuilderPage />} />
-          <Route path="/chat" element={<ChatPage />} />
-          <Route path="/agent-store" element={<AgentStorePage />} />
-          <Route path="/workflow-store" element={<WorkflowStorePage />} />
-          <Route path="/scheduled-jobs" element={<ScheduledJobsPage />} />
-          <Route path="/usage" element={<UsagePage />} />
-          <Route path="/insights" element={<InsightsPage />} />
-          <Route path="/knowledge-bases" element={<KnowledgeBasesPage />} />
-          <Route path="/tools" element={<ToolsPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/privacy" element={<PrivacyPage />} />
+        {/* Role decides the landing surface: admin console vs user app. */}
+        <Route path="/" element={<RoleRedirect />} />
+        <Route path="/administration" element={<RoleRedirect />} />
+        <Route path="/select-view" element={<SelectViewPage />} />
+
+        <Route element={<RequireUser />}>
+          <Route element={<MainLayout />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/agent-builder" element={<AgentBuilderPage />} />
+            <Route path="/workflow-builder" element={<WorkflowBuilderPage />} />
+            <Route path="/chat" element={<ChatPage />} />
+            <Route path="/agent-store" element={<AgentStorePage />} />
+            <Route path="/workflow-store" element={<WorkflowStorePage />} />
+            <Route path="/scheduled-jobs" element={<ScheduledJobsPage />} />
+            <Route path="/usage" element={<UsagePage />} />
+            <Route path="/insights" element={<InsightsPage />} />
+            <Route path="/knowledge-bases" element={<KnowledgeBasesPage />} />
+            <Route path="/tools" element={<ToolsPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
+          </Route>
+        </Route>
+
+        <Route element={<RequireAdmin />}>
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route index element={<Navigate to="mcp-tools" replace />} />
+            <Route path="mcp-tools" element={<AdminIntegrationsPage />} />
+            <Route
+              path="integrations"
+              element={<Navigate to="/admin/mcp-tools" replace />}
+            />
+          </Route>
         </Route>
       </Route>
       <Route path="*" element={<NotFoundPage />} />

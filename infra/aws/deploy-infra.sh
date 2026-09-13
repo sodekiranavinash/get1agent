@@ -21,6 +21,11 @@ if [[ ! -s "$ROOT/backend/services/layers/data/dist/layer.zip" ]]; then
   bash "$ROOT/infra/aws/build-backend-layers.sh"
 fi
 
+if [[ ! -s "$ROOT/backend/services/layers/ai/dist/layer.zip" ]]; then
+  echo "Building backend ai Lambda layer..."
+  bash "$ROOT/infra/aws/build-backend-layers.sh" ai
+fi
+
 if [[ ! -s "$ROOT/backend/services/health-check/dist/function.zip" ]]; then
   echo "Packaging backend health-check Lambda zip..."
   make -C "$ROOT/backend/services/health-check" package
@@ -54,6 +59,11 @@ fi
 if [[ ! -s "$ROOT/backend/services/ingestion-mark-failed/dist/function.zip" ]]; then
   echo "Packaging backend ingestion-mark-failed Lambda zip..."
   make -C "$ROOT/backend/services/ingestion-mark-failed" package
+fi
+
+if [[ ! -s "$ROOT/backend/services/admin/mcp-tester/dist/function.zip" ]]; then
+  echo "Packaging backend mcp-tester Lambda zip..."
+  make -C "$ROOT/backend/services/admin/mcp-tester" package
 fi
 
 bash "$ROOT/infra/aws/run-terraform.sh" bootstrap "$MODE"

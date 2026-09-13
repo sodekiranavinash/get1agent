@@ -18,10 +18,15 @@ TARGETS=()
 # health-check only needs existing VPC/RDS in state — do not -target module.network (pulls jumpbox).
 [[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && {
   TARGETS+=(-target='module.layer_data[0]')
+  TARGETS+=(-target='module.layer_ai[0]')
   TARGETS+=(-target='module.health_check[0]')
   TARGETS+=(-target='module.account_settings[0]')
   TARGETS+=(-target='module.knowledge_storage[0]')
   TARGETS+=(-target='module.knowledge_bases[0]')
+  TARGETS+=(-target='module.get_user_knowledge_bases[0]')
+  TARGETS+=(-target='module.retrieval_query[0]')
+  TARGETS+=(-target='module.search_user_knowledge_bases[0]')
+  TARGETS+=(-target='module.knowledge_mcp[0]')
   TARGETS+=(-target='module.ingestion_extract[0]')
   TARGETS+=(-target='module.ingestion_embed[0]')
   TARGETS+=(-target='module.ingestion_index[0]')
@@ -29,6 +34,7 @@ TARGETS=()
   TARGETS+=(-target='module.ingestion_watchdog[0]')
   TARGETS+=(-target='module.ingestion[0]')
   TARGETS+=(-target='module.ingestion_dispatcher[0]')
+  TARGETS+=(-target='module.mcp_tester[0]')
 }
 
 need_backend_artifacts=false
@@ -42,6 +48,9 @@ if [[ "$need_backend_artifacts" == true ]]; then
   if [[ ! -s "$ROOT/backend/services/layers/data/dist/layer.zip" ]]; then
     bash "$ROOT/infra/aws/build-backend-layers.sh"
   fi
+  if [[ ! -s "$ROOT/backend/services/layers/ai/dist/layer.zip" ]]; then
+    bash "$ROOT/infra/aws/build-backend-layers.sh" ai
+  fi
   if [[ ! -s "$ROOT/backend/services/health-check/dist/function.zip" ]]; then
     make -C "$ROOT/backend/services/health-check" package
   fi
@@ -50,6 +59,18 @@ if [[ "$need_backend_artifacts" == true ]]; then
   fi
   if [[ ! -s "$ROOT/backend/services/knowledge-bases/dist/function.zip" ]]; then
     make -C "$ROOT/backend/services/knowledge-bases" package
+  fi
+  if [[ ! -s "$ROOT/backend/services/get-user-knowledge-bases/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/get-user-knowledge-bases" package
+  fi
+  if [[ ! -s "$ROOT/backend/services/retrieval-query/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/retrieval-query" package
+  fi
+  if [[ ! -s "$ROOT/backend/services/search-user-knowledge-bases/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/search-user-knowledge-bases" package
+  fi
+  if [[ ! -s "$ROOT/backend/services/knowledge-mcp/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/knowledge-mcp" package
   fi
   if [[ ! -s "$ROOT/backend/services/ingestion-dispatcher/dist/function.zip" ]]; then
     make -C "$ROOT/backend/services/ingestion-dispatcher" package
@@ -68,6 +89,9 @@ if [[ "$need_backend_artifacts" == true ]]; then
   fi
   if [[ ! -s "$ROOT/backend/services/ingestion-watchdog/dist/function.zip" ]]; then
     make -C "$ROOT/backend/services/ingestion-watchdog" package
+  fi
+  if [[ ! -s "$ROOT/backend/services/admin/mcp-tester/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/admin/mcp-tester" package
   fi
 fi
 

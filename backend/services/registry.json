@@ -4,6 +4,11 @@
       "name": "data",
       "dir": "backend/services/layers/data",
       "terraform_name": "get1agent-prod-layer-data"
+    },
+    {
+      "name": "ai",
+      "dir": "backend/services/layers/ai",
+      "terraform_name": "get1agent-prod-layer-ai"
     }
   ],
   "lambdas": [
@@ -24,7 +29,8 @@
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
       "layers": [
-        "data"
+        "data",
+        "ai"
       ]
     },
     {
@@ -34,7 +40,58 @@
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
       "layers": [
+        "data",
+        "ai"
+      ]
+    },
+    {
+      "name": "get-user-knowledge-bases",
+      "dir": "backend/services/get-user-knowledge-bases",
+      "function_name": "get1agent-prod-get-user-knowledge-bases",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": [
         "data"
+      ]
+    },
+    {
+      "name": "retrieval-query",
+      "dir": "backend/services/retrieval-query",
+      "function_name": "get1agent-prod-retrieval-query",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": [
+        "data"
+      ]
+    },
+    {
+      "name": "search-user-knowledge-bases",
+      "dir": "backend/services/search-user-knowledge-bases",
+      "function_name": "get1agent-prod-search-user-knowledge-bases",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": [
+        "data"
+      ]
+    },
+    {
+      "name": "knowledge-mcp",
+      "dir": "backend/services/knowledge-mcp",
+      "function_name": "get1agent-prod-knowledge-mcp",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": [
+        "ai"
+      ]
+    },
+    {
+      "name": "mcp-tester",
+      "dir": "backend/services/admin/mcp-tester",
+      "function_name": "get1agent-prod-mcp-tester",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": [
+        "ai"
       ]
     },
     {

@@ -186,25 +186,9 @@ function KnowledgeBasesPanel({
         </div>
       </div>
 
-      <div className="border-t border-border">
-        <div className="p-5">
-          {knowledgeBases.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border-strong bg-raised/20 px-6 py-10 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-soft text-accent">
-                <FileStack className="h-6 w-6" strokeWidth={1.5} />
-              </div>
-              <h3 className="mt-4 text-base font-semibold text-foreground">
-                No knowledge bases yet
-              </h3>
-              <p className="mx-auto mt-2 max-w-md text-sm text-muted">
-                Drop documents above, or use the{' '}
-                <span className="font-semibold text-foreground">
-                  Knowledge Base
-                </span>{' '}
-                button to get started.
-              </p>
-            </div>
-          ) : (
+      {knowledgeBases.length > 0 ? (
+        <div className="border-t border-border">
+          <div className="p-5">
             <div className="scrollbar-thin max-h-[292px] overflow-y-auto pr-1">
               <div className="flex flex-col gap-2.5">
                 {knowledgeBases.map((kb, index) => (
@@ -219,9 +203,9 @@ function KnowledgeBasesPanel({
                 ))}
               </div>
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border px-5 py-3 text-[11px] text-muted">
         <span
@@ -504,6 +488,7 @@ export function KnowledgeBasesPage() {
         <PageHeader
           title="Knowledge"
           description="Write knowledge or upload documents for RAG. Attach ready knowledge bases to agents"
+          badge="Agents"
           secondaryAction={{
             label: 'Activity',
             icon: <Activity className="h-4 w-4" />,

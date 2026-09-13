@@ -6,27 +6,52 @@ export const KNOWLEDGE_BASES_QUERY_KEY = 'knowledge-bases'
 export const TAG_SUGGESTIONS_QUERY_KEY = 'knowledge-base-tags'
 export const INGESTION_EVENTS_QUERY_KEY = 'ingestion-events'
 
-// Keep these in sync with backend/knowledge-bases/src/handler.py.
-// Up to 20 knowledge bases x 20 files x 20 MB, capped at 200 MB storage/user.
-export const MAX_KNOWLEDGE_BASES = 20
-export const MAX_FILES_PER_KB = 20
-export const MAX_FILES_PER_USER = 400
-export const MAX_FILE_BYTES = 20 * 1024 * 1024
-export const MAX_STORAGE_BYTES = 200 * 1024 * 1024
+// Keep these in sync with backend/services/shared/models/user_quota.py.
+// Up to 10 knowledge bases x 25 files x 10 MB, capped at 100 MB storage/user.
+export const MAX_KNOWLEDGE_BASES = 10
+export const MAX_FILES_PER_KB = 25
+export const MAX_FILES_PER_USER = 250
+export const MAX_FILE_BYTES = 10 * 1024 * 1024
+export const MAX_STORAGE_BYTES = 100 * 1024 * 1024
 export const MAX_TAGS_PER_DOCUMENT = 10
-export const MAX_NAME_LENGTH = 100
+// Knowledge base names follow S3-bucket-style rules (lowercase, digits,
+// hyphens; 3–63 chars; start/end alphanumeric).
+export const MIN_NAME_LENGTH = 3
+export const MAX_NAME_LENGTH = 63
 export const MAX_DESCRIPTION_LENGTH = 300
 export const MAX_TAG_NAME_LENGTH = 64
 export const MAX_TAG_DESCRIPTION_LENGTH = 500
+
+/** Returns a human-readable error, or null when the name is valid. */
+export function validateKnowledgeBaseName(value: string): string | null {
+  const name = value.trim()
+  if (!name) return 'Name is required'
+  if (name.length < MIN_NAME_LENGTH) {
+    return `Name must be at least ${MIN_NAME_LENGTH} characters`
+  }
+  if (name.length > MAX_NAME_LENGTH) {
+    return `Name must be at most ${MAX_NAME_LENGTH} characters`
+  }
+  if (!/^[a-z0-9-]+$/.test(name)) {
+    return 'Only lowercase letters, numbers and hyphens (no spaces or special characters)'
+  }
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(name)) {
+    return 'Must start and end with a letter or number'
+  }
+  return null
+}
 
 // Ingestion defaults. Keep in sync with backend/shared/ingestion/config.py.
 export const TEXT_EMBED_MODEL = 'amazon.titan-embed-text-v2:0'
 export const IMAGE_EMBED_MODEL = 'amazon.titan-embed-image-v1'
 export const EMBEDDING_DIM = 1024
-export const CHUNK_SIZES = [512, 1024, 2048] as const
-export const CHUNK_OVERLAPS = [0, 128, 256] as const
-export const DEFAULT_CHUNK_SIZE = 1024
-export const DEFAULT_CHUNK_OVERLAP = 128
+export const DEFAULT_CHUNK_SIZE = 512
+export const DEFAULT_CHUNK_OVERLAP = 64
+// Evenly-spaced, selectable points (no free-form values in the UI).
+export const CHUNK_SIZE_POINTS = [256, 384, 512, 768, 1024] as const
+export const CHUNK_OVERLAP_POINTS = [0, 32, 64, 128, 256] as const
+// Overlap may not exceed 25% of the chunk size (documented upper bound).
+export const MAX_OVERLAP_RATIO = 0.25
 
 export const ACCEPTED_MIME: Record<string, string[]> = {
   'application/pdf': ['.pdf'],

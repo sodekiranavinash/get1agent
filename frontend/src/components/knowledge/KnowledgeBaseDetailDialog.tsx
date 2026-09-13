@@ -12,13 +12,10 @@ import { Dialog } from '../ui/Dialog'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
-import { Segmented } from '../ui/Segmented'
 import { Spinner } from '../ui/Spinner'
 import { CreateKnowledgeBaseDialog } from './CreateKnowledgeBaseDialog'
 import { ApiError, useApiClient } from '../../lib/api'
 import {
-  CHUNK_OVERLAPS,
-  CHUNK_SIZES,
   MAX_FILES_PER_KB,
   deleteDocument,
   deleteKnowledgeBase,
@@ -249,27 +246,27 @@ export function KnowledgeBaseDetailDialog({
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <div>
               <ConfigLabel>Chunk size (tokens)</ConfigLabel>
-              <Segmented
-                options={CHUNK_SIZES}
-                value={detail.knowledgeBase.chunkSize}
-                disabled
-                size="sm"
-              />
+              <p className="mt-1 text-sm font-semibold tabular-nums text-foreground">
+                {detail.knowledgeBase.chunkSize}
+              </p>
             </div>
             <div>
               <ConfigLabel>Chunk overlap (tokens)</ConfigLabel>
-              <Segmented
-                options={CHUNK_OVERLAPS}
-                value={detail.knowledgeBase.chunkOverlap}
-                disabled
-                size="sm"
-              />
+              <p className="mt-1 text-sm font-semibold tabular-nums text-foreground">
+                {detail.knowledgeBase.chunkOverlap}
+                <span className="ml-1.5 text-[11px] font-normal text-subtle">
+                  ≈{' '}
+                  {Math.round(
+                    (detail.knowledgeBase.chunkOverlap /
+                      Math.max(1, detail.knowledgeBase.chunkSize)) *
+                      100,
+                  )}
+                  %
+                </span>
+              </p>
             </div>
           </div>
-          <p className="mt-2 text-[11px] text-subtle">
-            Fixed at creation — every file in this knowledge base uses the same
-            chunking.
-          </p>
+          <p className="mt-2 text-[11px] text-subtle">Fixed at creation.</p>
         </div>
       ) : null}
 

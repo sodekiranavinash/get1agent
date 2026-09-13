@@ -28,6 +28,9 @@ class Extraction:
     rows: int | None = None
     sheets: int | None = None
     paragraphs: int | None = None
+    # Per-page text for paginated formats (PDF). ``None`` when the format has no
+    # page concept; the chunker uses it to tag chunks with their source page.
+    page_texts: list[str] | None = None
 
 
 class UnsupportedDocument(Exception):
@@ -91,7 +94,12 @@ def _extract_pdf(data: bytes) -> Extraction:
                         height=raw.get("height"),
                     )
                 )
-        return Extraction("\n\n".join(pages).strip(), images, pages=len(pages))
+        return Extraction(
+            "\n\n".join(pages).strip(),
+            images,
+            pages=len(pages),
+            page_texts=pages,
+        )
     finally:
         document.close()
 

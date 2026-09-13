@@ -2,14 +2,25 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth0 } from '@auth0/auth0-react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ChevronRight, LogOut, Moon, Settings, Sun } from 'lucide-react'
+import {
+  ArrowLeftRight,
+  Check,
+  ChevronRight,
+  LogOut,
+  Moon,
+  Settings,
+  Sun,
+} from 'lucide-react'
 import { AUTH_PATHS } from '../../auth/authUrls'
 import { getUserProfile } from '../../auth/userProfile'
+import { useView } from '../../auth/ViewProvider'
 import { useTheme, type Theme } from '../../theme/ThemeProvider'
 import { UserAvatar } from '../UserAvatar'
 
 type SidebarUserSectionProps = {
   collapsed: boolean
+  /** Where the Settings link points; pass null to hide it (admin console). */
+  settingsPath?: string | null
 }
 
 const themeOptions: { id: Theme; label: string; icon: typeof Sun }[] = [
@@ -17,9 +28,13 @@ const themeOptions: { id: Theme; label: string; icon: typeof Sun }[] = [
   { id: 'dark', label: 'Dark', icon: Moon },
 ]
 
-export function SidebarUserSection({ collapsed }: SidebarUserSectionProps) {
+export function SidebarUserSection({
+  collapsed,
+  settingsPath = '/settings',
+}: SidebarUserSectionProps) {
   const { user } = useAuth0()
   const { theme, setTheme } = useTheme()
+  const { view, canSwitch, chooseView } = useView()
   const profile = getUserProfile(user)
   const displayName = [profile.firstName, profile.lastName].filter(Boolean).join(' ')
   const [open, setOpen] = useState(false)
@@ -126,15 +141,35 @@ export function SidebarUserSection({ collapsed }: SidebarUserSectionProps) {
 
             <div className="my-1 h-px bg-border" />
 
-            <Link
-              to="/settings"
-              role="menuitem"
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted no-underline transition-colors hover:bg-raised hover:text-foreground"
-            >
-              <Settings className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-              Settings
-            </Link>
+            {canSwitch ? (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    chooseView(view === 'admin' ? 'user' : 'admin')
+                    setOpen(false)
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted transition-colors hover:bg-raised hover:text-foreground"
+                >
+                  <ArrowLeftRight className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                  Switch to {view === 'admin' ? 'User' : 'Admin'} view
+                </button>
+                <div className="my-1 h-px bg-border" />
+              </>
+            ) : null}
+
+            {settingsPath ? (
+              <Link
+                to={settingsPath}
+                role="menuitem"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted no-underline transition-colors hover:bg-raised hover:text-foreground"
+              >
+                <Settings className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                Settings
+              </Link>
+            ) : null}
             <Link
               to={AUTH_PATHS.logout}
               role="menuitem"

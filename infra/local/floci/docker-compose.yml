@@ -57,6 +57,7 @@ services:
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.get1agent.com}
       OLLAMA_URL: http://ollama:11434
       LOCAL_EMBED_MODEL: ${LOCAL_EMBED_MODEL:-mxbai-embed-large}
+      LOCAL_RERANK_URL: http://reranker:80/rerank
     ports:
       - "${FLOCI_PORT:-4566}:4566"
     volumes:
@@ -77,6 +78,26 @@ services:
     networks:
       - get1agent
 
+  # Real cross-encoder reranker for local retrieval (mirrors Bedrock Rerank).
+  # HuggingFace Text Embeddings Inference serves POST /rerank. TEI's CPU image
+  # is amd64; on Apple Silicon Docker runs it under Rosetta. `make floci` waits
+  # for /health before continuing.
+  reranker:
+    image: ${RERANKER_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
+    command:
+      [
+        "--model-id",
+        "${LOCAL_RERANK_MODEL:-cross-encoder/ms-marco-MiniLM-L6-v2}",
+        "--port",
+        "80",
+      ]
+    ports:
+      - "${RERANKER_PORT:-8080}:80"
+    volumes:
+      - reranker_models:/data
+    networks:
+      - get1agent
+
 networks:
   get1agent:
     name: get1agent-floci
@@ -84,3 +105,4 @@ networks:
 volumes:
   pgdata:
   ollama_models:
+  reranker_models:
