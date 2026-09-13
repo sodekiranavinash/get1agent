@@ -5,7 +5,7 @@ resource "aws_apigatewayv2_api" "this" {
 
   cors_configuration {
     allow_credentials = false
-    allow_headers     = ["authorization", "content-type", "x-request-id"]
+    allow_headers     = ["authorization", "content-type", "x-request-id", "x-active-view"]
     allow_methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     allow_origins     = var.cors_allow_origins
     expose_headers    = ["x-request-id"]
