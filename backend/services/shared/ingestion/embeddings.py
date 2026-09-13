@@ -2,19 +2,64 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import random
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, Callable
 
 from shared.ingestion.config import IngestionConfig
 
-_MAX_WORKERS = 4
+_MAX_WORKERS = int(os.environ.get("EMBED_MAX_WORKERS", "4"))
+_MAX_ATTEMPTS = int(os.environ.get("EMBED_MAX_ATTEMPTS", "6"))
+_BASE_BACKOFF_SECONDS = 0.5
+_MAX_BACKOFF_SECONDS = 20.0
+
+_RETRYABLE_ERROR_CODES = frozenset(
+    {
+        "ThrottlingException",
+        "TooManyRequestsException",
+        "ServiceUnavailableException",
+        "ModelNotReadyException",
+        "InternalServerException",
+        "RequestTimeout",
+    }
+)
 
 
 def _bedrock_client(region: str) -> Any:
     import boto3
+    from botocore.config import Config
 
-    return boto3.client("bedrock-runtime", region_name=region)
+    return boto3.client(
+        "bedrock-runtime",
+        region_name=region,
+        config=Config(retries={"max_attempts": 8, "mode": "adaptive"}),
+    )
+
+
+def _is_retryable(error: BaseException) -> bool:
+    from botocore.exceptions import ClientError
+
+    if not isinstance(error, ClientError):
+        return False
+    code = error.response.get("Error", {}).get("Code", "")
+    return code in _RETRYABLE_ERROR_CODES
+
+
+def _with_retry(call: Callable[[], list[float]]) -> list[float]:
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            return call()
+        except Exception as error:
+            if attempt == _MAX_ATTEMPTS - 1 or not _is_retryable(error):
+                raise
+            backoff = min(
+                _MAX_BACKOFF_SECONDS, _BASE_BACKOFF_SECONDS * 2**attempt
+            )
+            time.sleep(backoff + random.uniform(0, backoff))
+    raise AssertionError("unreachable")
 
 
 def _invoke_text(client: Any, model: str, text: str, dimensions: int) -> list[float]:
@@ -88,8 +133,10 @@ def embed_texts(texts: list[str], config: IngestionConfig) -> list[list[float]]:
     if config.embed_mode == "bedrock":
         client = _bedrock_client(config.bedrock_region)
         return _run_parallel(
-            lambda text: _invoke_text(
-                client, config.text_embed_model, text, config.embedding_dim
+            lambda text: _with_retry(
+                lambda: _invoke_text(
+                    client, config.text_embed_model, text, config.embedding_dim
+                )
             ),
             texts,
         )
@@ -102,8 +149,10 @@ def embed_images(images: list[bytes], config: IngestionConfig) -> list[list[floa
     if config.embed_mode == "bedrock":
         client = _bedrock_client(config.bedrock_region)
         return _run_parallel(
-            lambda image: _invoke_image(
-                client, config.image_embed_model, image, config.embedding_dim
+            lambda image: _with_retry(
+                lambda: _invoke_image(
+                    client, config.image_embed_model, image, config.embedding_dim
+                )
             ),
             images,
         )
