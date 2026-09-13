@@ -382,7 +382,6 @@ module "knowledge_mcp" {
   environment = {
     GET_USER_KB_FUNCTION    = module.get_user_knowledge_bases[0].function_name
     SEARCH_USER_KB_FUNCTION = module.search_user_knowledge_bases[0].function_name
-    AWS_REGION              = var.aws_region
   }
 
   depends_on = [
@@ -411,7 +410,6 @@ module "mcp_tester" {
 
   environment = {
     MCP_FUNCTION = module.knowledge_mcp[0].function_name
-    AWS_REGION   = var.aws_region
   }
 
   depends_on = [module.layer_ai, module.knowledge_mcp]
