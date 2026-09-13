@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
+from shared.ingestion.config import config_from_dict, config_to_dict, load_config
 from shared.ingestion.pipeline import (
+    embed_document,
     emit_event,
     extract_document,
+    find_stalled_documents,
     get_document,
     index_document,
     load_config_for_knowledge_base,
@@ -113,6 +117,43 @@ async def extract_action(event: dict[str, Any]) -> dict[str, Any]:
         message=_extract_message(extracted.stats),
         details=extracted.stats,
     )
+    # Chunking happens here (extract is in the VPC and owns the timeline), and
+    # the embed stage — which runs outside the VPC — is announced next.
+    await emit_event(
+        document_id=document["id"],
+        knowledge_base_id=document["knowledge_base_id"],
+        user_id=document["user_id"],
+        stage="chunked",
+        status="succeeded",
+        message=(
+            f"{extracted.chunk_count} chunk"
+            f"{'s' if extracted.chunk_count != 1 else ''} "
+            f"· {config.chunk_size}/{config.chunk_overlap}"
+        ),
+        details=extracted.chunk_stats,
+    )
+    await emit_event(
+        document_id=document["id"],
+        knowledge_base_id=document["knowledge_base_id"],
+        user_id=document["user_id"],
+        stage="embedding",
+        status="started",
+        message=(
+            f"Embedding {extracted.chunk_count} text chunk"
+            f"{'s' if extracted.chunk_count != 1 else ''}"
+            + (
+                f" + {extracted.image_count} image"
+                f"{'s' if extracted.image_count != 1 else ''}"
+                if extracted.images
+                else ""
+            )
+        ),
+        details={
+            "textEmbeddings": extracted.chunk_count,
+            "imageEmbeddings": extracted.image_count,
+            "dimension": config.embedding_dim,
+        },
+    )
     logger.info(
         "extract succeeded",
         extra={
@@ -125,15 +166,56 @@ async def extract_action(event: dict[str, Any]) -> dict[str, Any]:
         "documentId": document["id"],
         "knowledgeBaseId": document["knowledge_base_id"],
         "userId": document["user_id"],
-        "textKey": extracted.text_key,
+        "chunksKey": extracted.chunks_key,
         "images": extracted.images,
         "imageCount": extracted.image_count,
+        "chunkCount": extracted.chunk_count,
+        "config": config_to_dict(config),
+    }
+
+
+async def embed_action(event: dict[str, Any]) -> dict[str, Any]:
+    """Stage 2: compute embeddings. Runs outside the VPC (no RDS access).
+
+    The per-KB settings the extract stage loaded are carried in the event, so
+    this worker never needs to read the database.
+    """
+    config = config_from_dict(load_config(), event.get("config"))
+    logger.info(
+        "embed started",
+        extra={
+            "documentId": event["documentId"],
+            "knowledgeBaseId": event["knowledgeBaseId"],
+            "stage": "embedding",
+        },
+    )
+    embedded = embed_document(
+        _storage(),
+        config,
+        chunks_key=event["chunksKey"],
+        images=event.get("images") or [],
+    )
+    logger.info(
+        "embed succeeded",
+        extra={
+            "documentId": event["documentId"],
+            "knowledgeBaseId": event["knowledgeBaseId"],
+            "stage": "embedding",
+        },
+    )
+    return {
+        "embeddingsKey": embedded.embeddings_key,
+        "chunkCount": embedded.chunk_count,
+        "imageCount": embedded.image_count,
+        "dimension": embedded.dimension,
+        "textModel": embedded.text_model,
+        "imageModel": embedded.image_model,
     }
 
 
 async def index_action(event: dict[str, Any]) -> dict[str, Any]:
-    """Stage 2: chunk + embed text/images and persist vectors."""
-    config = await load_config_for_knowledge_base(event["knowledgeBaseId"])
+    """Stage 3: persist the embed stage's vectors (in-VPC, RDS write)."""
+    config = config_from_dict(load_config(), event.get("config"))
     logger.info(
         "index started",
         extra={
@@ -148,7 +230,8 @@ async def index_action(event: dict[str, Any]) -> dict[str, Any]:
         user_id=event["userId"],
         knowledge_base_id=event["knowledgeBaseId"],
         document_id=event["documentId"],
-        text_key=event["textKey"],
+        chunks_key=event["chunksKey"],
+        embeddings_key=event["embeddingsKey"],
         images=event.get("images") or [],
     )
     await set_document_status(
@@ -211,3 +294,40 @@ async def mark_failed_action(event: dict[str, Any]) -> dict[str, Any]:
         details={"failedStage": failed_stage},
     )
     return {"ok": True}
+
+
+async def watchdog_action(event: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Scheduled safety net: fail documents stuck in ``processing``.
+
+    Catches executions that were aborted before ``mark_failed`` could run, so a
+    document can never stay silently stuck in the UI.
+    """
+    threshold = int(os.environ.get("STALL_THRESHOLD_MINUTES", "75"))
+    stalled = await find_stalled_documents(threshold)
+    for document in stalled:
+        logger.warning(
+            "reaping stalled document",
+            extra={
+                "documentId": document["id"],
+                "knowledgeBaseId": document["knowledge_base_id"],
+                "stage": "failed",
+            },
+        )
+        await set_document_status(document["id"], "failed")
+        await emit_event(
+            document_id=document["id"],
+            knowledge_base_id=document["knowledge_base_id"],
+            user_id=document["user_id"],
+            stage="failed",
+            status="failed",
+            message=(
+                f"stalled: no progress for over {threshold} minutes "
+                f"({document['file_name']})"
+            ),
+            details={"failedStage": "stalled", "reason": "watchdog"},
+        )
+    logger.info(
+        "watchdog scan complete",
+        extra={"reaped": len(stalled), "thresholdMinutes": threshold},
+    )
+    return {"reaped": len(stalled), "thresholdMinutes": threshold}

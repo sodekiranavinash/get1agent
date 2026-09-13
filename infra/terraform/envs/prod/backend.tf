@@ -6,8 +6,10 @@ locals {
   knowledge_bases_zip      = abspath("${path.module}/../../../../backend/services/knowledge-bases/dist/function.zip")
   ingestion_dispatcher_zip = abspath("${path.module}/../../../../backend/services/ingestion-dispatcher/dist/function.zip")
   ingestion_extract_zip    = abspath("${path.module}/../../../../backend/services/ingestion-extract/dist/function.zip")
+  ingestion_embed_zip      = abspath("${path.module}/../../../../backend/services/ingestion-embed/dist/function.zip")
   ingestion_index_zip      = abspath("${path.module}/../../../../backend/services/ingestion-index/dist/function.zip")
   ingestion_fail_zip       = abspath("${path.module}/../../../../backend/services/ingestion-mark-failed/dist/function.zip")
+  ingestion_watchdog_zip   = abspath("${path.module}/../../../../backend/services/ingestion-watchdog/dist/function.zip")
 }
 
 check "layer_data_zip_exists" {
@@ -52,6 +54,13 @@ check "ingestion_extract_zip_exists" {
   }
 }
 
+check "ingestion_embed_zip_exists" {
+  assert {
+    condition     = !var.enable_ingestion || fileexists(local.ingestion_embed_zip)
+    error_message = "Embed zip not found at ${local.ingestion_embed_zip}. Run: make -C backend/services/ingestion-embed package"
+  }
+}
+
 check "ingestion_index_zip_exists" {
   assert {
     condition     = !var.enable_ingestion || fileexists(local.ingestion_index_zip)
@@ -63,6 +72,13 @@ check "ingestion_fail_zip_exists" {
   assert {
     condition     = !var.enable_ingestion || fileexists(local.ingestion_fail_zip)
     error_message = "Mark-failed zip not found at ${local.ingestion_fail_zip}. Run: make -C backend/services/ingestion-mark-failed package"
+  }
+}
+
+check "ingestion_watchdog_zip_exists" {
+  assert {
+    condition     = !var.enable_ingestion || fileexists(local.ingestion_watchdog_zip)
+    error_message = "Watchdog zip not found at ${local.ingestion_watchdog_zip}. Run: make -C backend/services/ingestion-watchdog package"
   }
 }
 
@@ -195,7 +211,7 @@ module "ingestion_extract" {
   layer_arns       = [module.layer_data[0].arn]
 
   memory_size = 1024
-  timeout     = 300
+  timeout     = 600
 
   vpc_id                     = module.network[0].vpc_id
   subnet_ids                 = module.network[0].private_subnet_ids
@@ -217,6 +233,43 @@ module "ingestion_extract" {
   depends_on = [module.layer_data, module.knowledge_storage]
 }
 
+module "ingestion_embed" {
+  count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-ingestion-embed"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.ingestion_embed_zip
+  source_code_hash = try(filebase64sha256(local.ingestion_embed_zip), "")
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_data[0].arn]
+
+  memory_size = 1024
+  timeout     = 600
+
+  # Intentionally outside the VPC: this worker only needs S3 + Bedrock, which
+  # are reachable over the public internet. Keeping it out avoids a Bedrock
+  # interface endpoint (PrivateLink) charge and the NAT/endpoint setup.
+  s3_bucket_arns = [module.knowledge_storage[0].bucket_arn]
+
+  bedrock_model_arns = [
+    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0",
+    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-image-v1",
+  ]
+
+  environment = {
+    S3_BUCKET         = module.knowledge_storage[0].bucket_name
+    S3_REGION         = var.aws_region
+    EMBED_MODE        = "bedrock"
+    BEDROCK_REGION    = var.aws_region
+    TEXT_EMBED_MODEL  = "amazon.titan-embed-text-v2:0"
+    IMAGE_EMBED_MODEL = "amazon.titan-embed-image-v1"
+  }
+
+  depends_on = [module.layer_data, module.knowledge_storage]
+}
+
 module "ingestion_index" {
   count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
   source = "../../modules/lambda_rds"
@@ -230,7 +283,7 @@ module "ingestion_index" {
   layer_arns       = [module.layer_data[0].arn]
 
   memory_size = 1024
-  timeout     = 300
+  timeout     = 600
 
   vpc_id                     = module.network[0].vpc_id
   subnet_ids                 = module.network[0].private_subnet_ids
@@ -239,11 +292,6 @@ module "ingestion_index" {
   rds_resource_id            = module.rds[0].postgres_resource_id
   db_iam_username            = module.rds[0].db_iam_username
   s3_bucket_arns             = [module.knowledge_storage[0].bucket_arn]
-
-  bedrock_model_arns = [
-    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0",
-    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-image-v1",
-  ]
 
   environment = {
     DB_HOST           = module.rds[0].postgres_endpoint
@@ -293,6 +341,39 @@ module "ingestion_mark_failed" {
   depends_on = [module.layer_data]
 }
 
+module "ingestion_watchdog" {
+  count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-ingestion-watchdog"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.ingestion_watchdog_zip
+  source_code_hash = try(filebase64sha256(local.ingestion_watchdog_zip), "")
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_data[0].arn]
+
+  memory_size = 256
+  timeout     = 120
+
+  vpc_id                     = module.network[0].vpc_id
+  subnet_ids                 = module.network[0].private_subnet_ids
+  postgres_security_group_id = module.network[0].postgres_security_group_id
+  aws_region                 = var.aws_region
+  rds_resource_id            = module.rds[0].postgres_resource_id
+  db_iam_username            = module.rds[0].db_iam_username
+
+  environment = {
+    DB_HOST                 = module.rds[0].postgres_endpoint
+    DB_PORT                 = tostring(module.rds[0].postgres_port)
+    DB_NAME                 = module.rds[0].postgres_db_name
+    DB_IAM_USER             = module.rds[0].db_iam_username
+    STALL_THRESHOLD_MINUTES = "75"
+  }
+
+  depends_on = [module.layer_data]
+}
+
 module "ingestion" {
   count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
   source = "../../modules/ingestion"
@@ -300,8 +381,10 @@ module "ingestion" {
   name_prefix              = "get1agent-prod"
   bucket_name              = module.knowledge_storage[0].bucket_name
   extract_function_arn     = module.ingestion_extract[0].function_arn
+  embed_function_arn       = module.ingestion_embed[0].function_arn
   index_function_arn       = module.ingestion_index[0].function_arn
   mark_failed_function_arn = module.ingestion_mark_failed[0].function_arn
+  watchdog_function_arn    = module.ingestion_watchdog[0].function_arn
 
   enable_xray = var.enable_xray
 

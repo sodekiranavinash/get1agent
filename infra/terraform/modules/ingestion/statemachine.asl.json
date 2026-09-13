@@ -1,6 +1,7 @@
 {
-  "Comment": "Ingest one document: Extract -> Index. Any stage failure records which stage failed, then marks the document failed.",
+  "Comment": "Ingest one document: Extract (VPC) -> Embed (no VPC) -> Index (VPC). Any stage failure records which stage failed, then marks the document failed. Runs as STANDARD so long ingestions are not cut off by the EXPRESS 5-minute cap; TimeoutSeconds is the safety bound.",
   "StartAt": "Extract",
+  "TimeoutSeconds": 3600,
   "States": {
     "Extract": {
       "Type": "Task",
@@ -38,6 +39,40 @@
           "Next": "ExtractFailed"
         }
       ],
+      "Next": "Embed"
+    },
+    "Embed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${embed_function_arn}",
+        "Payload": {
+          "documentId.$": "$.extracted.documentId",
+          "knowledgeBaseId.$": "$.extracted.knowledgeBaseId",
+          "userId.$": "$.extracted.userId",
+          "chunksKey.$": "$.extracted.chunksKey",
+          "images.$": "$.extracted.images",
+          "config.$": "$.extracted.config"
+        }
+      },
+      "ResultSelector": {
+        "embedded.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "EmbedFailed"
+        }
+      ],
       "Next": "Index"
     },
     "Index": {
@@ -49,8 +84,10 @@
           "documentId.$": "$.extracted.documentId",
           "knowledgeBaseId.$": "$.extracted.knowledgeBaseId",
           "userId.$": "$.extracted.userId",
-          "textKey.$": "$.extracted.textKey",
-          "images.$": "$.extracted.images"
+          "chunksKey.$": "$.extracted.chunksKey",
+          "embeddingsKey.$": "$.embedded.embeddingsKey",
+          "images.$": "$.extracted.images",
+          "config.$": "$.extracted.config"
         }
       },
       "ResultSelector": {
@@ -84,6 +121,17 @@
       },
       "Next": "MarkFailed"
     },
+    "EmbedFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "documentId.$": "$.extracted.documentId",
+        "knowledgeBaseId.$": "$.extracted.knowledgeBaseId",
+        "userId.$": "$.extracted.userId",
+        "error.$": "$.error",
+        "stage": "embed"
+      },
+      "Next": "MarkFailed"
+    },
     "IndexFailed": {
       "Type": "Pass",
       "Parameters": {
@@ -108,6 +156,14 @@
           "error.$": "$.error"
         }
       },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
       "ResultPath": null,
       "Next": "Failed"
     },

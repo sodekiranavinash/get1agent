@@ -79,6 +79,6 @@ output "ingestion_queue_url" {
 }
 
 output "ingestion_state_machine_arn" {
-  description = "Step Functions Express state machine for ingestion"
+  description = "Step Functions Standard state machine for ingestion"
   value       = try(module.ingestion[0].state_machine_arn, null)
 }

@@ -28,11 +28,19 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 
 - **Production**: S3 `ObjectCreated` → EventBridge → SQS
   (`ingestion-docs` + DLQ) → `ingestion-dispatcher` (batch 5, partial batch
-  failures) → **Step Functions Express** (`ingest-{docId}-{contentHash}`) →
-  `ingestion-extract` → `ingestion-index` (any stage failure →
-  `ingestion-mark-failed`). Each stage is its own Lambda for per-stage
+  failures) → **Step Functions Standard** (`ingest-{docId}-{eventToken}`) →
+  `ingestion-extract` → `ingestion-embed` → `ingestion-index` (any stage failure
+  → `ingestion-mark-failed`). Each stage is its own Lambda for per-stage
   memory/timeout/IAM and clear failure visibility. There is no in-process
   ingestion path.
+- **VPC split**: `ingestion-extract`, `ingestion-index` and
+  `ingestion-mark-failed` run in the VPC because they write RDS; `ingestion-embed`
+  and `ingestion-dispatcher` run **outside** the VPC. `ingestion-extract` chunks
+  text and stages `chunks.json` in S3 (it owns the per-KB config + timeline);
+  `ingestion-embed` reads it, calls Bedrock over the public internet, and writes
+  `embeddings.json` back to S3; `ingestion-index` reads that and persists to
+  pgvector. Keeping the Bedrock call out of the VPC removes the need for a
+  Bedrock interface endpoint (PrivateLink).
 - **Local**: the Floci stack runs this exact path; see "Local development".
 - Pipeline code is shared: `backend/services/shared/ingestion/` (chunking, extractors,
   embeddings, pipeline). Heavy extractor deps (`pymupdf`, `python-docx`,
@@ -48,9 +56,11 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - `ingestion_events` is the append-only timeline the UI reads
   (`GET /v1/knowledge-bases/events`). The worker updates `documents.status`
   (`processing`/`ready`/`failed`) and `knowledge_bases.status` follows.
-- The VPC has no NAT; the worker reaches Bedrock through a VPC interface
-  endpoint, and the dispatcher runs outside the VPC (it only calls Step
-  Functions).
+- The VPC has no NAT: the in-VPC workers reach S3 through the free gateway
+  endpoint and RDS over the VPC network. The Bedrock call lives in
+  `ingestion-embed`, outside the VPC, so no Bedrock interface endpoint
+  (PrivateLink) is needed; the dispatcher is outside the VPC too (it only calls
+  Step Functions).
 
 ### Ingestion observability
 
@@ -59,6 +69,11 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   query by document: `fields @timestamp, message | filter documentId = "…"`.
 - `ingestion_events` is the UI timeline; `documents.status` is the terminal
   state. The UI shows a **Stalled** badge when a document stops advancing.
+- A scheduled `ingestion-watchdog` (EventBridge `rate(10 minutes)`, in the VPC)
+  fails any document left in `processing` past `STALL_THRESHOLD_MINUTES`
+  (default 75), so an aborted execution can never stay silently stuck. The
+  threshold exceeds the state machine `TimeoutSeconds` (3600s) so it never races
+  a still-running execution.
 - No CloudWatch alarms are provisioned (monitoring will live in an admin panel).
 - X-Ray (`enable_xray`, default true) traces the ingestion workers + state
   machine. Lambda log retention is 7 days (`log_retention_days`).

@@ -53,8 +53,10 @@ floci-build:
 	bash infra/aws/build-backend-layers.sh
 	$(MAKE) -C backend/services/ingestion-dispatcher package
 	$(MAKE) -C backend/services/ingestion-extract package
+	$(MAKE) -C backend/services/ingestion-embed package
 	$(MAKE) -C backend/services/ingestion-index package
 	$(MAKE) -C backend/services/ingestion-mark-failed package
+	$(MAKE) -C backend/services/ingestion-watchdog package
 	$(MAKE) -C backend/services/knowledge-bases package
 	$(MAKE) -C backend/services/account-settings package
 
@@ -64,8 +66,10 @@ floci-artifacts:
 	for f in backend/services/layers/data/dist/layer.zip \
 		backend/services/ingestion-dispatcher/dist/function.zip \
 		backend/services/ingestion-extract/dist/function.zip \
+		backend/services/ingestion-embed/dist/function.zip \
 		backend/services/ingestion-index/dist/function.zip \
 		backend/services/ingestion-mark-failed/dist/function.zip \
+		backend/services/ingestion-watchdog/dist/function.zip \
 		backend/services/knowledge-bases/dist/function.zip \
 		backend/services/account-settings/dist/function.zip; do \
 		[ -f "$$f" ] || missing=1; \

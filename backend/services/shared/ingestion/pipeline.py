@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select, text
 
@@ -15,6 +17,8 @@ from shared.models import Document, IngestionEvent, KnowledgeBase
 from shared.storage import Storage
 
 DERIVED_DIR = ".derived"
+CHUNKS_FILENAME = "chunks.json"
+EMBEDDINGS_FILENAME = "embeddings.json"
 
 _IMAGE_CONTENT_TYPES = {
     "png": "image/png",
@@ -58,12 +62,30 @@ _INSERT_IMAGE = text(
 @dataclass
 class ExtractedDocument:
     text_key: str
+    chunks_key: str
     images: list[dict] = field(default_factory=list)
     stats: dict = field(default_factory=dict)
+    chunk_stats: dict = field(default_factory=dict)
 
     @property
     def image_count(self) -> int:
         return len(self.images)
+
+    @property
+    def chunk_count(self) -> int:
+        return int(self.chunk_stats.get("chunks", 0))
+
+
+@dataclass
+class EmbeddedDocument:
+    """Vectors computed by the (non-VPC) embed stage, staged in S3."""
+
+    embeddings_key: str
+    chunk_count: int
+    image_count: int
+    dimension: int
+    text_model: str
+    image_model: str
 
 
 @dataclass
@@ -156,6 +178,33 @@ async def get_document(document_id: str | uuid.UUID) -> dict | None:
             "knowledge_base_id": str(document.knowledge_base_id),
             "user_id": str(document.user_id),
         }
+
+
+async def find_stalled_documents(threshold_minutes: int) -> list[dict]:
+    """Documents left in ``processing`` with no update for ``threshold_minutes``.
+
+    The watchdog uses this to fail documents whose execution was aborted (e.g.
+    the state machine hit its ``TimeoutSeconds``) before the failure handler
+    could run. The threshold must exceed the state machine timeout so the
+    watchdog never races a still-running execution.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+    async with get_session() as session:
+        result = await session.execute(
+            select(Document).where(
+                Document.status == "processing",
+                Document.updated_at < cutoff,
+            )
+        )
+        return [
+            {
+                "id": str(document.id),
+                "knowledge_base_id": str(document.knowledge_base_id),
+                "user_id": str(document.user_id),
+                "file_name": document.file_name,
+            }
+            for document in result.scalars()
+        ]
 
 
 async def set_document_status(
@@ -265,6 +314,24 @@ def extract_document(
     text_key = f"{prefix}/text.md"
     storage.put_bytes(text_key, extraction.text.encode("utf-8"), "text/markdown")
 
+    # Chunking is pure CPU: do it here (the extract worker is in the VPC and
+    # already loaded the per-KB chunk settings) so the embed worker can stay
+    # outside the VPC and just turn text into vectors.
+    chunks = chunk_text(extraction.text, config.chunk_size, config.chunk_overlap)
+    chunks_key = f"{prefix}/{CHUNKS_FILENAME}"
+    storage.put_bytes(
+        chunks_key,
+        json.dumps({"chunks": chunks}).encode("utf-8"),
+        "application/json",
+    )
+    chunk_stats = {
+        "chunks": len(chunks),
+        "characters": sum(len(chunk) for chunk in chunks),
+        "tokens": sum(max(1, len(chunk) // 4) for chunk in chunks),
+        "chunkSize": config.chunk_size,
+        "chunkOverlap": config.chunk_overlap,
+    }
+
     images: list[dict] = []
     for index, (data, extension, page, width, height) in enumerate(
         _select_images(extraction, config)
@@ -285,8 +352,55 @@ def extract_document(
 
     return ExtractedDocument(
         text_key=text_key,
+        chunks_key=chunks_key,
         images=images,
         stats=_extraction_stats(extraction, len(images), len(raw)),
+        chunk_stats=chunk_stats,
+    )
+
+
+def embed_document(
+    storage: Storage,
+    config: IngestionConfig,
+    *,
+    chunks_key: str,
+    images: list[dict],
+) -> EmbeddedDocument:
+    """Turn staged chunk text + images into vectors and stage the result.
+
+    Runs outside the VPC: it only needs S3 (public) and Bedrock (public), so it
+    never touches RDS. The vectors are written back to S3 for the in-VPC index
+    worker to persist.
+    """
+    payload = json.loads(storage.get_bytes(chunks_key).decode("utf-8"))
+    chunks = payload.get("chunks") or []
+    chunk_vectors = embed_texts(chunks, config)
+
+    image_vectors: list[list[float]] = []
+    if images:
+        blobs = [storage.get_bytes(image["key"]) for image in images]
+        image_vectors = embed_images(blobs, config)
+
+    embeddings_key = f"{chunks_key.rsplit('/', 1)[0]}/{EMBEDDINGS_FILENAME}"
+    artifact = {
+        "dimension": config.embedding_dim,
+        "textModel": config.text_embed_model,
+        "imageModel": config.image_embed_model,
+        "chunkVectors": chunk_vectors,
+        "imageVectors": image_vectors,
+    }
+    storage.put_bytes(
+        embeddings_key,
+        json.dumps(artifact).encode("utf-8"),
+        "application/json",
+    )
+    return EmbeddedDocument(
+        embeddings_key=embeddings_key,
+        chunk_count=len(chunks),
+        image_count=len(image_vectors),
+        dimension=config.embedding_dim,
+        text_model=config.text_embed_model,
+        image_model=config.image_embed_model,
     )
 
 
@@ -297,61 +411,17 @@ async def index_document(
     user_id: str,
     knowledge_base_id: str,
     document_id: str,
-    text_key: str,
+    chunks_key: str,
+    embeddings_key: str,
     images: list[dict],
 ) -> IndexedDocument:
-    """Chunk + embed text and images, then replace this document's rows."""
-    text_content = storage.get_bytes(text_key).decode("utf-8")
-    chunks = chunk_text(text_content, config.chunk_size, config.chunk_overlap)
-    chunk_characters = sum(len(chunk) for chunk in chunks)
-    # Same heuristic used for chunks.token_count when persisting.
-    chunk_tokens = sum(max(1, len(chunk) // 4) for chunk in chunks)
-
-    await emit_event(
-        document_id=document_id,
-        knowledge_base_id=knowledge_base_id,
-        user_id=user_id,
-        stage="chunked",
-        status="succeeded",
-        message=(
-            f"{len(chunks)} chunk{'s' if len(chunks) != 1 else ''} "
-            f"· {config.chunk_size}/{config.chunk_overlap}"
-        ),
-        details={
-            "chunks": len(chunks),
-            "characters": chunk_characters,
-            "tokens": chunk_tokens,
-            "chunkSize": config.chunk_size,
-            "chunkOverlap": config.chunk_overlap,
-        },
-    )
-
-    await emit_event(
-        document_id=document_id,
-        knowledge_base_id=knowledge_base_id,
-        user_id=user_id,
-        stage="embedding",
-        status="started",
-        message=(
-            f"Embedding {len(chunks)} text chunk{'s' if len(chunks) != 1 else ''}"
-            + (
-                f" + {len(images)} image{'s' if len(images) != 1 else ''}"
-                if images
-                else ""
-            )
-        ),
-        details={
-            "textEmbeddings": len(chunks),
-            "imageEmbeddings": len(images),
-            "dimension": config.embedding_dim,
-        },
-    )
-    chunk_vectors = embed_texts(chunks, config)
-
-    image_vectors: list[list[float]] = []
-    if images:
-        blobs = [storage.get_bytes(image["key"]) for image in images]
-        image_vectors = embed_images(blobs, config)
+    """Persist the embed stage's vectors (and chunk text) into pgvector."""
+    chunks = json.loads(storage.get_bytes(chunks_key).decode("utf-8")).get(
+        "chunks"
+    ) or []
+    artifact = json.loads(storage.get_bytes(embeddings_key).decode("utf-8"))
+    chunk_vectors = artifact.get("chunkVectors") or []
+    image_vectors = artifact.get("imageVectors") or []
 
     embedding_count = len(chunk_vectors) + len(image_vectors)
     await emit_event(

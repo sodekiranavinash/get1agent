@@ -23,12 +23,20 @@ on:
         description: Deploy ingestion-extract
         type: boolean
         default: false
+      ingestion_embed:
+        description: Deploy ingestion-embed
+        type: boolean
+        default: false
       ingestion_index:
         description: Deploy ingestion-index
         type: boolean
         default: false
       ingestion_mark_failed:
         description: Deploy ingestion-mark-failed
+        type: boolean
+        default: false
+      ingestion_watchdog:
+        description: Deploy ingestion-watchdog
         type: boolean
         default: false
 
@@ -60,8 +68,10 @@ jobs:
           SELECT_KNOWLEDGE_BASES: ${{ inputs.knowledge_bases }}
           SELECT_INGESTION_DISPATCHER: ${{ inputs.ingestion_dispatcher }}
           SELECT_INGESTION_EXTRACT: ${{ inputs.ingestion_extract }}
+          SELECT_INGESTION_EMBED: ${{ inputs.ingestion_embed }}
           SELECT_INGESTION_INDEX: ${{ inputs.ingestion_index }}
           SELECT_INGESTION_MARK_FAILED: ${{ inputs.ingestion_mark_failed }}
+          SELECT_INGESTION_WATCHDOG: ${{ inputs.ingestion_watchdog }}
         run: |
           include="$(bash infra/aws/build-backend-matrix.sh)"
           echo "Deploying: $include"

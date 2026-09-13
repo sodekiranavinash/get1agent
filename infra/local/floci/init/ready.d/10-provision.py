@@ -32,6 +32,7 @@ BUCKET = os.environ.get("KB_BUCKET", "get1agent-local")
 QUEUE_NAME = "get1agent-local-ingestion-docs"
 DLQ_NAME = "get1agent-local-ingestion-dlq"
 RULE_NAME = "get1agent-local-ingestion-s3-object-created"
+WATCHDOG_RULE_NAME = "get1agent-local-ingestion-watchdog"
 STATE_MACHINE_NAME = "get1agent-local-ingestion"
 DATABASE_URL = os.environ.get(
     "APP_DATABASE_URL",
@@ -52,8 +53,10 @@ SFN_ROLE_ARN = f"arn:aws:iam::{ACCOUNT}:role/sfn-role"
 
 FUNCTIONS = {
     "extract": "get1agent-local-ingestion-extract",
+    "embed": "get1agent-local-ingestion-embed",
     "index": "get1agent-local-ingestion-index",
     "mark_failed": "get1agent-local-ingestion-mark-failed",
+    "watchdog": "get1agent-local-ingestion-watchdog",
     "dispatcher": "get1agent-local-ingestion-dispatcher",
     "knowledge_bases": "get1agent-local-knowledge-bases",
     "account_settings": "get1agent-local-account-settings",
@@ -184,6 +187,24 @@ def ensure_rule(events, queue_arn: str) -> None:
     log(f"created EventBridge rule {RULE_NAME} -> SQS")
 
 
+def ensure_watchdog_rule(events, function_arn: str) -> None:
+    try:
+        events.put_rule(
+            Name=WATCHDOG_RULE_NAME,
+            ScheduleExpression="rate(10 minutes)",
+            State="ENABLED",
+        )
+        events.put_targets(
+            Rule=WATCHDOG_RULE_NAME,
+            Targets=[{"Id": "ingestion-watchdog", "Arn": function_arn}],
+        )
+        log(f"created EventBridge schedule {WATCHDOG_RULE_NAME} -> watchdog")
+    except ClientError as exc:
+        # Not all emulators support scheduled rules; the function still works
+        # when invoked manually.
+        log(f"skipped watchdog schedule ({exc.response['Error']['Code']})")
+
+
 # --- lambda ------------------------------------------------------------------
 
 
@@ -248,6 +269,7 @@ def render_asl() -> str:
         definition = handle.read()
     replacements = {
         "${extract_function_arn}": function_arn(FUNCTIONS["extract"]),
+        "${embed_function_arn}": function_arn(FUNCTIONS["embed"]),
         "${index_function_arn}": function_arn(FUNCTIONS["index"]),
         "${mark_failed_function_arn}": function_arn(FUNCTIONS["mark_failed"]),
     }
@@ -371,8 +393,10 @@ def main() -> int:
     required = [
         f"{ROOT}/backend/services/layers/data/dist/layer.zip",
         f"{ROOT}/backend/services/ingestion-extract/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion-embed/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-index/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-mark-failed/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion-watchdog/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-dispatcher/dist/function.zip",
         f"{ROOT}/backend/services/knowledge-bases/dist/function.zip",
         f"{ROOT}/backend/services/account-settings/dist/function.zip",
@@ -417,6 +441,15 @@ def main() -> int:
     )
     ensure_function(
         lm,
+        FUNCTIONS["embed"],
+        f"{ROOT}/backend/services/ingestion-embed/dist/function.zip",
+        layers=[layer_arn],
+        environment=worker_env,
+        timeout=300,
+        memory=1024,
+    )
+    ensure_function(
+        lm,
         FUNCTIONS["index"],
         f"{ROOT}/backend/services/ingestion-index/dist/function.zip",
         layers=[layer_arn],
@@ -433,6 +466,16 @@ def main() -> int:
         timeout=30,
         memory=256,
     )
+    watchdog_arn = ensure_function(
+        lm,
+        FUNCTIONS["watchdog"],
+        f"{ROOT}/backend/services/ingestion-watchdog/dist/function.zip",
+        layers=[layer_arn],
+        environment={**worker_env, "STALL_THRESHOLD_MINUTES": "75"},
+        timeout=120,
+        memory=256,
+    )
+    ensure_watchdog_rule(events, watchdog_arn)
 
     state_machine_arn = ensure_state_machine(sfn)
 

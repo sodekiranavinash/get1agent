@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields, replace
 
 DEFAULT_TEXT_EMBED_MODEL = "amazon.titan-embed-text-v2:0"
 DEFAULT_IMAGE_EMBED_MODEL = "amazon.titan-embed-image-v1"
@@ -76,3 +76,25 @@ def load_config() -> IngestionConfig:
             "LOCAL_EMBED_MODEL", DEFAULT_LOCAL_EMBED_MODEL
         ),
     )
+
+
+def config_to_dict(config: IngestionConfig) -> dict:
+    """Serialize a config for the Step Functions payload (per-KB overrides).
+
+    The embed worker runs outside the VPC, so it cannot read per-KB settings
+    from RDS; the extract stage loads them and passes them along here.
+    """
+    return asdict(config)
+
+
+def config_from_dict(base: IngestionConfig, data: dict | None) -> IngestionConfig:
+    """Overlay a payload config onto the worker's env defaults."""
+    if not data:
+        return base
+    known = {item.name for item in fields(IngestionConfig)}
+    overrides = {
+        key: value
+        for key, value in data.items()
+        if key in known and value is not None
+    }
+    return replace(base, **overrides)

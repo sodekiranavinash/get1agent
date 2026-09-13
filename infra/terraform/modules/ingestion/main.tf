@@ -98,6 +98,7 @@ resource "aws_iam_role_policy" "sfn" {
         Action = ["lambda:InvokeFunction"]
         Resource = [
           var.extract_function_arn,
+          var.embed_function_arn,
           var.index_function_arn,
           var.mark_failed_function_arn,
         ]
@@ -128,12 +129,17 @@ resource "aws_iam_role_policy" "sfn" {
 }
 
 resource "aws_sfn_state_machine" "this" {
-  name     = local.name
-  type     = "EXPRESS"
+  name = local.name
+  # STANDARD, not EXPRESS: EXPRESS has a hard 5-minute execution cap, which
+  # silently aborts a slow ingestion (e.g. Bedrock retries) before the failure
+  # handler can run, orphaning the document in `processing`. STANDARD allows
+  # long-running executions; the ASL bounds them with TimeoutSeconds.
+  type     = "STANDARD"
   role_arn = aws_iam_role.sfn.arn
 
   definition = templatefile("${path.module}/statemachine.asl.json", {
     extract_function_arn     = var.extract_function_arn
+    embed_function_arn       = var.embed_function_arn
     index_function_arn       = var.index_function_arn
     mark_failed_function_arn = var.mark_failed_function_arn
   })
@@ -149,4 +155,27 @@ resource "aws_sfn_state_machine" "this" {
   }
 
   tags = var.tags
+}
+
+# Scheduled safety net: fails documents left in `processing` (e.g. an execution
+# that hit the state machine timeout before the failure handler could run).
+resource "aws_cloudwatch_event_rule" "watchdog" {
+  name                = "${local.name}-watchdog"
+  description         = "Scan for ingestion documents stuck in processing"
+  schedule_expression = var.watchdog_schedule_expression
+  tags                = var.tags
+}
+
+resource "aws_cloudwatch_event_target" "watchdog" {
+  rule      = aws_cloudwatch_event_rule.watchdog.name
+  target_id = "ingestion-watchdog"
+  arn       = var.watchdog_function_arn
+}
+
+resource "aws_lambda_permission" "watchdog" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = var.watchdog_function_arn
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.watchdog.arn
 }

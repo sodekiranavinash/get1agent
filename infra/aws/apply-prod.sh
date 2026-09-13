@@ -23,8 +23,10 @@ TARGETS=()
   TARGETS+=(-target='module.knowledge_storage[0]')
   TARGETS+=(-target='module.knowledge_bases[0]')
   TARGETS+=(-target='module.ingestion_extract[0]')
+  TARGETS+=(-target='module.ingestion_embed[0]')
   TARGETS+=(-target='module.ingestion_index[0]')
   TARGETS+=(-target='module.ingestion_mark_failed[0]')
+  TARGETS+=(-target='module.ingestion_watchdog[0]')
   TARGETS+=(-target='module.ingestion[0]')
   TARGETS+=(-target='module.ingestion_dispatcher[0]')
 }
@@ -55,11 +57,17 @@ if [[ "$need_backend_artifacts" == true ]]; then
   if [[ ! -s "$ROOT/backend/services/ingestion-extract/dist/function.zip" ]]; then
     make -C "$ROOT/backend/services/ingestion-extract" package
   fi
+  if [[ ! -s "$ROOT/backend/services/ingestion-embed/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/ingestion-embed" package
+  fi
   if [[ ! -s "$ROOT/backend/services/ingestion-index/dist/function.zip" ]]; then
     make -C "$ROOT/backend/services/ingestion-index" package
   fi
   if [[ ! -s "$ROOT/backend/services/ingestion-mark-failed/dist/function.zip" ]]; then
     make -C "$ROOT/backend/services/ingestion-mark-failed" package
+  fi
+  if [[ ! -s "$ROOT/backend/services/ingestion-watchdog/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/ingestion-watchdog" package
   fi
 fi
 

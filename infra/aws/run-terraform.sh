@@ -106,8 +106,10 @@ run_env() {
     local knowledge_zip="$ROOT/backend/services/knowledge-bases/dist/function.zip"
     local dispatcher_zip="$ROOT/backend/services/ingestion-dispatcher/dist/function.zip"
     local extract_zip="$ROOT/backend/services/ingestion-extract/dist/function.zip"
+    local embed_zip="$ROOT/backend/services/ingestion-embed/dist/function.zip"
     local index_zip="$ROOT/backend/services/ingestion-index/dist/function.zip"
     local fail_zip="$ROOT/backend/services/ingestion-mark-failed/dist/function.zip"
+    local watchdog_zip="$ROOT/backend/services/ingestion-watchdog/dist/function.zip"
     local need_backend=false
 
     if [[ -z "${PROD_TARGETS:-}" ]]; then
@@ -146,6 +148,11 @@ run_env() {
       echo "Run: make -C backend/services/ingestion-extract package" >&2
       exit 1
     fi
+    if [[ "$need_backend" == true && ! -s "$embed_zip" ]]; then
+      echo "Backend ingestion-embed zip missing or empty: $embed_zip" >&2
+      echo "Run: make -C backend/services/ingestion-embed package" >&2
+      exit 1
+    fi
     if [[ "$need_backend" == true && ! -s "$index_zip" ]]; then
       echo "Backend ingestion-index zip missing or empty: $index_zip" >&2
       echo "Run: make -C backend/services/ingestion-index package" >&2
@@ -156,13 +163,20 @@ run_env() {
       echo "Run: make -C backend/services/ingestion-mark-failed package" >&2
       exit 1
     fi
+    if [[ "$need_backend" == true && ! -s "$watchdog_zip" ]]; then
+      echo "Backend ingestion-watchdog zip missing or empty: $watchdog_zip" >&2
+      echo "Run: make -C backend/services/ingestion-watchdog package" >&2
+      exit 1
+    fi
     [[ "$need_backend" == true ]] && echo "Data layer zip: $layer_zip ($(wc -c <"$layer_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Health-check zip: $health_zip ($(wc -c <"$health_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Knowledge-bases zip: $knowledge_zip ($(wc -c <"$knowledge_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Ingestion-dispatcher zip: $dispatcher_zip ($(wc -c <"$dispatcher_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Ingestion-extract zip: $extract_zip ($(wc -c <"$extract_zip") bytes)"
+    [[ "$need_backend" == true ]] && echo "Ingestion-embed zip: $embed_zip ($(wc -c <"$embed_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Ingestion-index zip: $index_zip ($(wc -c <"$index_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Ingestion-mark-failed zip: $fail_zip ($(wc -c <"$fail_zip") bytes)"
+    [[ "$need_backend" == true ]] && echo "Ingestion-watchdog zip: $watchdog_zip ($(wc -c <"$watchdog_zip") bytes)"
   fi
 
   init_s3

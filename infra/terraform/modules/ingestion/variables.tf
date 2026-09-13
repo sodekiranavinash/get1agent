@@ -13,6 +13,11 @@ variable "extract_function_arn" {
   description = "ingestion-extract Lambda ARN invoked by the state machine"
 }
 
+variable "embed_function_arn" {
+  type        = string
+  description = "ingestion-embed Lambda ARN (runs outside the VPC) invoked by the state machine"
+}
+
 variable "index_function_arn" {
   type        = string
   description = "ingestion-index Lambda ARN invoked by the state machine"
@@ -21,6 +26,17 @@ variable "index_function_arn" {
 variable "mark_failed_function_arn" {
   type        = string
   description = "ingestion-mark-failed Lambda ARN invoked by the state machine"
+}
+
+variable "watchdog_function_arn" {
+  type        = string
+  description = "ingestion-watchdog Lambda ARN invoked on a schedule"
+}
+
+variable "watchdog_schedule_expression" {
+  type        = string
+  default     = "rate(10 minutes)"
+  description = "How often the watchdog scans for documents stuck in processing"
 }
 
 variable "visibility_timeout_seconds" {

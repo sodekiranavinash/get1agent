@@ -56,6 +56,16 @@
       ]
     },
     {
+      "name": "ingestion-embed",
+      "dir": "backend/services/ingestion-embed",
+      "function_name": "get1agent-prod-ingestion-embed",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": [
+        "data"
+      ]
+    },
+    {
       "name": "ingestion-index",
       "dir": "backend/services/ingestion-index",
       "function_name": "get1agent-prod-ingestion-index",
@@ -69,6 +79,16 @@
       "name": "ingestion-mark-failed",
       "dir": "backend/services/ingestion-mark-failed",
       "function_name": "get1agent-prod-ingestion-mark-failed",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": [
+        "data"
+      ]
+    },
+    {
+      "name": "ingestion-watchdog",
+      "dir": "backend/services/ingestion-watchdog",
+      "function_name": "get1agent-prod-ingestion-watchdog",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
       "layers": [

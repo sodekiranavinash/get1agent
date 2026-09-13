@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import uuid
@@ -8,6 +9,19 @@ from typing import Any
 import boto3
 
 DERIVED_SEGMENT = ".derived"
+
+
+def _execution_token(etag: str, event_id: str) -> str:
+    """Stable per-object-event token for the Step Functions execution name.
+
+    A STANDARD state machine keeps execution names unique for 90 days, so a
+    re-upload of the same content must produce a new name or it would be
+    silently ignored. The EventBridge event id changes on every upload, while
+    redeliveries of the same SQS message keep it — so this is both
+    re-upload-friendly and idempotent.
+    """
+    seed = f"{etag}:{event_id}".encode()
+    return hashlib.sha256(seed).hexdigest()[:12]
 
 
 def _log(level: str, message: str, **fields: Any) -> None:
@@ -62,6 +76,7 @@ def _detail(body: str) -> dict[str, str] | None:
         "bucket": bucket,
         "key": key,
         "etag": str(obj.get("etag") or "").strip('"') or "unknown",
+        "eventId": str(event.get("id") or obj.get("sequencer") or ""),
     }
 
 
@@ -90,7 +105,10 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
                 "s3Key": detail["key"],
                 "contentHash": detail["etag"],
             }
-            execution_name = f"ingest-{parsed['documentId']}-{detail['etag']}"
+            execution_name = (
+                f"ingest-{parsed['documentId']}"
+                f"-{_execution_token(detail['etag'], detail['eventId'])}"
+            )
             try:
                 client.start_execution(
                     stateMachineArn=state_machine_arn,

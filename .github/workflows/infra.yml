@@ -110,6 +110,11 @@ jobs:
         run: make package
         working-directory: backend/services/ingestion-extract
 
+      - name: Package backend ingestion-embed zip
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/services/ingestion-embed
+
       - name: Package backend ingestion-index zip
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
@@ -119,6 +124,11 @@ jobs:
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/services/ingestion-mark-failed
+
+      - name: Package backend ingestion-watchdog zip
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/services/ingestion-watchdog
 
       - name: Verify Lambda zips
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
@@ -135,10 +145,14 @@ jobs:
           unzip -l backend/services/ingestion-dispatcher/dist/function.zip | grep handler.py
           test -s backend/services/ingestion-extract/dist/function.zip
           unzip -l backend/services/ingestion-extract/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion-embed/dist/function.zip
+          unzip -l backend/services/ingestion-embed/dist/function.zip | grep handler.py
           test -s backend/services/ingestion-index/dist/function.zip
           unzip -l backend/services/ingestion-index/dist/function.zip | grep handler.py
           test -s backend/services/ingestion-mark-failed/dist/function.zip
           unzip -l backend/services/ingestion-mark-failed/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion-watchdog/dist/function.zip
+          unzip -l backend/services/ingestion-watchdog/dist/function.zip | grep handler.py
 
       - name: Terraform validate
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
