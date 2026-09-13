@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Package and optionally deploy backend/* Lambdas (Python handler zips + registry layers).
+# Package and optionally deploy backend/services/* Lambdas (Python handler zips + registry layers).
 #
 # Usage:
 #   bash infra/aws/deploy-backend.sh health-check          # package only
@@ -17,7 +17,7 @@ if [[ "$MODE" != "package" && "$MODE" != "deploy" ]]; then
   exit 2
 fi
 
-RESOLVED="$(python3 - "$ROOT/backend/registry.json" "$QUERY" <<'PY'
+RESOLVED="$(python3 - "$ROOT/backend/services/registry.json" "$QUERY" <<'PY'
 import json
 import sys
 

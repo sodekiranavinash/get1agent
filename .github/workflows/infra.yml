@@ -66,13 +66,6 @@ jobs:
           terraform_version: ${{ steps.tfver.outputs.version }}
           terraform_wrapper: false
 
-      - name: Setup Go
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: tools/challan-extractor/go.mod
-          cache-dependency-path: tools/challan-extractor/go.sum
-
       - name: Setup uv
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         uses: astral-sh/setup-uv@v5
@@ -83,11 +76,6 @@ jobs:
       - name: Write prod terraform.tfvars
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: bash infra/aws/write-prod-tfvars.sh
-
-      - name: Package challan-extractor zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
-        run: make package
-        working-directory: tools/challan-extractor
 
       - name: Set up QEMU
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
@@ -100,66 +88,57 @@ jobs:
       - name: Package backend health-check zip
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/health-check
-
-      - name: Package backend migration-runner zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
-        run: make package
-        working-directory: backend/migration-runner
+        working-directory: backend/services/health-check
 
       - name: Package backend account-settings zip
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/account-settings
+        working-directory: backend/services/account-settings
 
       - name: Package backend knowledge-bases zip
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/knowledge-bases
+        working-directory: backend/services/knowledge-bases
 
       - name: Package backend ingestion-dispatcher zip
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/ingestion-dispatcher
+        working-directory: backend/services/ingestion-dispatcher
 
       - name: Package backend ingestion-extract zip
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/ingestion-extract
+        working-directory: backend/services/ingestion-extract
 
       - name: Package backend ingestion-index zip
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/ingestion-index
+        working-directory: backend/services/ingestion-index
 
       - name: Package backend ingestion-mark-failed zip
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/ingestion-mark-failed
+        working-directory: backend/services/ingestion-mark-failed
 
       - name: Verify Lambda zips
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: |
-          test -s tools/challan-extractor/dist/function.zip
-          unzip -l tools/challan-extractor/dist/function.zip | grep bootstrap
-          test -s backend/layers/data/dist/layer.zip
-          unzip -l backend/layers/data/dist/layer.zip | grep 'python/sqlalchemy'
-          test -s backend/health-check/dist/function.zip
-          unzip -l backend/health-check/dist/function.zip | grep handler.py
-          test -s backend/migration-runner/dist/function.zip
-          unzip -l backend/migration-runner/dist/function.zip | grep 'versions/'
-          test -s backend/account-settings/dist/function.zip
-          unzip -l backend/account-settings/dist/function.zip | grep handler.py
-          test -s backend/knowledge-bases/dist/function.zip
-          unzip -l backend/knowledge-bases/dist/function.zip | grep handler.py
-          test -s backend/ingestion-dispatcher/dist/function.zip
-          unzip -l backend/ingestion-dispatcher/dist/function.zip | grep handler.py
-          test -s backend/ingestion-extract/dist/function.zip
-          unzip -l backend/ingestion-extract/dist/function.zip | grep handler.py
-          test -s backend/ingestion-index/dist/function.zip
-          unzip -l backend/ingestion-index/dist/function.zip | grep handler.py
-          test -s backend/ingestion-mark-failed/dist/function.zip
-          unzip -l backend/ingestion-mark-failed/dist/function.zip | grep handler.py
+          test -s backend/services/layers/data/dist/layer.zip
+          unzip -l backend/services/layers/data/dist/layer.zip | grep 'python/sqlalchemy'
+          test -s backend/services/health-check/dist/function.zip
+          unzip -l backend/services/health-check/dist/function.zip | grep handler.py
+          test -s backend/services/account-settings/dist/function.zip
+          unzip -l backend/services/account-settings/dist/function.zip | grep handler.py
+          test -s backend/services/knowledge-bases/dist/function.zip
+          unzip -l backend/services/knowledge-bases/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion-dispatcher/dist/function.zip
+          unzip -l backend/services/ingestion-dispatcher/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion-extract/dist/function.zip
+          unzip -l backend/services/ingestion-extract/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion-index/dist/function.zip
+          unzip -l backend/services/ingestion-index/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion-mark-failed/dist/function.zip
+          unzip -l backend/services/ingestion-mark-failed/dist/function.zip | grep handler.py
 
       - name: Terraform validate
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
@@ -192,7 +171,6 @@ jobs:
           APPLY_RDS: ${{ inputs.rds }}
           APPLY_API_GATEWAY: ${{ inputs.api_gateway }}
           APPLY_BACKEND_LAMBDAS: ${{ inputs.lambdas }}
-          APPLY_TOOL_LAMBDAS: ${{ inputs.lambdas }}
         run: bash infra/aws/apply-prod.sh
 
       - name: Print prod outputs

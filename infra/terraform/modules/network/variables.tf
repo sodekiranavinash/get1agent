@@ -21,6 +21,18 @@ variable "ec2_root_volume_gb" {
   description = "Root EBS volume in GB"
 }
 
+variable "artifacts_bucket" {
+  type        = string
+  default     = "get1agent-terraform-state-ap-south-1"
+  description = "Bucket the jumpbox reads migration bundles from (CI uploads them there)"
+}
+
+variable "artifacts_prefix" {
+  type        = string
+  default     = "migrations"
+  description = "Key prefix for migration bundles in the artifacts bucket"
+}
+
 variable "enable_ingestion_endpoints" {
   type        = bool
   default     = false

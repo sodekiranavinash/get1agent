@@ -46,6 +46,12 @@ variable "architectures" {
   default = ["arm64"]
 }
 
+variable "tracing_mode" {
+  type        = string
+  default     = "PassThrough"
+  description = "X-Ray tracing mode: PassThrough (no traces recorded) or Active (records traces)"
+}
+
 variable "environment" {
   type    = map(string)
   default = {}

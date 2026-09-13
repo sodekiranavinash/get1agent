@@ -4,12 +4,6 @@ variable "aws_region" {
   description = "AWS region for prod resources (API, VPC, RDS, Lambdas)"
 }
 
-variable "package_path" {
-  type        = string
-  description = "Path to function.zip, relative to infra/terraform/envs/prod"
-  default     = "../../../../tools/challan-extractor/dist/function.zip"
-}
-
 variable "enable_network" {
   type        = bool
   default     = false
@@ -26,12 +20,6 @@ variable "enable_api_gateway" {
   type        = bool
   default     = false
   description = "API Gateway HTTP API + Auth0 JWT"
-}
-
-variable "enable_tool_lambdas" {
-  type        = bool
-  default     = false
-  description = "Terraform tool Lambdas (e.g. challan-extractor)"
 }
 
 variable "enable_backend_lambdas" {
@@ -85,4 +73,10 @@ variable "knowledge_bases_bucket_name" {
   type        = string
   default     = "get1agent-prod-knowledge-bases"
   description = "Private S3 bucket for knowledge base documents"
+}
+
+variable "enable_xray" {
+  type        = bool
+  default     = true
+  description = "X-Ray tracing on the ingestion workers and state machine (records sampled traces)"
 }

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build Lambda layers listed in backend/registry.json.
+# Build Lambda layers listed in backend/services/registry.json.
 # Optional first arg: comma-separated layer names (default: all).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-REGISTRY="$ROOT/backend/registry.json"
+REGISTRY="$ROOT/backend/services/registry.json"
 FILTER="${1:-}"
 
 python3 - "$REGISTRY" "$ROOT" "$FILTER" <<'PY'

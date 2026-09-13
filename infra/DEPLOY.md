@@ -96,7 +96,7 @@ EC2 jumpbox (on-demand, public IPv4 only while running) → RDS PostgreSQL
 
 ## Backend Lambdas (Python)
 
-Registry: `backend/registry.json` — lists **layers** and **lambdas** (with `layers: [...]`).
+Registry: `backend/services/registry.json` — lists **layers** and **lambdas** (with `layers: [...]`).
 
 | Lambda | Route | Layers | Purpose |
 |--------|-------|--------|---------|
@@ -112,7 +112,7 @@ Handler zips contain **only** `handler.py`. Dependencies ship in Lambda layers.
 # Build data layer + handler zip locally
 # Layer build: native on Linux arm64; otherwise Docker + public.ecr.aws/lambda/python:3.14 (QEMU on x86_64)
 bash infra/aws/build-backend-layers.sh
-make -C backend/health-check package
+make -C backend/services/health-check package
 
 # Package + upload handler code (after Infra created the function + layer)
 bash infra/aws/deploy-backend.sh health-check deploy
@@ -173,14 +173,13 @@ RDS is **private** — reachable from VPC Lambdas and the always-on jumpbox.
 
 ## GitHub Actions
 
-Four workflows — each has checkboxes to run only what you need:
+Three workflows — each has checkboxes to run only what you need:
 
 | Workflow | Components (checkboxes) |
 |----------|-------------------------|
 | **Infra** | Web, VPC, RDS, API Gateway, Lambdas (state S3 bucket is created automatically) — always apply |
 | **Frontend** | Build + sync to S3 (separate from Infra) |
 | **Backend** | `health-check` — one checkbox = deploy Lambda **code** |
-| **Tools** | `challan-extractor` — one checkbox = deploy Lambda **code** |
 
 Push to `main` under `frontend/**` auto-runs **Frontend**.
 

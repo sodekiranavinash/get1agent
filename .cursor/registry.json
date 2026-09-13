@@ -2,34 +2,30 @@
   "layers": [
     {
       "name": "data",
-      "dir": "backend/layers/data",
+      "dir": "backend/services/layers/data",
       "terraform_name": "get1agent-prod-layer-data"
     }
   ],
   "lambdas": [
     {
       "name": "health-check",
-      "dir": "backend/health-check",
+      "dir": "backend/services/health-check",
       "function_name": "get1agent-prod-health-check",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
-      "layers": ["data"]
-    },
-    {
-      "name": "migration-runner",
-      "dir": "backend/migration-runner",
-      "function_name": "get1agent-prod-migration-runner",
-      "handler": "handler.lambda_handler",
-      "runtime": "python3.14",
-      "layers": ["data"]
+      "layers": [
+        "data"
+      ]
     },
     {
       "name": "account-settings",
-      "dir": "backend/account-settings",
+      "dir": "backend/services/account-settings",
       "function_name": "get1agent-prod-account-settings",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
-      "layers": ["data"]
+      "layers": [
+        "data"
+      ]
     }
   ]
 }

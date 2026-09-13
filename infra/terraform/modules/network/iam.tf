@@ -38,6 +38,22 @@ resource "aws_iam_role_policy" "jumpbox_db_bootstrap" {
   })
 }
 
+resource "aws_iam_role_policy" "jumpbox_artifacts" {
+  count = var.artifacts_bucket == "" ? 0 : 1
+  name  = "${var.name_prefix}-jumpbox-artifacts"
+  role  = aws_iam_role.jumpbox.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "ReadMigrationBundles"
+      Effect   = "Allow"
+      Action   = ["s3:GetObject"]
+      Resource = "arn:aws:s3:::${var.artifacts_bucket}/${var.artifacts_prefix}/*"
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "jumpbox" {
   name = "${var.name_prefix}-jumpbox"
   role = aws_iam_role.jumpbox.name

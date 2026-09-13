@@ -7,12 +7,10 @@ TFVARS="$ROOT/infra/terraform/envs/prod/terraform.tfvars"
 
 cat >"$TFVARS" <<'EOF'
 aws_region               = "ap-south-1"
-package_path             = "../../../../tools/challan-extractor/dist/function.zip"
 enable_network           = true
 enable_rds               = true
 enable_api_gateway       = true
 enable_backend_lambdas   = true
-enable_tool_lambdas      = true
 enable_ingestion         = true
 enable_api_custom_domain = true
 EOF

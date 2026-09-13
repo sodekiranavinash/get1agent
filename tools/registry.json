@@ -1,9 +1,0 @@
-{
-  "tools": [
-    {
-      "name": "challan-extractor",
-      "dir": "tools/challan-extractor",
-      "function_name": "get1agent-prod-challan-extractor"
-    }
-  ]
-}

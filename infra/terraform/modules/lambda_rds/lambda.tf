@@ -24,6 +24,10 @@ resource "aws_lambda_function" "this" {
     variables = var.environment
   }
 
+  tracing_config {
+    mode = var.tracing_mode
+  }
+
   dynamic "vpc_config" {
     for_each = length(var.subnet_ids) > 0 ? [1] : []
     content {
@@ -42,6 +46,7 @@ resource "aws_lambda_function" "this" {
     aws_iam_role_policy.sqs_access,
     aws_iam_role_policy.step_functions_access,
     aws_iam_role_policy.bedrock_access,
+    aws_iam_role_policy.xray,
     aws_security_group_rule.postgres_from_lambda,
   ]
 

@@ -31,13 +31,11 @@ import {
   completeUpload,
   createInlineDocument,
   createKnowledgeBase,
-  fileToBase64,
   formatBytes,
   invalidateKnowledgeBases,
   invalidateTagSuggestions,
   requestUpload,
   resolveContentType,
-  uploadLocal,
   uploadToPresignedUrl,
   useTagSuggestions,
   validateFile,
@@ -71,6 +69,8 @@ type CreateKnowledgeBaseDialogProps = {
   initialTab?: Tab
   initialFiles?: File[]
   maxFiles?: number
+  /** When set, files are added to this existing knowledge base. */
+  knowledgeBaseId?: string | null
   onCreated?: () => void
 }
 
@@ -99,11 +99,13 @@ export function CreateKnowledgeBaseDialog({
   initialTab = 'write',
   initialFiles,
   maxFiles = MAX_FILES_PER_KB,
+  knowledgeBaseId,
   onCreated,
 }: CreateKnowledgeBaseDialogProps) {
   const api = useApiClient()
   const mdInputRef = useRef<HTMLInputElement>(null)
   const { tags: tagSuggestions, refetch: refetchTags } = useTagSuggestions()
+  const addingToExisting = Boolean(knowledgeBaseId)
 
   const [tab, setTab] = useState<Tab>(initialTab)
   const [name, setName] = useState('')
@@ -133,7 +135,7 @@ export function CreateKnowledgeBaseDialog({
     setStaged([])
     setError(null)
     setSubmitting(false)
-    setKbId(null)
+    setKbId(knowledgeBaseId ?? null)
     setTab(initialTab)
     setChunkSize(DEFAULT_CHUNK_SIZE)
     setChunkOverlap(DEFAULT_CHUNK_OVERLAP)
@@ -151,7 +153,7 @@ export function CreateKnowledgeBaseDialog({
       )
       setTab('upload')
     }
-  }, [open, initialTab, initialFiles, maxFiles, refetchTags])
+  }, [open, initialTab, initialFiles, maxFiles, knowledgeBaseId, refetchTags])
 
   const contentNotes = notes.filter((note) => note.content.trim().length > 0)
   const hasWrittenContent = contentNotes.length > 0
@@ -262,18 +264,13 @@ export function CreateKnowledgeBaseDialog({
         sizeBytes: item.file.size,
         tags: item.tags,
       })
-      if (presign.mode === 's3' && presign.uploadUrl) {
-        await uploadToPresignedUrl(
-          presign.uploadUrl,
-          item.file,
-          presign.contentType || contentType,
-          (progress) => updateStaged(item.id, { progress }),
-        )
-        await completeUpload(api, knowledgeBaseId, presign.documentId)
-      } else {
-        const base64 = await fileToBase64(item.file)
-        await uploadLocal(api, knowledgeBaseId, presign.documentId, base64)
-      }
+      await uploadToPresignedUrl(
+        presign.uploadUrl,
+        item.file,
+        presign.contentType || contentType,
+        (progress) => updateStaged(item.id, { progress }),
+      )
+      await completeUpload(api, knowledgeBaseId, presign.documentId)
       updateStaged(item.id, { status: 'done', progress: 100 })
       return true
     } catch (uploadError) {
@@ -291,7 +288,7 @@ export function CreateKnowledgeBaseDialog({
   const handleSubmit = async () => {
     setError(null)
     setNameInvalid(false)
-    if (!name.trim()) {
+    if (!addingToExisting && !name.trim()) {
       setNameInvalid(true)
       setError('Knowledge base name is required')
       return
@@ -331,22 +328,22 @@ export function CreateKnowledgeBaseDialog({
 
     setSubmitting(true)
     try {
-      let knowledgeBaseId = kbId
-      if (!knowledgeBaseId) {
+      let targetKbId = kbId
+      if (!targetKbId) {
         const created = await createKnowledgeBase(api, {
           name: name.trim(),
           description: description.trim() || undefined,
           chunkSize,
           chunkOverlap,
         })
-        knowledgeBaseId = created.id
+        targetKbId = created.id
         setKbId(created.id)
       }
 
       let noteFailures = 0
       for (const note of contentNotes.filter((item) => item.status !== 'done')) {
         try {
-          await createInlineDocument(api, knowledgeBaseId, {
+          await createInlineDocument(api, targetKbId, {
             name: note.title.trim(),
             content: note.content,
             tags: note.tags,
@@ -364,7 +361,7 @@ export function CreateKnowledgeBaseDialog({
 
       const pending = staged.filter((item) => item.status !== 'done')
       const uploadResults = await Promise.all(
-        pending.map((item) => uploadOne(knowledgeBaseId as string, item)),
+        pending.map((item) => uploadOne(targetKbId as string, item)),
       )
 
       const failedUploads = uploadResults.filter((ok) => !ok).length
@@ -400,8 +397,12 @@ export function CreateKnowledgeBaseDialog({
       onOpenChange={onOpenChange}
       size="2xl"
       contentClassName="h-[85vh]"
-      title="New knowledge base"
-      description="Write markdown files, or upload documents. Pick one — not both."
+      title={addingToExisting ? 'Add files' : 'New knowledge base'}
+      description={
+        addingToExisting
+          ? 'Add markdown files, or upload documents to this knowledge base. Pick one — not both.'
+          : 'Write markdown files, or upload documents. Pick one — not both.'
+      }
       banner={
         error ? (
           <div className="flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning-soft/50 px-3.5 py-2.5">
@@ -430,12 +431,13 @@ export function CreateKnowledgeBaseDialog({
               )
             }
           >
-            {submitting ? 'Saving…' : 'Save knowledge base'}
+            {submitting ? 'Saving…' : addingToExisting ? 'Add files' : 'Save knowledge base'}
           </Button>
         </>
       }
     >
       <div className="space-y-5">
+        {!addingToExisting ? (
         <div className="space-y-4">
           <label className="block">
             <span className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted">
@@ -475,14 +477,16 @@ export function CreateKnowledgeBaseDialog({
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               placeholder="What does this knowledge base cover?"
-              rows={3}
+              rows={2}
               maxLength={MAX_DESCRIPTION_LENGTH}
               disabled={Boolean(kbId)}
-              className="w-full resize-y rounded-xl border border-border bg-canvas px-3 py-2.5 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-subtle focus:border-accent/50 disabled:opacity-60 scrollbar-thin"
+              className="h-[3.75rem] w-full resize-none rounded-xl border border-border bg-canvas px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-subtle focus:border-accent/50 disabled:opacity-60 scrollbar-thin"
             />
           </label>
         </div>
+        ) : null}
 
+        {!addingToExisting ? (
         <div className="rounded-xl border border-border bg-raised/30 p-3">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted">
             <Scissors className="h-3.5 w-3.5" />
@@ -519,6 +523,7 @@ export function CreateKnowledgeBaseDialog({
             same chunking.
           </p>
         </div>
+        ) : null}
 
         <div className="inline-flex rounded-xl border border-border bg-raised/40 p-1">
           {(

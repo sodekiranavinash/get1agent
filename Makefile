@@ -1,51 +1,122 @@
 # Root local-dev Makefile.
 #
-# Runs the apps locally, ready to receive traffic. No AWS, no Docker, no layers:
-# each Lambda is launched with its own uv-managed environment.
+# Everything runs locally on Floci — a free, LocalStack-compatible AWS emulator
+# (no AWS account, no auth token). Lambda, API Gateway, S3, SQS, EventBridge and
+# Step Functions run in Docker; Postgres + pgvector run alongside.
 #
-#   make dev                All local Lambdas + gateway -> http://localhost:9000
-#   make ui                 React app                  -> http://localhost:5173
-#   make gateway            Path-routing proxy only    -> http://localhost:9000
-#   make account-settings   account-settings Lambda    -> http://localhost:9001
-#   make health-check       health-check Lambda        -> http://localhost:9003
+#   make floci        Build + start + provision + migrate; prints the API URL
+#   make ui           React app -> http://localhost:5173
+#   make floci-logs   Follow Floci logs
+#   make floci-down   Stop and remove the stack
 #
-# Migrations are a separate script (not a make target):
-#   bash scripts/migrate.sh up|down|current|history|revision
-#
-# Set DATABASE_URL (and optional PORT) in .env.local or .env first.
+# Migrations against the Floci Postgres:
+#   make floci-migrate
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help ui dev gateway account-settings health-check knowledge-bases
+COMPOSE := docker compose --env-file .env -f infra/local/floci/docker-compose.yml
+FLOCI_API_URL := http://get1agent.execute-api.localhost.floci.io:4566
+LOCAL_EMBED_MODEL ?= mxbai-embed-large
+
+.PHONY: help ui floci floci-env floci-artifacts floci-build floci-up floci-wait \
+	floci-embed floci-reload floci-down floci-logs floci-migrate floci-migrate-down
 
 help:
-	@echo "get1agent local dev"
+	@echo "get1agent local dev (Floci)"
 	@echo ""
-	@echo "  make dev                Run ALL local Lambdas + gateway (single URL :9000)"
-	@echo "  make ui                 Start the React app (localhost:5173)"
-	@echo "  make gateway            Run the path-routing proxy only (localhost:9000)"
+	@echo "  make floci            One command: build, start Floci + Postgres, provision"
+	@echo "                        S3/SQS/EventBridge/Step Functions/Lambda + API Gateway,"
+	@echo "                        migrate, and print the local API URL"
+	@echo "  make ui               Start the React app (localhost:5173)"
 	@echo ""
-	@echo "  make account-settings   Run account-settings Lambda locally (localhost:9001)"
-	@echo "  make health-check       Run health-check Lambda locally (localhost:9003)"
-	@echo "  make knowledge-bases    Run knowledge-bases Lambda locally (localhost:9004)"
+	@echo "  Floci stack:"
+	@echo "    make floci          Build + up + provision + migrate"
+	@echo "    make floci-build    Build Lambda zips (after code changes)"
+	@echo "    make floci-reload   Rebuild + re-upload code to the running stack"
+	@echo "    make floci-up       Start the stack and provision resources"
+	@echo "    make floci-migrate  Apply DB migrations"
+	@echo "    make floci-migrate-down  Roll back one migration"
+	@echo "    make floci-logs     Follow the Floci logs"
+	@echo "    make floci-down     Stop and remove the stack"
 	@echo ""
-	@echo "  Migrations:  bash scripts/migrate.sh up|down|current|history|revision"
-	@echo "  Tip: set DATABASE_URL in .env.local or .env."
+	@echo "  API base URL: $(FLOCI_API_URL)"
 
 ui:
 	cd frontend && npm run dev
 
-dev:
-	bash local/dev.sh
+# --- Floci local stack -------------------------------------------------------
 
-gateway:
-	python3 -u local/gateway.py
+floci-env:
+	@test -f .env || cp infra/local/floci/env.example .env
 
-account-settings:
-	bash local/run.sh account-settings
+floci-build:
+	bash infra/aws/build-backend-layers.sh
+	$(MAKE) -C backend/services/ingestion-dispatcher package
+	$(MAKE) -C backend/services/ingestion-extract package
+	$(MAKE) -C backend/services/ingestion-index package
+	$(MAKE) -C backend/services/ingestion-mark-failed package
+	$(MAKE) -C backend/services/knowledge-bases package
+	$(MAKE) -C backend/services/account-settings package
 
-health-check:
-	bash local/run.sh health-check
+# Build only if any artifact is missing (fast first run).
+floci-artifacts:
+	@missing=0; \
+	for f in backend/services/layers/data/dist/layer.zip \
+		backend/services/ingestion-dispatcher/dist/function.zip \
+		backend/services/ingestion-extract/dist/function.zip \
+		backend/services/ingestion-index/dist/function.zip \
+		backend/services/ingestion-mark-failed/dist/function.zip \
+		backend/services/knowledge-bases/dist/function.zip \
+		backend/services/account-settings/dist/function.zip; do \
+		[ -f "$$f" ] || missing=1; \
+	done; \
+	if [ "$$missing" = "1" ]; then \
+		echo "Lambda artifacts missing; building..."; \
+		$(MAKE) floci-build; \
+	else \
+		echo "Lambda artifacts present (run 'make floci-build' after code changes)"; \
+	fi
 
-knowledge-bases:
-	bash local/run.sh knowledge-bases
+floci-up: floci-env
+	$(COMPOSE) up -d
+
+floci-wait:
+	bash infra/local/floci/wait.sh
+
+# After changing Lambda code: rebuild the zips and re-upload them to the running
+# Floci instance (re-runs the init hook in place; keeps S3/SQS/DB state).
+floci-reload: floci-env
+	$(MAKE) floci-build
+	$(COMPOSE) exec -T floci python3 /etc/floci/init/ready.d/10-provision.py
+
+# Pull the local embedding model (real vectors for ingestion).
+floci-embed: floci-env
+	@echo "waiting for ollama..."
+	@until $(COMPOSE) exec -T ollama ollama list >/dev/null 2>&1; do sleep 2; done
+	$(COMPOSE) exec -T ollama ollama pull $(LOCAL_EMBED_MODEL)
+
+floci-down: floci-env
+	$(COMPOSE) down
+
+floci-logs: floci-env
+	$(COMPOSE) logs -f floci
+
+floci-migrate: floci-env
+	bash infra/local/floci/migrate.sh upgrade
+
+floci-migrate-down: floci-env
+	bash infra/local/floci/migrate.sh downgrade
+
+# One command: build (if needed), start, provision, migrate, print the API URL.
+floci: floci-env
+	$(MAKE) floci-artifacts
+	$(MAKE) floci-up
+	$(MAKE) floci-wait
+	$(MAKE) floci-embed
+	$(MAKE) floci-migrate
+	@echo ""
+	@echo "Floci stack ready."
+	@echo "  API base URL: $(FLOCI_API_URL)"
+	@echo "  Point the UI at it (dev server proxies /v1 to Floci):"
+	@echo "    printf 'VITE_API_URL=/\\nVITE_API_PROXY_TARGET=$(FLOCI_API_URL)\\n' > frontend/.env.local"
+	@echo "  Logs:  make floci-logs     Stop:  make floci-down"

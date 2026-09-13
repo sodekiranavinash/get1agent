@@ -40,6 +40,12 @@ variable "log_retention_days" {
   default = 7
 }
 
+variable "enable_xray" {
+  type        = bool
+  default     = true
+  description = "Enable X-Ray tracing on the state machine"
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

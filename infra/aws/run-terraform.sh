@@ -100,31 +100,22 @@ run_env() {
   fi
 
   if [[ "$env_name" == "prod" ]]; then
-    local tool_zip="$ROOT/tools/challan-extractor/dist/function.zip"
-    local layer_zip="$ROOT/backend/layers/data/dist/layer.zip"
-    local health_zip="$ROOT/backend/health-check/dist/function.zip"
-    local migration_zip="$ROOT/backend/migration-runner/dist/function.zip"
-    local account_zip="$ROOT/backend/account-settings/dist/function.zip"
-    local knowledge_zip="$ROOT/backend/knowledge-bases/dist/function.zip"
-    local dispatcher_zip="$ROOT/backend/ingestion-dispatcher/dist/function.zip"
-    local extract_zip="$ROOT/backend/ingestion-extract/dist/function.zip"
-    local index_zip="$ROOT/backend/ingestion-index/dist/function.zip"
-    local fail_zip="$ROOT/backend/ingestion-mark-failed/dist/function.zip"
-    local need_tool=false need_backend=false
+    local layer_zip="$ROOT/backend/services/layers/data/dist/layer.zip"
+    local health_zip="$ROOT/backend/services/health-check/dist/function.zip"
+    local account_zip="$ROOT/backend/services/account-settings/dist/function.zip"
+    local knowledge_zip="$ROOT/backend/services/knowledge-bases/dist/function.zip"
+    local dispatcher_zip="$ROOT/backend/services/ingestion-dispatcher/dist/function.zip"
+    local extract_zip="$ROOT/backend/services/ingestion-extract/dist/function.zip"
+    local index_zip="$ROOT/backend/services/ingestion-index/dist/function.zip"
+    local fail_zip="$ROOT/backend/services/ingestion-mark-failed/dist/function.zip"
+    local need_backend=false
 
     if [[ -z "${PROD_TARGETS:-}" ]]; then
-      need_tool=true
       need_backend=true
     else
-      [[ "$PROD_TARGETS" == *challan_extractor* ]] && need_tool=true
       [[ "$PROD_TARGETS" == *layer_data* || "$PROD_TARGETS" == *health_check* || "$PROD_TARGETS" == *knowledge_bases* || "$PROD_TARGETS" == *ingestion* ]] && need_backend=true
     fi
 
-    if [[ "$need_tool" == true && ! -s "$tool_zip" ]]; then
-      echo "Lambda zip missing or empty: $tool_zip" >&2
-      echo "Run: make -C tools/challan-extractor package" >&2
-      exit 1
-    fi
     if [[ "$need_backend" == true && ! -s "$layer_zip" ]]; then
       echo "Backend data layer zip missing or empty: $layer_zip" >&2
       echo "Run: bash infra/aws/build-backend-layers.sh" >&2
@@ -132,45 +123,39 @@ run_env() {
     fi
     if [[ "$need_backend" == true && ! -s "$health_zip" ]]; then
       echo "Backend health-check zip missing or empty: $health_zip" >&2
-      echo "Run: make -C backend/health-check package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$migration_zip" ]]; then
-      echo "Backend migration-runner zip missing or empty: $migration_zip" >&2
-      echo "Run: make -C backend/migration-runner package" >&2
+      echo "Run: make -C backend/services/health-check package" >&2
       exit 1
     fi
     if [[ "$need_backend" == true && ! -s "$account_zip" ]]; then
       echo "Backend account-settings zip missing or empty: $account_zip" >&2
-      echo "Run: make -C backend/account-settings package" >&2
+      echo "Run: make -C backend/services/account-settings package" >&2
       exit 1
     fi
     if [[ "$need_backend" == true && ! -s "$knowledge_zip" ]]; then
       echo "Backend knowledge-bases zip missing or empty: $knowledge_zip" >&2
-      echo "Run: make -C backend/knowledge-bases package" >&2
+      echo "Run: make -C backend/services/knowledge-bases package" >&2
       exit 1
     fi
     if [[ "$need_backend" == true && ! -s "$dispatcher_zip" ]]; then
       echo "Backend ingestion-dispatcher zip missing or empty: $dispatcher_zip" >&2
-      echo "Run: make -C backend/ingestion-dispatcher package" >&2
+      echo "Run: make -C backend/services/ingestion-dispatcher package" >&2
       exit 1
     fi
     if [[ "$need_backend" == true && ! -s "$extract_zip" ]]; then
       echo "Backend ingestion-extract zip missing or empty: $extract_zip" >&2
-      echo "Run: make -C backend/ingestion-extract package" >&2
+      echo "Run: make -C backend/services/ingestion-extract package" >&2
       exit 1
     fi
     if [[ "$need_backend" == true && ! -s "$index_zip" ]]; then
       echo "Backend ingestion-index zip missing or empty: $index_zip" >&2
-      echo "Run: make -C backend/ingestion-index package" >&2
+      echo "Run: make -C backend/services/ingestion-index package" >&2
       exit 1
     fi
     if [[ "$need_backend" == true && ! -s "$fail_zip" ]]; then
       echo "Backend ingestion-mark-failed zip missing or empty: $fail_zip" >&2
-      echo "Run: make -C backend/ingestion-mark-failed package" >&2
+      echo "Run: make -C backend/services/ingestion-mark-failed package" >&2
       exit 1
     fi
-    [[ "$need_tool" == true ]] && echo "Tool Lambda zip: $tool_zip ($(wc -c <"$tool_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Data layer zip: $layer_zip ($(wc -c <"$layer_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Health-check zip: $health_zip ($(wc -c <"$health_zip") bytes)"
     [[ "$need_backend" == true ]] && echo "Knowledge-bases zip: $knowledge_zip ($(wc -c <"$knowledge_zip") bytes)"

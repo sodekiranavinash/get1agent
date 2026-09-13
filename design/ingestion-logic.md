@@ -181,11 +181,11 @@ Alternative embeddings if cost-sensitive: `voyage-3-lite`, or self-hosted
 
 ## 7. Alignment with this repo
 
-- Lambdas live in `backend/<name>/src/handler.py`, registered in
-  `backend/registry.json`, runtime `python3.14`, shared `data` layer.
+- Lambdas live in `backend/services/<name>/src/handler.py`, registered in
+  `backend/services/registry.json`, runtime `python3.14`, shared `data` layer.
 - New schema changes go through `backend/migrations/versions/` and
-  `bash scripts/migrate.sh up`.
-- Local testing via `make` targets / `local/` scripts only — never invoke
+  `bash infra/scripts/migrate.sh up`.
+- Local testing via `make` targets / `infra/local/` scripts only — never invoke
   Lambdas through AWS or Docker locally.
 - Step Functions definition and S3/EventBridge resources belong in
   `infra/terraform/`.

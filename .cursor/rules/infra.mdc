@@ -11,15 +11,13 @@ alwaysApply: false
 - API domain: `api.get1agent.com` → Cloudflare CNAME → API Gateway
 - Network: VPC + jumpbox (`infra/terraform/modules/network`); public IPv4 only while `db-access.sh` runs
 - Data: RDS PostgreSQL (`infra/terraform/modules/rds`) + SSM Parameter Store credentials
-- Tool Lambdas: `infra/terraform/modules/lambda_tool` (Go tools in `tools/`)
-- Backend Lambdas: `infra/terraform/modules/lambda_rds` (Python in `backend/`, layers in `backend/layers/`, registry in `backend/registry.json`)
+- Backend Lambdas: `infra/terraform/modules/lambda_rds` (Python in `backend/services/`, layers in `backend/services/layers/`, registry in `backend/services/registry.json`)
 - API routes: `infra/terraform/envs/prod/api_gateway.tf`
 
 ## GitHub Actions
 - **Infra** — web / vpc / rds / api_gateway / lambdas (state bucket auto; always apply)
 - **Frontend** — build + sync to S3 (separate from Infra)
 - **Backend** — one checkbox per Lambda = deploy code
-- **Tools** — one checkbox per tool = deploy code
 
 ## Deploy scripts
 - `infra/aws/deploy-all.sh` — full infra apply

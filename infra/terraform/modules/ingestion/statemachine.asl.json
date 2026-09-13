@@ -46,9 +46,9 @@
       "Parameters": {
         "FunctionName": "${index_function_arn}",
         "Payload": {
-          "documentId.$": "$.documentId",
-          "knowledgeBaseId.$": "$.knowledgeBaseId",
-          "userId.$": "$.userId",
+          "documentId.$": "$.extracted.documentId",
+          "knowledgeBaseId.$": "$.extracted.knowledgeBaseId",
+          "userId.$": "$.extracted.userId",
           "textKey.$": "$.extracted.textKey",
           "images.$": "$.extracted.images"
         }
@@ -87,9 +87,9 @@
     "IndexFailed": {
       "Type": "Pass",
       "Parameters": {
-        "documentId.$": "$.documentId",
-        "knowledgeBaseId.$": "$.knowledgeBaseId",
-        "userId.$": "$.userId",
+        "documentId.$": "$.extracted.documentId",
+        "knowledgeBaseId.$": "$.extracted.knowledgeBaseId",
+        "userId.$": "$.extracted.userId",
         "error.$": "$.error",
         "stage": "index"
       },

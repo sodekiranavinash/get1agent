@@ -1,0 +1,86 @@
+# Floci (free, LocalStack-compatible AWS emulator) + Postgres for testing the
+# ingestion pipeline locally. No AWS account, no auth token.
+#
+#   make floci-build     # build Lambda zips (data layer + ingestion functions)
+#   make floci-up        # start postgres + floci; init hook provisions AWS resources
+#   make floci-migrate   # apply DB migrations to the local Postgres
+#   make floci-dev       # run the API Lambdas on the host against this stack
+#   make floci-down      # stop and remove the stack
+#
+# Run `make floci-up` only after `make floci-build` (the init hook uploads the
+# zips). See infra/local/floci/README.md for details.
+name: get1agent-floci
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-get1agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-get1agent}
+      POSTGRES_DB: ${POSTGRES_DB:-get1agent}
+    ports:
+      # Host port 5433 avoids clashing with a native Postgres on 5432. Inside
+      # the compose network the DB is always postgres:5432 (Lambda containers).
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-get1agent} -d ${POSTGRES_DB:-get1agent}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - get1agent
+
+  floci:
+    # `-compat` bundles Python 3 + boto3 + the AWS CLI, which the init hook uses.
+    image: ${FLOCI_IMAGE:-floci/floci:latest-compat}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      FLOCI_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      # Browser-reachable hostname. Floci's embedded DNS resolves it inside
+      # Lambda containers, and it resolves to 127.0.0.1 from the host/browser,
+      # so presigned S3 URLs and the execute-api host work from both.
+      FLOCI_HOSTNAME: localhost.floci.io
+      FLOCI_STORAGE_MODE: memory
+      FLOCI_INIT_HOOKS_TIMEOUT_SECONDS: "300"
+      # Read by the init hook (infra/local/floci/init/ready.d/10-provision.py).
+      APP_DATABASE_URL: ${FLOCI_DATABASE_URL:-postgresql+asyncpg://get1agent:get1agent@postgres:5432/get1agent}
+      KB_BUCKET: ${S3_BUCKET:-get1agent-local}
+      AUTH0_ISSUER: ${AUTH0_ISSUER:-https://get1agent.us.auth0.com/}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.get1agent.com}
+      OLLAMA_URL: http://ollama:11434
+      LOCAL_EMBED_MODEL: ${LOCAL_EMBED_MODEL:-mxbai-embed-large}
+    ports:
+      - "${FLOCI_PORT:-4566}:4566"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./init:/etc/floci/init:ro
+      - ../../../backend:/opt/get1agent/backend:ro
+      - ../../../infra:/opt/get1agent/infra:ro
+    networks:
+      - get1agent
+
+  # Real text embeddings for local ingestion (1024-dim, matches the schema).
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    networks:
+      - get1agent
+
+networks:
+  get1agent:
+    name: get1agent-floci
+
+volumes:
+  pgdata:
+  ollama_models:

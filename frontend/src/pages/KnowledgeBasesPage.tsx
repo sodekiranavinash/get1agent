@@ -1,23 +1,20 @@
-import { Fragment, useEffect, useState } from 'react'
+import { useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
-  ArrowRight,
   Boxes,
   Clock,
-  Database,
-  FileSearch,
   FileStack,
   HardDrive,
+  Image as ImageIcon,
   Layers,
+  Lock,
   Paperclip,
   Plus,
   Scissors,
   Settings2,
-  Sparkles,
   Trash2,
-  UploadCloud,
 } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -31,17 +28,23 @@ import { FileDropzone } from '../components/knowledge/FileDropzone'
 import { CreateKnowledgeBaseDialog } from '../components/knowledge/CreateKnowledgeBaseDialog'
 import { KnowledgeBaseDetailDialog } from '../components/knowledge/KnowledgeBaseDetailDialog'
 import { IngestionActivity } from '../components/knowledge/IngestionActivity'
-import { RagSettings } from '../components/knowledge/RagSettings'
+import { useAdaptivePoll } from '../hooks/useAdaptivePoll'
 import { ApiError, useApiClient } from '../lib/api'
 import {
   MAX_FILES_PER_KB,
   MAX_FILES_PER_USER,
   MAX_KNOWLEDGE_BASES,
   MAX_STORAGE_BYTES,
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_CHUNK_SIZE,
+  EMBEDDING_DIM,
+  IMAGE_EMBED_MODEL,
+  TEXT_EMBED_MODEL,
   deleteKnowledgeBase,
   formatBytes,
   formatRelative,
   invalidateKnowledgeBases,
+  removeIngestionEvents,
   useIngestionEvents,
   useKnowledgeBases,
   type KnowledgeBase,
@@ -56,14 +59,6 @@ const statusConfig: Record<
   processing: { variant: 'accent', label: 'Processing' },
   failed: { variant: 'warning', label: 'Failed' },
 }
-
-const PIPELINE_STEPS: { label: string; icon: LucideIcon }[] = [
-  { label: 'Upload', icon: UploadCloud },
-  { label: 'Parse', icon: FileSearch },
-  { label: 'Chunk', icon: Scissors },
-  { label: 'Embed', icon: Boxes },
-  { label: 'Index', icon: Database },
-]
 
 const toneStyles = {
   accent: { box: 'bg-accent-soft text-accent', bar: 'bg-accent' },
@@ -129,138 +124,134 @@ function UsageStat({
   )
 }
 
-function UploadPanel({
+function KnowledgeBasesPanel({
+  knowledgeBases,
+  filesPerKb,
+  count,
+  limit,
+  atLimit,
   remaining,
   disabled,
   onFiles,
   onWrite,
+  onManage,
+  onDelete,
 }: {
+  knowledgeBases: KnowledgeBase[]
+  filesPerKb: number
+  count: number
+  limit: number
+  atLimit: boolean
   remaining: number
   disabled: boolean
   onFiles: (files: File[]) => void
   onWrite: () => void
+  onManage: (kb: KnowledgeBase) => void
+  onDelete: (kb: KnowledgeBase) => void
 }) {
   return (
-    <Card
-      padding="none"
-      className="gradient-border relative flex h-full flex-col overflow-hidden"
-    >
-      <div
-        className="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-accent-soft blur-3xl"
-        aria-hidden="true"
-      />
-      <div className="relative flex h-full flex-col p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="max-w-lg">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Sparkles className="h-4 w-4 text-accent" />
-              Add documents
-            </h2>
-            <p className="mt-1 text-xs leading-relaxed text-muted">
-              Drop files to build a new knowledge base. We parse, chunk, embed,
-              and index everything automatically.
-            </p>
+    <Card padding="none" className="gradient-border relative overflow-hidden">
+      <div className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <FileStack className="h-4 w-4 text-accent" />
+            Knowledge bases
+            <span className="rounded-full bg-raised px-2 py-0.5 text-[11px] font-semibold tabular-nums text-muted">
+              {count}/{limit}
+            </span>
+          </h2>
+          <div className="flex items-center gap-3">
+            {atLimit ? (
+              <span className="text-xs text-warning">
+                Limit of {limit} reached
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={onWrite}
+              disabled={disabled}
+              className="text-xs font-semibold text-accent transition-colors hover:text-accent-hover disabled:opacity-50"
+            >
+              Write knowledge directly
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onWrite}
-            disabled={disabled}
-            className="text-xs font-semibold text-accent transition-colors hover:text-accent-hover disabled:opacity-50"
-          >
-            Write knowledge directly
-          </button>
         </div>
 
-        <div className="mt-4 flex-1">
+        <div className="mt-3">
           <FileDropzone
             remaining={remaining}
             disabled={disabled}
             onFiles={onFiles}
-            className="h-full"
           />
         </div>
+      </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-1.5">
-          {PIPELINE_STEPS.map((step, index) => (
-            <Fragment key={step.label}>
-              {index > 0 ? (
-                <ArrowRight className="h-3 w-3 text-subtle" />
-              ) : null}
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-raised/60 px-2.5 py-1 text-[11px] font-medium text-muted">
-                <step.icon className="h-3 w-3 text-accent" strokeWidth={1.75} />
-                {step.label}
-              </span>
-            </Fragment>
-          ))}
+      <div className="border-t border-border">
+        <div className="p-5">
+          {knowledgeBases.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border-strong bg-raised/20 px-6 py-10 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-soft text-accent">
+                <FileStack className="h-6 w-6" strokeWidth={1.5} />
+              </div>
+              <h3 className="mt-4 text-base font-semibold text-foreground">
+                No knowledge bases yet
+              </h3>
+              <p className="mx-auto mt-2 max-w-md text-sm text-muted">
+                Drop documents above, or use the{' '}
+                <span className="font-semibold text-foreground">
+                  Knowledge Base
+                </span>{' '}
+                button to get started.
+              </p>
+            </div>
+          ) : (
+            <div className="scrollbar-thin max-h-[292px] overflow-y-auto pr-1">
+              <div className="flex flex-col gap-2.5">
+                {knowledgeBases.map((kb, index) => (
+                  <KnowledgeBaseRow
+                    key={kb.id}
+                    kb={kb}
+                    filesPerKb={filesPerKb}
+                    index={index}
+                    onManage={() => onManage(kb)}
+                    onDelete={() => onDelete(kb)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border px-5 py-3 text-[11px] text-muted">
+        <span
+          title={TEXT_EMBED_MODEL}
+          className="inline-flex items-center gap-1.5"
+        >
+          <Boxes className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />
+          Text · Titan Text V2 · {EMBEDDING_DIM}-d
+        </span>
+        <span
+          title={IMAGE_EMBED_MODEL}
+          className="inline-flex items-center gap-1.5"
+        >
+          <ImageIcon className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />
+          Image · Titan Multimodal G1 · {EMBEDDING_DIM}-d
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <Scissors className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />
+          Chunk {DEFAULT_CHUNK_SIZE} · overlap {DEFAULT_CHUNK_OVERLAP}
+        </span>
+        <span className="ml-auto inline-flex items-center gap-1 text-subtle">
+          <Lock className="h-3 w-3" />
+          Per knowledge base
+        </span>
       </div>
     </Card>
   )
 }
 
-type SectionTab = 'bases' | 'upload'
-
-function SectionTabs({
-  value,
-  onChange,
-  count,
-  limit,
-}: {
-  value: SectionTab
-  onChange: (value: SectionTab) => void
-  count: number
-  limit: number
-}) {
-  const tabs: {
-    key: SectionTab
-    label: string
-    icon: LucideIcon
-    badge?: string
-  }[] = [
-    {
-      key: 'bases',
-      label: 'Knowledge bases',
-      icon: FileStack,
-      badge: `${count}/${limit}`,
-    },
-    { key: 'upload', label: 'Add documents', icon: UploadCloud },
-  ]
-
-  return (
-    <div className="inline-flex items-center gap-1 rounded-2xl border border-border bg-raised/60 p-1">
-      {tabs.map((item) => {
-        const active = value === item.key
-        return (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => onChange(item.key)}
-            className={`relative inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
-              active ? 'text-foreground' : 'text-muted hover:text-foreground'
-            }`}
-          >
-            {active ? (
-              <motion.span
-                layoutId="kb-section-tab"
-                className="absolute inset-0 rounded-xl border border-border bg-surface shadow-panel"
-                transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-              />
-            ) : null}
-            <item.icon className="relative z-10 h-4 w-4" strokeWidth={1.75} />
-            <span className="relative z-10">{item.label}</span>
-            {item.badge ? (
-              <span className="relative z-10 rounded-full bg-raised px-2 py-0.5 text-[11px] font-semibold tabular-nums text-muted">
-                {item.badge}
-              </span>
-            ) : null}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-function KnowledgeBaseCard({
+function KnowledgeBaseRow({
   kb,
   filesPerKb,
   index,
@@ -287,67 +278,57 @@ function KnowledgeBaseCard({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{
-        duration: 0.35,
-        delay: 0.05 + index * 0.04,
+        duration: 0.3,
+        delay: 0.04 + index * 0.03,
         ease: [0.25, 0.46, 0.45, 0.94],
       }}
-      className="h-full"
     >
-      <Card hover className="group flex h-full flex-col">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div
-              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-raised ${tone}`}
-            >
-              <FileStack className="h-5 w-5" strokeWidth={1.5} />
-            </div>
-            <div className="min-w-0">
-              <h3 className="truncate text-sm font-semibold text-foreground">
-                {kb.name}
-              </h3>
-              <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-subtle">
-                <Clock className="h-3 w-3" />
-                {formatRelative(kb.updatedAt)}
-              </p>
-            </div>
-          </div>
-          <Badge variant={status.variant} dot={kb.status === 'processing'}>
-            {status.label}
-          </Badge>
+      <div className="group flex h-16 items-center gap-4 rounded-xl border border-border bg-raised/30 px-4 transition-colors hover:border-accent/20 hover:bg-raised/50">
+        <div
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-raised ${tone}`}
+        >
+          <FileStack className="h-4 w-4" strokeWidth={1.5} />
         </div>
 
-        <p className="mt-3 line-clamp-2 min-h-[2.25rem] text-xs leading-relaxed text-muted">
-          {kb.description || 'No description'}
-        </p>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="truncate text-sm font-semibold text-foreground">
+              {kb.name}
+            </h3>
+            <Badge variant={status.variant} dot={kb.status === 'processing'}>
+              {status.label}
+            </Badge>
+          </div>
+          <p className="mt-0.5 truncate text-xs text-muted">
+            {kb.description || 'No description'}
+          </p>
+        </div>
 
-        <div className="mt-4 flex items-center justify-between text-[11px] text-muted">
+        <div className="hidden shrink-0 items-center gap-4 text-[11px] text-muted lg:flex">
           <span className="inline-flex items-center gap-1.5">
             <Paperclip className="h-3.5 w-3.5" />
-            {kb.fileCount}/{filesPerKb} files
+            {kb.fileCount}/{filesPerKb}
           </span>
-          <span className="tabular-nums">{pct}%</span>
-        </div>
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-raised">
-          <div
-            className={`h-full rounded-full ${
-              kb.status === 'failed' ? 'bg-warning' : 'bg-accent'
-            }`}
-            style={{ width: `${pct}%` }}
-          />
+          <span className="inline-flex items-center gap-1 text-subtle">
+            <Clock className="h-3 w-3" />
+            {formatRelative(kb.updatedAt)}
+          </span>
+          <span className="w-9 text-right tabular-nums text-subtle">
+            {pct}%
+          </span>
         </div>
 
-        <div className="mt-4 flex items-center gap-2 border-t border-border pt-4">
+        <div className="flex shrink-0 items-center gap-1.5">
           <Button
             variant="outline"
             size="sm"
             icon={<Settings2 className="h-3.5 w-3.5" />}
             onClick={onManage}
-            className="flex-1"
           >
-            Manage
+            Manage files
           </Button>
           <button
             type="button"
@@ -359,7 +340,7 @@ function KnowledgeBaseCard({
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
-      </Card>
+      </div>
     </motion.div>
   )
 }
@@ -379,10 +360,10 @@ function KnowledgeBasesSkeleton() {
                 <Skeleton key={index} className="h-24 w-full rounded-2xl" />
               ))}
             </div>
-            <Skeleton className="h-44 w-full rounded-2xl" />
-            <div>
-              <Skeleton className="mb-4 h-11 w-72 rounded-2xl" />
-              <Skeleton className="h-[400px] w-full rounded-2xl" />
+            <div className="space-y-3">
+              <Skeleton className="h-52 w-full rounded-2xl" />
+              <Skeleton className="h-16 w-full rounded-xl" />
+              <Skeleton className="h-16 w-full rounded-xl" />
             </div>
           </div>
           <Skeleton className="hidden w-[360px] shrink-0 self-stretch rounded-2xl xl:block" />
@@ -404,7 +385,6 @@ export function KnowledgeBasesPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [activityOpen, setActivityOpen] = useState(true)
-  const [tab, setTab] = useState<SectionTab>('bases')
 
   const knowledgeBases = data?.knowledgeBases ?? []
   const usage = data?.usage
@@ -422,19 +402,36 @@ export function KnowledgeBasesPage() {
   const remainingUserFiles = Math.max(0, fileLimit - usedFiles)
   const maxFilesForNewKb = Math.max(0, Math.min(filesPerKb, remainingUserFiles))
   const processing = knowledgeBases.filter((kb) => kb.status === 'processing')
+  // `documentStatus` is the document's current status, so any non-terminal
+  // event means that file is still moving through the pipeline.
+  const hasActiveIngestion = (ingestionEvents ?? []).some(
+    (event) =>
+      event.documentStatus !== 'ready' && event.documentStatus !== 'failed',
+  )
 
-  useEffect(() => {
-    if (processing.length === 0) return
-    const id = window.setInterval(() => {
-      refetch()
+  // Poll only while the activity panel is open and something is actually
+  // moving. A closed panel costs nothing; a slow stage backs off; a stuck
+  // document stops after the cap and offers a manual refresh.
+  const pollTick = useRef(0)
+  const { cappedOut, reset: resetPoll } = useAdaptivePoll({
+    enabled: activityOpen && (processing.length > 0 || hasActiveIngestion),
+    resetKey: ingestionEvents?.[0]?.id,
+    onPoll: () => {
       refetchEvents()
-    }, 4000)
-    return () => window.clearInterval(id)
-  }, [processing.length, refetch, refetchEvents])
+      pollTick.current += 1
+      // Knowledge-base status changes far less often than ingestion events.
+      if (pollTick.current % 4 === 0) refetch()
+    },
+  })
 
   const refreshAll = () => {
     refetch()
     refetchEvents()
+  }
+
+  const refreshActivity = () => {
+    resetPoll()
+    refreshAll()
   }
 
   const openCreate = (tab: 'write' | 'upload', files?: File[]) => {
@@ -455,12 +452,18 @@ export function KnowledgeBasesPage() {
     try {
       await deleteKnowledgeBase(api, deleteTarget.id)
       invalidateKnowledgeBases()
+      removeIngestionEvents(
+        (event) => event.knowledgeBaseId === deleteTarget.id,
+      )
       if (detailId === deleteTarget.id) setDetailId(null)
       setDeleteTarget(null)
       refetch()
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
         invalidateKnowledgeBases()
+        removeIngestionEvents(
+          (event) => event.knowledgeBaseId === deleteTarget.id,
+        )
         if (detailId === deleteTarget.id) setDetailId(null)
         setDeleteTarget(null)
         refetch()
@@ -547,91 +550,19 @@ export function KnowledgeBasesPage() {
               />
             </div>
 
-            <div>
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <SectionTabs
-                  value={tab}
-                  onChange={setTab}
-                  count={usedKbs}
-                  limit={kbLimit}
-                />
-                {atKbLimit ? (
-                  <span className="text-xs text-warning">
-                    Limit of {kbLimit} reached
-                  </span>
-                ) : null}
-              </div>
-
-              <div className="lg:h-[400px]">
-                <AnimatePresence mode="wait" initial={false}>
-                  {tab === 'bases' ? (
-                    <motion.div
-                      key="bases"
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      transition={{ duration: 0.2 }}
-                      className="h-full"
-                    >
-                      {knowledgeBases.length === 0 ? (
-                        <div className="flex h-full flex-col items-center justify-center rounded-2xl border border-dashed border-border-strong bg-raised/20 px-6 py-12 text-center">
-                          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-soft text-accent">
-                            <FileStack className="h-6 w-6" strokeWidth={1.5} />
-                          </div>
-                          <h3 className="mt-4 text-base font-semibold text-foreground">
-                            No knowledge bases yet
-                          </h3>
-                          <p className="mx-auto mt-2 max-w-md text-sm text-muted">
-                            Switch to the{' '}
-                            <span className="font-semibold text-foreground">
-                              Add documents
-                            </span>{' '}
-                            tab, or use the{' '}
-                            <span className="font-semibold text-foreground">
-                              Knowledge Base
-                            </span>{' '}
-                            button above to get started.
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="scrollbar-thin h-full overflow-y-auto pr-1">
-                          <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
-                            {knowledgeBases.map((kb, index) => (
-                              <KnowledgeBaseCard
-                                key={kb.id}
-                                kb={kb}
-                                filesPerKb={filesPerKb}
-                                index={index}
-                                onManage={() => setDetailId(kb.id)}
-                                onDelete={() => openDelete(kb)}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="upload"
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      transition={{ duration: 0.2 }}
-                      className="h-full"
-                    >
-                      <UploadPanel
-                        remaining={maxFilesForNewKb}
-                        disabled={atKbLimit}
-                        onFiles={(files) => openCreate('upload', files)}
-                        onWrite={() => openCreate('write')}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            </div>
-
-            <RagSettings />
+            <KnowledgeBasesPanel
+              knowledgeBases={knowledgeBases}
+              filesPerKb={filesPerKb}
+              count={usedKbs}
+              limit={kbLimit}
+              atLimit={atKbLimit}
+              remaining={maxFilesForNewKb}
+              disabled={atKbLimit}
+              onFiles={(files) => openCreate('upload', files)}
+              onWrite={() => openCreate('write')}
+              onManage={(kb) => setDetailId(kb.id)}
+              onDelete={openDelete}
+            />
           </div>
 
           <AnimatePresence initial={false}>
@@ -651,6 +582,8 @@ export function KnowledgeBasesPage() {
                   >
                     <IngestionActivity
                       events={ingestionEvents ?? []}
+                      capped={cappedOut}
+                      onRefresh={refreshActivity}
                       onClose={() => setActivityOpen(false)}
                     />
                   </Card>
@@ -686,6 +619,8 @@ export function KnowledgeBasesPage() {
           >
             <IngestionActivity
               events={ingestionEvents ?? []}
+              capped={cappedOut}
+              onRefresh={refreshActivity}
               onClose={() => setActivityOpen(false)}
             />
           </motion.aside>
@@ -710,6 +645,7 @@ export function KnowledgeBasesPage() {
           if (!open) setDetailId(null)
         }}
         knowledgeBaseId={detailId}
+        filesPerKb={filesPerKb}
         onChanged={refreshAll}
       />
 

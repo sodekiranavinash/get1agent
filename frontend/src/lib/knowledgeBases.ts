@@ -1,5 +1,5 @@
 import { useApiClient, type ApiClient } from './api'
-import { invalidateQuery, useQuery } from './query'
+import { getQueryData, invalidateQuery, setQueryData, useQuery } from './query'
 import { usePageQuery } from '../hooks/usePageQuery'
 
 export const KNOWLEDGE_BASES_QUERY_KEY = 'knowledge-bases'
@@ -14,8 +14,8 @@ export const MAX_FILES_PER_USER = 400
 export const MAX_FILE_BYTES = 20 * 1024 * 1024
 export const MAX_STORAGE_BYTES = 200 * 1024 * 1024
 export const MAX_TAGS_PER_DOCUMENT = 10
-export const MAX_NAME_LENGTH = 255
-export const MAX_DESCRIPTION_LENGTH = 1000
+export const MAX_NAME_LENGTH = 100
+export const MAX_DESCRIPTION_LENGTH = 300
 export const MAX_TAG_NAME_LENGTH = 64
 export const MAX_TAG_DESCRIPTION_LENGTH = 500
 
@@ -102,6 +102,43 @@ export type IngestionStage =
 
 export type IngestionEventStatus = 'started' | 'succeeded' | 'failed'
 
+/**
+ * Stage-specific counts emitted by the pipeline (backend
+ * shared/ingestion). Only the keys relevant to a stage are present.
+ */
+export type IngestionEventDetails = {
+  // uploaded
+  sizeBytes?: number
+  contentType?: string | null
+  source?: 'upload' | 'inline'
+  // extracted / parsed
+  sourceBytes?: number
+  characters?: number
+  words?: number
+  images?: number
+  imagesFound?: number
+  pages?: number
+  rows?: number
+  sheets?: number
+  paragraphs?: number
+  // chunked
+  chunks?: number
+  tokens?: number
+  chunkSize?: number
+  chunkOverlap?: number
+  // embedding
+  embeddings?: number
+  textEmbeddings?: number
+  imageEmbeddings?: number
+  dimension?: number
+  model?: string
+  // indexed
+  vectors?: number
+  tables?: string[]
+  // failed
+  failedStage?: string
+}
+
 export type IngestionEvent = {
   id: number
   documentId: string
@@ -111,6 +148,7 @@ export type IngestionEvent = {
   stage: IngestionStage
   status: IngestionEventStatus
   message: string | null
+  details: IngestionEventDetails | null
   createdAt: string
 }
 
@@ -140,8 +178,7 @@ export type KnowledgeBaseList = {
 export type PresignResult = {
   documentId: string
   key: string
-  mode: 's3' | 'local'
-  uploadUrl: string | null
+  uploadUrl: string
   contentType: string
   expiresIn: number
 }
@@ -190,22 +227,6 @@ export function validateFile(
     return `Limit of ${MAX_FILES_PER_KB} files per knowledge base reached`
   }
   return null
-}
-
-export function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = reader.result
-      if (typeof result !== 'string') {
-        reject(new Error('Could not read file'))
-        return
-      }
-      resolve(result.slice(result.indexOf(',') + 1))
-    }
-    reader.onerror = () => reject(new Error('Could not read file'))
-    reader.readAsDataURL(file)
-  })
 }
 
 export function uploadToPresignedUrl(
@@ -297,18 +318,6 @@ export async function completeUpload(
   )
 }
 
-export async function uploadLocal(
-  api: ApiClient,
-  knowledgeBaseId: string,
-  documentId: string,
-  contentBase64: string,
-): Promise<KnowledgeBaseDocument> {
-  return api.post<KnowledgeBaseDocument>(
-    `/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/upload`,
-    { contentBase64 },
-  )
-}
-
 export async function createInlineDocument(
   api: ApiClient,
   knowledgeBaseId: string,
@@ -354,6 +363,21 @@ export function useIngestionEvents() {
 
 export function invalidateIngestionEvents(): void {
   invalidateQuery(INGESTION_EVENTS_QUERY_KEY)
+}
+
+/**
+ * Drop events from the cached timeline immediately, so a deleted document or
+ * knowledge base disappears from the activity panel without waiting for a poll.
+ */
+export function removeIngestionEvents(
+  predicate: (event: IngestionEvent) => boolean,
+): void {
+  const current = getQueryData<IngestionEvent[]>(INGESTION_EVENTS_QUERY_KEY)
+  if (!current) return
+  setQueryData(
+    INGESTION_EVENTS_QUERY_KEY,
+    current.filter((event) => !predicate(event)),
+  )
 }
 
 /** Distinct tags the user has used before, for autocomplete in the tag editor. */

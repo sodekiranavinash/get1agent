@@ -1,20 +1,31 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, AlertTriangle, FileText, Loader2, Scissors, Trash2 } from 'lucide-react'
+import {
+  AlertCircle,
+  AlertTriangle,
+  FileText,
+  Loader2,
+  Plus,
+  Scissors,
+  Trash2,
+} from 'lucide-react'
 import { Dialog } from '../ui/Dialog'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { Segmented } from '../ui/Segmented'
 import { Spinner } from '../ui/Spinner'
+import { CreateKnowledgeBaseDialog } from './CreateKnowledgeBaseDialog'
 import { ApiError, useApiClient } from '../../lib/api'
 import {
   CHUNK_OVERLAPS,
   CHUNK_SIZES,
+  MAX_FILES_PER_KB,
   deleteDocument,
   deleteKnowledgeBase,
   fetchKnowledgeBase,
   formatBytes,
   invalidateKnowledgeBases,
+  removeIngestionEvents,
   type KnowledgeBaseDetail,
   type KnowledgeBaseDocument,
 } from '../../lib/knowledgeBases'
@@ -23,6 +34,7 @@ type KnowledgeBaseDetailDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   knowledgeBaseId: string | null
+  filesPerKb?: number
   onChanged?: () => void
 }
 
@@ -49,6 +61,7 @@ export function KnowledgeBaseDetailDialog({
   open,
   onOpenChange,
   knowledgeBaseId,
+  filesPerKb,
   onChanged,
 }: KnowledgeBaseDetailDialogProps) {
   const api = useApiClient()
@@ -58,6 +71,7 @@ export function KnowledgeBaseDetailDialog({
   const [busyId, setBusyId] = useState<string | null>(null)
   const [deletingKb, setDeletingKb] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const [lastFile, setLastFile] = useState<{
     id: string
     name: string
@@ -82,6 +96,7 @@ export function KnowledgeBaseDetailDialog({
     if (open) {
       setDetail(null)
       setConfirmingDelete(false)
+      setAddOpen(false)
       setLastFile(null)
       void load()
     }
@@ -92,8 +107,12 @@ export function KnowledgeBaseDetailDialog({
     setBusyId(documentId)
     try {
       await deleteDocument(api, knowledgeBaseId, documentId)
+      removeIngestionEvents((event) => event.documentId === documentId)
       if (alsoDeleteKb) {
         await deleteKnowledgeBase(api, knowledgeBaseId)
+        removeIngestionEvents(
+          (event) => event.knowledgeBaseId === knowledgeBaseId,
+        )
         invalidateKnowledgeBases()
         onChanged?.()
         onOpenChange(false)
@@ -124,12 +143,18 @@ export function KnowledgeBaseDetailDialog({
     setDeletingKb(true)
     try {
       await deleteKnowledgeBase(api, knowledgeBaseId)
+      removeIngestionEvents(
+        (event) => event.knowledgeBaseId === knowledgeBaseId,
+      )
       invalidateKnowledgeBases()
       onChanged?.()
       onOpenChange(false)
     } catch (deleteError) {
       if (deleteError instanceof ApiError && deleteError.status === 404) {
         // Already gone — treat as deleted.
+        removeIngestionEvents(
+          (event) => event.knowledgeBaseId === knowledgeBaseId,
+        )
         invalidateKnowledgeBases()
         onChanged?.()
         onOpenChange(false)
@@ -144,6 +169,9 @@ export function KnowledgeBaseDetailDialog({
       setDeletingKb(false)
     }
   }
+
+  const perKbLimit = filesPerKb ?? MAX_FILES_PER_KB
+  const remainingSlots = Math.max(0, perKbLimit - (detail?.documents.length ?? 0))
 
   return (
     <Dialog
@@ -190,6 +218,13 @@ export function KnowledgeBaseDetailDialog({
               className="mr-auto"
             >
               Delete knowledge base
+            </Button>
+            <Button
+              onClick={() => setAddOpen(true)}
+              disabled={loading || remainingSlots <= 0}
+              icon={<Plus className="h-4 w-4" />}
+            >
+              Add files
             </Button>
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Close
@@ -326,6 +361,18 @@ export function KnowledgeBaseDetailDialog({
           the knowledge base. This cannot be undone.
         </p>
       </ConfirmDialog>
+
+      <CreateKnowledgeBaseDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        knowledgeBaseId={knowledgeBaseId}
+        maxFiles={remainingSlots}
+        onCreated={async () => {
+          await load()
+          invalidateKnowledgeBases()
+          onChanged?.()
+        }}
+      />
     </Dialog>
   )
 }

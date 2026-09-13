@@ -4,7 +4,7 @@ set -euo pipefail
 
 QUERY="${1:-}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-REGISTRY="$ROOT/backend/registry.json"
+REGISTRY="$ROOT/backend/services/registry.json"
 
 if [[ -z "$QUERY" ]]; then
   echo "usage: $0 <lambda-name|function-name|all>" >&2

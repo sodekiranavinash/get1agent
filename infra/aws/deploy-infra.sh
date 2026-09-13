@@ -16,54 +16,44 @@ fi
 
 bash "$ROOT/infra/aws/write-prod-tfvars.sh"
 
-if [[ ! -s "$ROOT/tools/challan-extractor/dist/function.zip" ]]; then
-  echo "Packaging challan-extractor Lambda zip..."
-  make -C "$ROOT/tools/challan-extractor" package
-fi
-
-if [[ ! -s "$ROOT/backend/layers/data/dist/layer.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/layers/data/dist/layer.zip" ]]; then
   echo "Building backend data Lambda layer..."
   bash "$ROOT/infra/aws/build-backend-layers.sh"
 fi
 
-if [[ ! -s "$ROOT/backend/health-check/dist/function.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/health-check/dist/function.zip" ]]; then
   echo "Packaging backend health-check Lambda zip..."
-  make -C "$ROOT/backend/health-check" package
+  make -C "$ROOT/backend/services/health-check" package
 fi
 
-if [[ ! -s "$ROOT/backend/migration-runner/dist/function.zip" ]]; then
-  echo "Packaging backend migration-runner Lambda zip..."
-  make -C "$ROOT/backend/migration-runner" package
-fi
-
-if [[ ! -s "$ROOT/backend/account-settings/dist/function.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/account-settings/dist/function.zip" ]]; then
   echo "Packaging backend account-settings Lambda zip..."
-  make -C "$ROOT/backend/account-settings" package
+  make -C "$ROOT/backend/services/account-settings" package
 fi
 
-if [[ ! -s "$ROOT/backend/knowledge-bases/dist/function.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/knowledge-bases/dist/function.zip" ]]; then
   echo "Packaging backend knowledge-bases Lambda zip..."
-  make -C "$ROOT/backend/knowledge-bases" package
+  make -C "$ROOT/backend/services/knowledge-bases" package
 fi
 
-if [[ ! -s "$ROOT/backend/ingestion-dispatcher/dist/function.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/ingestion-dispatcher/dist/function.zip" ]]; then
   echo "Packaging backend ingestion-dispatcher Lambda zip..."
-  make -C "$ROOT/backend/ingestion-dispatcher" package
+  make -C "$ROOT/backend/services/ingestion-dispatcher" package
 fi
 
-if [[ ! -s "$ROOT/backend/ingestion-extract/dist/function.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/ingestion-extract/dist/function.zip" ]]; then
   echo "Packaging backend ingestion-extract Lambda zip..."
-  make -C "$ROOT/backend/ingestion-extract" package
+  make -C "$ROOT/backend/services/ingestion-extract" package
 fi
 
-if [[ ! -s "$ROOT/backend/ingestion-index/dist/function.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/ingestion-index/dist/function.zip" ]]; then
   echo "Packaging backend ingestion-index Lambda zip..."
-  make -C "$ROOT/backend/ingestion-index" package
+  make -C "$ROOT/backend/services/ingestion-index" package
 fi
 
-if [[ ! -s "$ROOT/backend/ingestion-mark-failed/dist/function.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/ingestion-mark-failed/dist/function.zip" ]]; then
   echo "Packaging backend ingestion-mark-failed Lambda zip..."
-  make -C "$ROOT/backend/ingestion-mark-failed" package
+  make -C "$ROOT/backend/services/ingestion-mark-failed" package
 fi
 
 bash "$ROOT/infra/aws/run-terraform.sh" bootstrap "$MODE"

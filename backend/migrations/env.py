@@ -6,9 +6,9 @@ from logging.config import fileConfig
 from alembic import context
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_BACKEND_ROOT = os.path.dirname(_HERE)
-if os.path.isdir(os.path.join(_BACKEND_ROOT, "shared")):
-    sys.path.insert(0, _BACKEND_ROOT)
+_SERVICES_ROOT = os.path.join(os.path.dirname(_HERE), "services")
+if os.path.isdir(os.path.join(_SERVICES_ROOT, "shared")):
+    sys.path.insert(0, _SERVICES_ROOT)
 
 from shared.db.engine import create_engine_from_env, create_engine_from_url  # noqa: E402
 from shared.models import Base  # noqa: E402

@@ -117,6 +117,12 @@ resource "aws_iam_role_policy" "sfn" {
         ]
         Resource = "*"
       },
+      {
+        Sid      = "XRayWrite"
+        Effect   = "Allow"
+        Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"]
+        Resource = "*"
+      },
     ]
   })
 }
@@ -138,35 +144,9 @@ resource "aws_sfn_state_machine" "this" {
     level                  = "ERROR"
   }
 
-  tags = var.tags
-}
-
-resource "aws_cloudwatch_metric_alarm" "dlq" {
-  alarm_name          = "${local.name}-dlq-not-empty"
-  namespace           = "AWS/SQS"
-  metric_name         = "ApproximateNumberOfMessagesVisible"
-  statistic           = "Maximum"
-  period              = 300
-  evaluation_periods  = 1
-  threshold           = 1
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  dimensions          = { QueueName = aws_sqs_queue.dlq.name }
-  treat_missing_data  = "notBreaching"
-
-  tags = var.tags
-}
-
-resource "aws_cloudwatch_metric_alarm" "failed" {
-  alarm_name          = "${local.name}-executions-failed"
-  namespace           = "AWS/States"
-  metric_name         = "ExecutionsFailed"
-  statistic           = "Sum"
-  period              = 300
-  evaluation_periods  = 1
-  threshold           = 1
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  dimensions          = { StateMachineArn = aws_sfn_state_machine.this.arn }
-  treat_missing_data  = "notBreaching"
+  tracing_configuration {
+    enabled = var.enable_xray
+  }
 
   tags = var.tags
 }

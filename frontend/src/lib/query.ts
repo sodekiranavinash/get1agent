@@ -90,6 +90,11 @@ export function setQueryData<T>(key: string, data: T): void {
   notify(entry)
 }
 
+/** Read the currently cached value for a key, if any. */
+export function getQueryData<T>(key: string): T | undefined {
+  return getEntry(key).data as T | undefined
+}
+
 export function useQuery<T>(
   key: string,
   fetcher: () => Promise<T>,

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Targeted prod apply. Set any of these to "true" to include that component:
-#   APPLY_NETWORK APPLY_RDS APPLY_API_GATEWAY APPLY_BACKEND_LAMBDAS APPLY_TOOL_LAMBDAS
+#   APPLY_NETWORK APPLY_RDS APPLY_API_GATEWAY APPLY_BACKEND_LAMBDAS
 # If none are set, runs a full prod apply.
 set -euo pipefail
 
@@ -19,7 +19,6 @@ TARGETS=()
 [[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && {
   TARGETS+=(-target='module.layer_data[0]')
   TARGETS+=(-target='module.health_check[0]')
-  TARGETS+=(-target='module.migration_runner[0]')
   TARGETS+=(-target='module.account_settings[0]')
   TARGETS+=(-target='module.knowledge_storage[0]')
   TARGETS+=(-target='module.knowledge_bases[0]')
@@ -29,48 +28,38 @@ TARGETS=()
   TARGETS+=(-target='module.ingestion[0]')
   TARGETS+=(-target='module.ingestion_dispatcher[0]')
 }
-[[ "${APPLY_TOOL_LAMBDAS:-false}" == "true" ]] && TARGETS+=(-target=module.challan_extractor)
 
-need_tool_zip=false
 need_backend_artifacts=false
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-  need_tool_zip=true
   need_backend_artifacts=true
 else
   [[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && need_backend_artifacts=true
-  [[ "${APPLY_TOOL_LAMBDAS:-false}" == "true" ]] && need_tool_zip=true
 fi
 
-if [[ "$need_tool_zip" == true && ! -s "$ROOT/tools/challan-extractor/dist/function.zip" ]]; then
-  make -C "$ROOT/tools/challan-extractor" package
-fi
 if [[ "$need_backend_artifacts" == true ]]; then
-  if [[ ! -s "$ROOT/backend/layers/data/dist/layer.zip" ]]; then
+  if [[ ! -s "$ROOT/backend/services/layers/data/dist/layer.zip" ]]; then
     bash "$ROOT/infra/aws/build-backend-layers.sh"
   fi
-  if [[ ! -s "$ROOT/backend/health-check/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/health-check" package
+  if [[ ! -s "$ROOT/backend/services/health-check/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/health-check" package
   fi
-  if [[ ! -s "$ROOT/backend/migration-runner/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/migration-runner" package
+  if [[ ! -s "$ROOT/backend/services/account-settings/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/account-settings" package
   fi
-  if [[ ! -s "$ROOT/backend/account-settings/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/account-settings" package
+  if [[ ! -s "$ROOT/backend/services/knowledge-bases/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/knowledge-bases" package
   fi
-  if [[ ! -s "$ROOT/backend/knowledge-bases/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/knowledge-bases" package
+  if [[ ! -s "$ROOT/backend/services/ingestion-dispatcher/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/ingestion-dispatcher" package
   fi
-  if [[ ! -s "$ROOT/backend/ingestion-dispatcher/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/ingestion-dispatcher" package
+  if [[ ! -s "$ROOT/backend/services/ingestion-extract/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/ingestion-extract" package
   fi
-  if [[ ! -s "$ROOT/backend/ingestion-extract/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/ingestion-extract" package
+  if [[ ! -s "$ROOT/backend/services/ingestion-index/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/ingestion-index" package
   fi
-  if [[ ! -s "$ROOT/backend/ingestion-index/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/ingestion-index" package
-  fi
-  if [[ ! -s "$ROOT/backend/ingestion-mark-failed/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/ingestion-mark-failed" package
+  if [[ ! -s "$ROOT/backend/services/ingestion-mark-failed/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/ingestion-mark-failed" package
   fi
 fi
 

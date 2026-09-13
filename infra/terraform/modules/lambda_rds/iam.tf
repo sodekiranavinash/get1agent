@@ -144,3 +144,19 @@ resource "aws_iam_role_policy" "bedrock_access" {
     }]
   })
 }
+
+resource "aws_iam_role_policy" "xray" {
+  count = var.tracing_mode == "Active" ? 1 : 0
+  name  = "${var.name}-xray"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "XRayWrite"
+      Effect   = "Allow"
+      Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"]
+      Resource = "*"
+    }]
+  })
+}
