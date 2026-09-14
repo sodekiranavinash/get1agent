@@ -36,19 +36,19 @@ _RESPONSE = {
 class ServiceTests(unittest.TestCase):
     def test_missing_api_key_is_not_configured(self) -> None:
         with mock.patch.dict("os.environ", {}, clear=True):
-            result = service.search({"auth0Sub": "u", "query": "x"})
+            result = service.search({"userId": "u", "query": "x"})
         self.assertEqual(result["error"]["code"], "not_configured")
 
     def test_missing_query_is_invalid_request(self) -> None:
         with mock.patch.dict("os.environ", _ENV, clear=True):
-            result = service.search({"auth0Sub": "u"})
+            result = service.search({"userId": "u"})
         self.assertEqual(result["error"]["code"], "invalid_request")
 
     def test_shapes_successful_search(self) -> None:
         with mock.patch.dict("os.environ", _ENV, clear=True), mock.patch.object(
             service.exa, "search", return_value=_RESPONSE
         ) as search:
-            result = service.search({"auth0Sub": "u", "query": "latest in llms", "numResults": 25})
+            result = service.search({"userId": "u", "query": "latest in llms", "numResults": 25})
 
         body = search.call_args.args[0]
         self.assertEqual(body["numResults"], 25)
@@ -62,7 +62,7 @@ class ServiceTests(unittest.TestCase):
         with mock.patch.dict("os.environ", _ENV, clear=True), mock.patch.object(
             service.exa, "search", side_effect=error
         ):
-            result = service.search({"auth0Sub": "u", "query": "x"})
+            result = service.search({"userId": "u", "query": "x"})
 
         self.assertEqual(result["error"]["code"], "search_failed")
         self.assertEqual(result["error"]["status"], 401)
@@ -73,7 +73,7 @@ class ServiceTests(unittest.TestCase):
         with mock.patch.dict("os.environ", _ENV, clear=True), mock.patch.object(
             service.exa, "search", side_effect=[empty, _RESPONSE]
         ) as search:
-            result = service.search({"auth0Sub": "u", "query": "x", "type": "deep-lite"})
+            result = service.search({"userId": "u", "query": "x", "type": "deep-lite"})
 
         self.assertEqual(search.call_count, 2)
         self.assertEqual(search.call_args.args[0]["type"], "auto")

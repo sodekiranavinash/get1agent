@@ -31,6 +31,7 @@ from ai.mcp_client import (
     find_tool_server,
     list_tools_multi,
 )
+from shared.users import get_or_create_user, get_user_by_sub
 
 
 def _json(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
@@ -51,6 +52,20 @@ def _claims(event: dict[str, Any]) -> dict[str, Any] | None:
         return event["requestContext"]["authorizer"]["jwt"]["claims"]
     except (KeyError, TypeError):
         return None
+
+
+def _resolve_user(claims: dict[str, Any], sub: str) -> dict[str, Any]:
+    """Resolve the caller's profile (creating it if needed) for identity + display."""
+    if not sub:
+        return {}
+    try:
+        profile = get_user_by_sub(sub)
+        if not profile:
+            profile = get_or_create_user(claims)
+        return profile
+    except Exception as exc:  # noqa: BLE001
+        print(f"mcp-tester user lookup failed: {exc!r}", file=sys.stderr)
+        return {}
 
 
 def _method(event: dict[str, Any]) -> str:
@@ -103,10 +118,10 @@ def _text_payload(response: dict[str, Any]) -> Any:
 
 
 def _handle_list_tools(
-    functions: list[str], sub: str, region: str | None
+    functions: list[str], user_id: str, region: str | None
 ) -> dict[str, Any]:
     started = time.perf_counter()
-    tools, per_server = list_tools_multi(functions, sub, region)
+    tools, per_server = list_tools_multi(functions, user_id, region)
     duration = _elapsed_ms(started)
     return _json(
         200,
@@ -114,6 +129,7 @@ def _handle_list_tools(
             "ok": True,
             "tools": tools,
             "servers": per_server,
+            "userId": user_id,
             "durationMs": duration,
         },
     )
@@ -121,7 +137,7 @@ def _handle_list_tools(
 
 def _handle_call_tool(
     functions: list[str],
-    sub: str,
+    user_id: str,
     region: str | None,
     body: dict[str, Any],
 ) -> dict[str, Any]:
@@ -135,14 +151,14 @@ def _handle_call_tool(
         return _json(400, {"error": "arguments must be a JSON object"})
 
     started = time.perf_counter()
-    server = find_tool_server(functions, sub, name, region)
+    server = find_tool_server(functions, user_id, name, region)
     if not server:
         return _json(
             200,
             {
                 "ok": False,
                 "tool": name,
-                "auth0Sub": sub,
+                "userId": user_id,
                 "arguments": arguments,
                 "error": {"code": -32601, "message": f"Tool '{name}' not found"},
                 "request": None,
@@ -151,7 +167,7 @@ def _handle_call_tool(
             },
         )
 
-    request, response = call_tool(server, sub, name, arguments, region)
+    request, response = call_tool(server, user_id, name, arguments, region)
     duration = _elapsed_ms(started)
 
     if "error" in response:
@@ -161,7 +177,7 @@ def _handle_call_tool(
                 "ok": False,
                 "tool": name,
                 "server": server,
-                "auth0Sub": sub,
+                "userId": user_id,
                 "arguments": arguments,
                 "error": response["error"],
                 "request": request,
@@ -176,7 +192,7 @@ def _handle_call_tool(
             "ok": True,
             "tool": name,
             "server": server,
-            "auth0Sub": sub,
+            "userId": user_id,
             "arguments": arguments,
             "result": response.get("result"),
             "data": _text_payload(response),
@@ -203,15 +219,17 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
         return _json(500, {"error": "MCP_FUNCTIONS is not configured"})
     region = os.environ.get("AWS_REGION")
     sub = str(claims.get("sub") or "").strip()
+    profile = _resolve_user(claims, sub)
+    user_id = str(profile.get("userId") or sub).strip()
 
     method = _method(event)
     path = _path(event)
 
     try:
         if method == "GET" and path.endswith("/mcp/tools"):
-            return _handle_list_tools(functions, sub, region)
+            return _handle_list_tools(functions, user_id, region)
         if method == "POST" and path.endswith("/mcp/call"):
-            return _handle_call_tool(functions, sub, region, _body(event))
+            return _handle_call_tool(functions, user_id, region, _body(event))
         return _json(404, {"error": "Not found"})
     except (McpClientError, ValueError) as exc:
         return _json(502, {"error": str(exc)})

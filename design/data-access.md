@@ -12,14 +12,14 @@ The canonical model and rationale live in
 - Access goes through the repository functions in
   `backend/services/shared/dynamo/repositories/`; do not hand-roll item access.
 - Embeddings live in **S3 Vectors**; the keyword (BM25) index, parents and
-  manifests live in **S3 objects** (`index/<sub>/...`). There is no SQL database
+  manifests live in **S3 objects** (`index/<userId>/...`). There is no SQL database
   and no ORM.
 - Numbers read from DynamoDB are `Decimal`; serialize responses through
   `shared.json_utils.dumps` and coerce to `int` where arithmetic/slicing needs it.
 
 ## Mandatory rules (do not deviate)
 
-- **One item per entity.** A user is a *partition* (`pk=USER#<sub>`), not a row.
+- **One item per entity.** A user is a *partition* (`pk=USER#<userId>`), not a row.
   Never model an aggregate (user, KB, document) as one JSON blob.
 - **Small metadata only in DynamoDB.** Vectors → S3 Vectors; postings, parents,
   manifests, staged artifacts, uploads → S3. Never store vectors/chunks/postings
@@ -48,13 +48,14 @@ The canonical model and rationale live in
 
 | Entity | pk | sk |
 |---|---|---|
-| User | `USER#<sub>` | `#PROFILE` |
-| Settings | `USER#<sub>` | `#SETTINGS` |
-| Notification prefs | `USER#<sub>` | `#NOTIF` |
-| Quota counters | `USER#<sub>` | `#QUOTA` |
-| Knowledge base | `USER#<sub>` | `KB#<name>` |
+| Identity (sub→userId) | `SUB#<sub>` | `#PROFILE` |
+| User | `USER#<userId>` | `#PROFILE` |
+| Settings | `USER#<userId>` | `#SETTINGS` |
+| Notification prefs | `USER#<userId>` | `#NOTIF` |
+| Quota counters | `USER#<userId>` | `#QUOTA` |
+| Knowledge base | `USER#<userId>` | `KB#<name>` |
 | Document | `KB#<kbId>` | `DOC#<lowerFileName>` |
 | Tag | `DOC#<docId>` | `TAG#<lowerName>` |
 | Ingestion event | `DOC#<docId>` | `EVENT#<ts>#<seq>` |
-| Skill | `USER#<sub>` | `SKILL#<lowerName>` |
-| Session (code-interp) | `USER#<sub>` | `CONV#<conversationId>` |
+| Skill | `USER#<userId>` | `SKILL#<lowerName>` |
+| Session (code-interp) | `USER#<userId>` | `CONV#<conversationId>` |

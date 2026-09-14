@@ -10,7 +10,7 @@ from shared.search.errors import RetrievalError
 from shared.search.hybrid import DEFAULT_CANDIDATE_LIMIT, search_candidates
 from shared.search.s3_vectors import vector_store
 from shared.storage import Storage
-from shared.users import get_user_by_sub
+from shared.users import get_user_by_id
 
 MAX_CANDIDATE_LIMIT = 200
 VALID_TAG_MATCH = ("any", "all")
@@ -70,7 +70,7 @@ def _serialize_discovery_kb(
 
 def list_knowledge_bases(sub: str, names: Any = None) -> dict[str, Any]:
     """Backing query for the ``get-user-knowledge-bases`` tool."""
-    user = get_user_by_sub(sub)
+    user = get_user_by_id(sub)
     if user is None:
         raise RetrievalError("user_not_found", "No account found for this user", 404)
 
@@ -174,7 +174,7 @@ def search(
     allowed_doc_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Run hybrid search and return candidates + per-KB metadata + warnings."""
-    user = get_user_by_sub(sub)
+    user = get_user_by_id(sub)
     if user is None:
         raise RetrievalError("user_not_found", "No account found for this user", 404)
 

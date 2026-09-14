@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from shared.dynamo.repositories import (
     documents,
     events,
@@ -44,6 +46,15 @@ def test_user_settings_and_quota():
     sub = profile["userId"]
     assert profile["email"] == "repos@example.com"
     assert profile["fullName"] == "Repos"
+    # The Auth0 sub is an attribute; the key is a minted short internal id.
+    assert profile["sub"] == "auth0|repos"
+    assert sub != "auth0|repos"
+    assert re.fullmatch(r"u_[0-9a-hjkmnp-tv-z]{16}", sub)
+
+    # The sub resolves to the same internal id, and the profile is stable.
+    assert users.get_user_by_sub("auth0|repos")["userId"] == sub
+    assert users.get_user_by_id(sub)["userId"] == sub
+    assert users.upsert_user(CLAIMS)["userId"] == sub
 
     settings.ensure_settings(sub)
     settings.ensure_notification_preferences(sub)

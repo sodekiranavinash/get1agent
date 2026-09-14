@@ -77,7 +77,7 @@ accepted trade-off is S3 Vectors' 100–300 ms semantic latency (with a
 1. **Prefix matching:** kept. Keyword search supports `term:*` prefix matching
    (plurals/inflections) via a per-first-char token catalog plus per-term posting
    objects.
-2. **Parents:** stored as **S3 objects** (`index/<sub>/parents/<parentId>.json`),
+2. **Parents:** stored as **S3 objects** (`index/<userId>/parents/<parentId>.json`),
    not DynamoDB items.
 3. **Vectors:** **S3 Vectors** is primary. A
    `VECTOR_STORE=s3vectors|dynamodb|local` switch is retained so the semantic leg
@@ -95,7 +95,7 @@ accepted trade-off is S3 Vectors' 100–300 ms semantic latency (with a
    change.
 7. **Data-access model (mandatory, locked):** **single DynamoDB table +
    adjacency list, one item per entity.** A user is a *partition*
-   (`pk=USER#<sub>`), not a single row; profile, settings, notifications, quota,
+   (`pk=USER#<userId>`), not a single row; profile, settings, notifications, quota,
    each KB, each skill, each session are **separate items** distinguished by
    `sk`. Never store a user (or any aggregate) as one JSON blob.
 8. **Keep large data out of DynamoDB (mandatory, locked):** embeddings →
@@ -174,23 +174,24 @@ sparse GSIs. **No vectors, chunks, or postings in DynamoDB.**
 
 | Entity | pk | sk | GSI | Key attributes |
 |---|---|---|---|---|
-| User | `USER#<sub>` | `#PROFILE` | — | userId, email, emailVerified, fullName, pictureUrl, createdAt, updatedAt, lastLoginAt |
-| Settings | `USER#<sub>` | `#SETTINGS` | — | preferredTheme, timezone |
-| Notification prefs | `USER#<sub>` | `#NOTIF` | — | emailOnWorkflowFailure, creditThresholdAlerts |
-| Quota counters | `USER#<sub>` | `#QUOTA` | — | kbCount, fileCount, storageBytes (atomic `ADD`) |
-| Knowledge base | `USER#<sub>` | `KB#<name>` | `g1pk=KB#<kbId>, g1sk=#META`; `g2pk=USER#<sub>, g2sk=KB#<updatedAt>#<name>` | kbId, name, description, status, embedModel, imageEmbedModel, embeddingDim, chunkSize, chunkOverlap, docCount, timestamps |
+| Identity (sub→userId) | `SUB#<sub>` | `#PROFILE` | — | userId, createdAt |
+| User | `USER#<userId>` | `#PROFILE` | — | userId, sub, email, emailVerified, fullName, pictureUrl, createdAt, updatedAt, lastLoginAt |
+| Settings | `USER#<userId>` | `#SETTINGS` | — | preferredTheme, timezone |
+| Notification prefs | `USER#<userId>` | `#NOTIF` | — | emailOnWorkflowFailure, creditThresholdAlerts |
+| Quota counters | `USER#<userId>` | `#QUOTA` | — | kbCount, fileCount, storageBytes (atomic `ADD`) |
+| Knowledge base | `USER#<userId>` | `KB#<name>` | `g1pk=KB#<kbId>, g1sk=#META`; `g2pk=USER#<userId>, g2sk=KB#<updatedAt>#<name>` | kbId, name, description, status, embedModel, imageEmbedModel, embeddingDim, chunkSize, chunkOverlap, docCount, timestamps |
 | Document | `KB#<kbId>` | `DOC#<lowerFileName>` | `g1pk=DOC#<docId>, g1sk=#META`; `g3pk=DOCSTATUS#<status>, g3sk=<updatedAt>#<docId>` | docId, kbId, userId, fileName, s3Key, contentType, sizeBytes, source, contentHash, status, chunkCount, imageCount, timestamps |
-| Tag | `DOC#<docId>` | `TAG#<lowerName>` | `g2pk=USER#<sub>, g2sk=TAG#<lowerName>#<docId>` | name, description |
-| Ingestion event | `DOC#<docId>` | `EVENT#<ts>#<seq>` | `g3pk=USER#<sub>#EVENT, g3sk=<ts>#<docId>` | stage, status, message, details, TTL |
-| Skill | `USER#<sub>` | `SKILL#<lowerName>` | `g1pk=SKILL#<skillId>, g1sk=#META`; `g2pk=USER#<sub>, g2sk=SKILL#<name>` | skillId, name, description, allowedTools, content, source, timestamps |
-| Session (code-interp) | `USER#<sub>` | `CONV#<conversationId>` | — | sessionId, expiresAt (TTL), createdAt, lastUsedAt |
+| Tag | `DOC#<docId>` | `TAG#<lowerName>` | `g2pk=USER#<userId>, g2sk=TAG#<lowerName>#<docId>` | name, description |
+| Ingestion event | `DOC#<docId>` | `EVENT#<ts>#<seq>` | `g3pk=USER#<userId>#EVENT, g3sk=<ts>#<docId>` | stage, status, message, details, TTL |
+| Skill | `USER#<userId>` | `SKILL#<lowerName>` | `g1pk=SKILL#<skillId>, g1sk=#META`; `g2pk=USER#<userId>, g2sk=SKILL#<name>` | skillId, name, description, allowedTools, content, source, timestamps |
+| Session (code-interp) | `USER#<userId>` | `CONV#<conversationId>` | — | sessionId, expiresAt (TTL), createdAt, lastUsedAt |
 
 **GSIs (all sparse):**
 - **GSI1 "byId"** — `gsi1pk`, `gsi1sk`: resolve KB/document/skill by UUID.
-- **GSI2 "byUser/type"** — `gsi2pk=USER#<sub>`, `gsi2sk=<TYPE>#…`: list KBs,
+- **GSI2 "byUser/type"** — `gsi2pk=USER#<userId>`, `gsi2sk=<TYPE>#…`: list KBs,
   skills, tags, documents by user (prefix queries).
 - **GSI3 "byStatus/time"** — `gsi3pk`: watchdog (`DOCSTATUS#processing`) and
-  recent events (`USER#<sub>#EVENT`).
+  recent events (`USER#<userId>#EVENT`).
 
 **Table config:** on-demand (`PAY_PER_REQUEST`); TTL attribute `expiresAt`.
 
@@ -201,7 +202,7 @@ sparse GSIs. **No vectors, chunks, or postings in DynamoDB.**
 | Upsert user / settings / prefs | DDB | `UpdateItem` / `PutItem` |
 | Get account + settings | DDB | `GetItem` (2–3 keys) |
 | Create KB (unique name) | DDB | `PutItem` `ConditionExpression=attribute_not_exists(pk)` |
-| List KBs (+counts) | DDB | `Query g2pk=USER#sub, begins_with(g2sk,'KB#')` |
+| List KBs (+counts) | DDB | `Query g2pk=USER#<userId>, begins_with(g2sk,'KB#')` |
 | Get KB by id | DDB | `Query g1pk=KB#<id>` |
 | Delete KB | DDB | query docs → delete each (cascade walk) + S3 prefix delete + S3 Vectors delete |
 | Presign upload | S3 | `generate_presigned_url` (key `raw/...`) |
@@ -209,8 +210,8 @@ sparse GSIs. **No vectors, chunks, or postings in DynamoDB.**
 | Create inline doc | S3+DDB | `PutObject` + `PutItem` |
 | List documents | DDB | `Query pk=KB#<kbId>, begins_with(sk,'DOC#')` |
 | Delete document | DDB+S3+Vec | manifest → delete postings/vectors/parents + S3 prefix + doc item |
-| List tags | DDB | `Query g2pk=USER#sub, begins_with(g2sk,'TAG#')` |
-| List events | DDB | `Query g3pk=USER#sub#EVENT` (desc), optional kb filter |
+| List tags | DDB | `Query g2pk=USER#<userId>, begins_with(g2sk,'TAG#')` |
+| List events | DDB | `Query g3pk=USER#<userId>#EVENT` (desc), optional kb filter |
 | Skills CRUD | DDB | same patterns as KBs |
 | Semantic search | S3 Vectors | `QueryVectors(topK=100, filter kbId/status)` |
 | Lexical search | S3 | per-term `GetObject` + catalog prefix expansion |
@@ -230,15 +231,15 @@ sessions/events, denormalized counts (`docCount`), idempotent writes keyed by
 
 ```
 s3://get1agent-data/
-  raw/<sub>/<kbId>/<docId>/<fileName>              # original upload; ONLY prefix that triggers ingestion
-  derived/<sub>/<kbId>/<docId>/text.md             # extracted text
-  derived/<sub>/<kbId>/<docId>/images/<page>-<i>.<ext>
-  derived/<sub>/<kbId>/<docId>/chunks.json         # staged parents + children
-  derived/<sub>/<kbId>/<docId>/embeddings.json     # staged vectors
-  index/<sub>/parents/<parentId>.json              # parent context for retrieval (small-to-big)
-  index/<sub>/terms/<token>.json                   # postings: {df, postings:[{chunkId,docId,kbId,tf}]}
-  index/<sub>/catalog/<c0>.json                    # token strings per first char (prefix expansion)
-  index/<sub>/docs/<docId>/manifest.json           # chunkIds, parentIds, tokens (delete/rebuild)
+  raw/<userId>/<kbId>/<docId>/<fileName>              # original upload; ONLY prefix that triggers ingestion
+  derived/<userId>/<kbId>/<docId>/text.md             # extracted text
+  derived/<userId>/<kbId>/<docId>/images/<page>-<i>.<ext>
+  derived/<userId>/<kbId>/<docId>/chunks.json         # staged parents + children
+  derived/<userId>/<kbId>/<docId>/embeddings.json     # staged vectors
+  index/<userId>/parents/<parentId>.json              # parent context for retrieval (small-to-big)
+  index/<userId>/terms/<token>.json                   # postings: {df, postings:[{chunkId,docId,kbId,tf}]}
+  index/<userId>/catalog/<c0>.json                    # token strings per first char (prefix expansion)
+  index/<userId>/docs/<docId>/manifest.json           # chunkIds, parentIds, tokens (delete/rebuild)
 ```
 
 - **Deterministic IDs:** `chunkId=<docId>#<ord>`, `parentId=<docId>#<ord>` — no
@@ -254,7 +255,7 @@ s3://get1agent-data/
 
 # Part 8 — S3 Vectors — embeddings
 
-- **One vector index per user** (`idx-<sub>`), created lazily on first
+- **One vector index per user** (`idx-<userId>`), created lazily on first
   KB/ingest. S3 Vectors supports 10,000 indexes per vector bucket. Per-user keeps
   query cost tiny (query cost scales with index size) and isolates tenants.
 - Vector key = `chunkId`; dimension **1024**; distance **COSINE**.
@@ -276,8 +277,8 @@ s3://get1agent-data/
      filter `kbId` and `status=ready`.
    - **Lexical:** tokenize the query (reuse the `lexical_tsquery` tokenizer in
      `shared/retrieval/hybrid.py`); for each term, **one `GetObject`** on
-     `index/<sub>/terms/<token>.json`; for prefix matching, one `GetObject` on
-     the catalog shard `index/<sub>/catalog/<c0>.json`, expand prefixes to exact
+     `index/<userId>/terms/<token>.json`; for prefix matching, one `GetObject` on
+     the catalog shard `index/<userId>/catalog/<c0>.json`, expand prefixes to exact
      tokens, then GET those term objects. Score BM25 in-Lambda
      (`k1=1.2, b=0.75`; `df` from the term object, `tokenCount` from vector
      metadata, `avgdl` from a per-user stats object).
@@ -519,3 +520,14 @@ deviating.
   similarity (`1 - distance`) so it matches the local store's score semantics.
 - **`get-user-knowledge-bases` tags come from the tag GSI** (`kbId` is stored on
   each tag item) instead of walking documents per KB.
+- **Internal `userId` is a short base32 id, not the Auth0 `sub`.** Every
+  user-scoped key (`USER#<userId>`, S3 prefixes, the per-user vector index,
+  sessions) uses the internal id. The id is `u_` + 16 Crockford base32 chars
+  (`0-9a-z` minus `i l o u`), ~80 bits, minted with `secrets` and made unique by a
+  conditional `PutItem` on `USER#<userId>` (regenerate on collision). The `sub` is
+  stored as a `User` attribute and resolved through a strongly-consistent
+  `SUB#<sub>` identity item (`GetItem`); a GSI was rejected because its eventual
+  consistency could create duplicate profiles on first login. The
+  `code-interpreter`/`mcp-tester`/`knowledge-mcp` MCP paths carry the internal
+  `userId` as the transport identity key (`auth0Sub` is gone; there is no separate
+  display code — the id is shown as-is).

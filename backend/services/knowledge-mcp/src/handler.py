@@ -28,6 +28,7 @@ from shared.search import (
     rerank_mode,
     search,
 )
+from shared.users import get_user_by_sub
 
 mcp = MCPLambdaHandler(name="get1agent-knowledge", version="1.0.0")
 
@@ -272,4 +273,13 @@ mcp.tool_implementations[GET_TOOL] = get_user_knowledge_bases
 mcp.tools[SEARCH_TOOL] = _SEARCH_SCHEMA
 mcp.tool_implementations[SEARCH_TOOL] = search_user_knowledge_bases
 
-lambda_handler = build_handler(mcp)
+def _resolve_user_id(sub: str) -> str | None:
+    """Map the HTTP caller's Auth0 sub to the internal userId for retrieval."""
+    try:
+        profile = get_user_by_sub(sub)
+    except Exception:  # noqa: BLE001 - fall through to an unauthenticated tool error
+        return None
+    return str(profile["userId"]) if profile else None
+
+
+lambda_handler = build_handler(mcp, resolve_user_id=_resolve_user_id)

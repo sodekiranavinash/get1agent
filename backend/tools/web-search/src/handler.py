@@ -259,7 +259,7 @@ def web_search(
         "subpageTarget": subpageTarget,
     }
     params: dict[str, Any] = {
-        "auth0Sub": require_sub(),
+        "userId": require_sub(),
         "query": query,
         **{key: value for key, value in optional.items() if value is not None},
     }

@@ -41,29 +41,33 @@ chunks or postings in DynamoDB.
 
 | Entity | pk | sk | GSI |
 |---|---|---|---|
-| User | `USER#<sub>` | `#PROFILE` | — |
-| Settings | `USER#<sub>` | `#SETTINGS` | — |
-| Notification prefs | `USER#<sub>` | `#NOTIF` | — |
-| Quota counters | `USER#<sub>` | `#QUOTA` | — |
-| Knowledge base | `USER#<sub>` | `KB#<name>` | `byId`; `byUser` (`KB#<updatedAt>#<name>`) |
+| Identity (sub→userId) | `SUB#<sub>` | `#PROFILE` | — |
+| User | `USER#<userId>` | `#PROFILE` | — |
+| Settings | `USER#<userId>` | `#SETTINGS` | — |
+| Notification prefs | `USER#<userId>` | `#NOTIF` | — |
+| Quota counters | `USER#<userId>` | `#QUOTA` | — |
+| Knowledge base | `USER#<userId>` | `KB#<name>` | `byId`; `byUser` (`KB#<updatedAt>#<name>`) |
 | Document | `KB#<kbId>` | `DOC#<lowerFileName>` | `byId`; `byStatus` (`DOCSTATUS#<status>`) |
 | Tag | `DOC#<docId>` | `TAG#<lowerName>` | `byUser` (`TAG#<lowerName>#<docId>`) |
-| Ingestion event | `DOC#<docId>` | `EVENT#<ts>#<seq>` | `byStatus` (`USER#<sub>#EVENT`) |
-| Skill | `USER#<sub>` | `SKILL#<lowerName>` | `byId`; `byUser` |
-| Session (code-interp) | `USER#<sub>` | `CONV#<conversationId>` | — |
+| Ingestion event | `DOC#<docId>` | `EVENT#<ts>#<seq>` | `byStatus` (`USER#<userId>#EVENT`) |
+| Skill | `USER#<userId>` | `SKILL#<lowerName>` | `byId`; `byUser` |
+| Session (code-interp) | `USER#<userId>` | `CONV#<conversationId>` | — |
 
 - **GSI1 `byId`** resolves a KB/document/skill by UUID.
 - **GSI2 `byUser`** lists a user's KBs/skills/tags by prefix.
 - **GSI3 `byStatus`** serves the watchdog (`DOCSTATUS#processing`) and the recent
-  events feed (`USER#<sub>#EVENT`).
+  events feed (`USER#<userId>#EVENT`).
 - Table is on-demand (`PAY_PER_REQUEST`), TTL attribute `expiresAt`.
 - Repository code lives in `backend/services/shared/dynamo/` (`client.py`,
-  `keys.py`, `repositories/*`). The Auth0 `sub` is the user id everywhere
-  (DynamoDB keys, S3 prefixes, ownership).
+  `keys.py`, `repositories/*`). The internal `userId` is a **short base32 id**
+  (`u_` + 16 Crockford chars, e.g. `u_7k3f9qz2mpx8n4rq`) minted on first login and
+  keys all user data (DynamoDB partitions, S3 prefixes, ownership). The Auth0
+  `sub` is stored as an attribute and resolved to the `userId` through the
+  `SUB#<sub>` identity item — never used in a key.
 
 **Data-access rules — mandatory, do not deviate:**
 
-- **One item per entity.** A user is a *partition* (`pk=USER#<sub>`), not a row;
+- **One item per entity.** A user is a *partition* (`pk=USER#<userId>`), not a row;
   profile/settings/notifications/quota/each KB/each skill/each session are
   **separate items** distinguished by `sk`. Never model an aggregate as one JSON
   blob.
@@ -72,10 +76,12 @@ chunks or postings in DynamoDB.
   put vectors, chunks, postings or large/binary data in an item.
 - **Reads are `GetItem`/`Query` only.** Target a known `pk` (+ `sk` prefix) and
   use the three sparse GSIs. **Never `Scan` on the request path. Never N+1**
-  (batch-get, don't loop gets).
+  (batch-get, don't loop gets). `sub→userId` is a strongly-consistent `GetItem`
+  on `SUB#<sub>` (never a GSI, which is eventually consistent and would duplicate
+  profiles on first login).
 - **Writes:** atomic `ADD` counters on their own item (`#QUOTA`); TTL
-  (`expiresAt`) for sessions/events; conditional writes for uniqueness;
-  idempotent delete-then-write per document.
+  (`expiresAt`) for sessions/events; conditional writes for uniqueness (including
+  the `SUB#<sub>` identity binding); idempotent delete-then-write per document.
 - These are what deliver the speed: one round trip per concern, no 400 KB item
   ceiling, no whole-blob write contention, cheap small reads, and the bulky data
   in the cheap store. See design Part 3 (locked decisions 7–10).
@@ -83,17 +89,17 @@ chunks or postings in DynamoDB.
 ### S3 layout
 
 ```
-raw/<sub>/<kbId>/<docId>/<fileName>            original upload; ONLY prefix that triggers ingestion
-derived/<sub>/<kbId>/<docId>/text.md           extracted text
-derived/<sub>/<kbId>/<docId>/images/<page>-<i>.<ext>
-derived/<sub>/<kbId>/<docId>/chunks.json       staged parents + children
-derived/<sub>/<kbId>/<docId>/embeddings.json   staged vectors
-index/<sub>/parents/<parentId>.json            parent + children text (hydration)
-index/<sub>/terms/<token>.json                 postings: {df, postings:[{chunkId,docId,kbId,parentId,tf,dl}]}
-index/<sub>/catalog/<c0>.json                  token strings per first char (prefix expansion)
-index/<sub>/docs/<docId>/manifest.json         chunkIds, parentIds, tokens (delete/rebuild)
-index/<sub>/stats.json                         chunkCount, totalTokens, avgdl
-index/<sub>/vectors.json                       local vector store (VECTOR_STORE=local)
+raw/<userId>/<kbId>/<docId>/<fileName>            original upload; ONLY prefix that triggers ingestion
+derived/<userId>/<kbId>/<docId>/text.md           extracted text
+derived/<userId>/<kbId>/<docId>/images/<page>-<i>.<ext>
+derived/<userId>/<kbId>/<docId>/chunks.json       staged parents + children
+derived/<userId>/<kbId>/<docId>/embeddings.json   staged vectors
+index/<userId>/parents/<parentId>.json            parent + children text (hydration)
+index/<userId>/terms/<token>.json                 postings: {df, postings:[{chunkId,docId,kbId,parentId,tf,dl}]}
+index/<userId>/catalog/<c0>.json                  token strings per first char (prefix expansion)
+index/<userId>/docs/<docId>/manifest.json         chunkIds, parentIds, tokens (delete/rebuild)
+index/<userId>/stats.json                         chunkCount, totalTokens, avgdl
+index/<userId>/vectors.json                       local vector store (VECTOR_STORE=local)
 ```
 
 - Deterministic IDs: `chunkId=<docId>#<ord>`, `parentId=<docId>#<parentOrd>`.
@@ -143,7 +149,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - **Hybrid search is always on** and runs **inside `knowledge-mcp`** (there is no
   separate retrieval Lambda):
   - **Semantic leg**: one S3 Vectors `QueryVectors` on the caller's per-user
-    index (`idx-<sub>`), `topK=100`, filtered by `kbId` + `status=ready`.
+    index (`idx-<userId>`), `topK=100`, filtered by `kbId` + `status=ready`.
   - **Lexical leg**: tokenize the query, prefix-expand via the catalog shard,
     `GetObject` each term, score BM25 in-Lambda (`k1=1.2, b=0.75`; `df` from the
     term object, `dl` from the posting, `avgdl` from `stats.json`).
@@ -163,8 +169,8 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   (`amazon.rerank-v1:0`, `us-west-2`) in production; locally `RERANK_MODE=local`
   calls a HuggingFace TEI cross-encoder (`reranker` container, `POST /rerank`).
   If it is unreachable the RRF order is returned instead of failing.
-- **Identity is passed in the event** (`auth0Sub`) for direct invokes, or comes
-  from JWT claims for HTTP.
+- **Identity is passed in the event** (`userId`, the internal UUID) for direct
+  invokes, or resolved from the JWT `sub` for HTTP (via the `SUB#<sub>` item).
 - **Each MCP server is its own Lambda** (`awslabs.mcp-lambda-handler`,
   stateless) exposing its tools over its own `POST /mcp…` route behind the Auth0
   JWT authorizer, plus the direct Lambda invoke transport. `knowledge-mcp` owns
@@ -189,8 +195,8 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   `ALLOWED_MODULES` extend/except the list. Every execution is also prefixed with
   an idempotent `sys.addaudithook` prelude. The microVM remains the real
   isolation boundary.
-- **Sessions**: one AgentCore session per `(auth0Sub, conversationId)` stored in
-  the **main `get1agent` DynamoDB table** (`USER#<sub>` / `CONV#<thread>`) with a
+- **Sessions**: one AgentCore session per `(userId, conversationId)` stored in
+  the **main `get1agent` DynamoDB table** (`USER#<userId>` / `CONV#<thread>`) with a
   TTL (`expiresAt`) and capped at `CODE_INTERPRETER_MAX_SESSIONS_PER_USER` (1)
   with LRU eviction. A deterministic `clientToken` (`uuid5`) plus a conditional
   write dedupes concurrent invocations.
@@ -255,10 +261,10 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - Admin code is kept separate: frontend UI under `frontend/src/admin/`, backend
   Lambda under `backend/services/admin/mcp-tester/`.
 - **`mcp-tester`** (`GET /v1/admin/mcp/tools`, `POST /v1/admin/mcp/call`) is the
-  MCP *client*: it reads the admin claim + `sub`, builds MCP JSON-RPC, and
-  invokes every MCP server in `MCP_FUNCTIONS` over their direct-invoke
-  transports, merging their tool lists and routing each call to the owning
-  server.
+  MCP *client*: it reads the admin claim + `sub`, resolves the caller's internal
+  `userId`, builds MCP JSON-RPC, and invokes every MCP server in `MCP_FUNCTIONS`
+  over their direct-invoke transports, merging their tool lists and routing each
+  call to the owning server.
 
 ## Conventions
 
@@ -334,7 +340,7 @@ make floci-down       # stop and remove
 - Ingestion runs with `EMBED_MODE=local`: real 1024-dim vectors from an Ollama
   container (`mxbai-embed-large`). `make floci` pulls the model.
 - Retrieval runs with `VECTOR_STORE=local` (brute-force cosine over
-  `index/<sub>/vectors.json`; S3 Vectors is not emulated) and `RERANK_MODE=local`
+  `index/<userId>/vectors.json`; S3 Vectors is not emulated) and `RERANK_MODE=local`
   (HuggingFace TEI `reranker`, `POST /rerank`). `make floci` starts it and waits
   for `/health`.
 - After changing Lambda code: `make floci-build` then `make floci-up`

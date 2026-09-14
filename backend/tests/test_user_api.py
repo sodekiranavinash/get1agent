@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from support import load_module, patch_lambda_storage
 
@@ -44,7 +45,9 @@ def _call(method, path, body=None, query=None, expect=200, view="user"):
 def test_settings(fake_storage, monkeypatch):
     patch_lambda_storage(monkeypatch, handler, fake_storage)
     initial = _call("GET", "/v1/user/settings")
-    assert initial["id"] == SUB
+    # The public id is the short internal id, never the Auth0 sub.
+    assert initial["id"] != SUB
+    assert re.fullmatch(r"u_[0-9a-hjkmnp-tv-z]{16}", initial["id"])
     updated = _call(
         "POST",
         "/v1/user/settings",
@@ -57,6 +60,8 @@ def test_settings(fake_storage, monkeypatch):
 
 def test_knowledge_base_document_flow(fake_storage, monkeypatch):
     patch_lambda_storage(monkeypatch, handler, fake_storage)
+
+    user_id = _call("GET", "/v1/user/settings")["id"]
 
     created = _call("POST", "/v1/knowledge-bases", {"name": "api-kb", "description": "hi"}, expect=201)
     kb_id = created["id"]
@@ -80,7 +85,7 @@ def test_knowledge_base_document_flow(fake_storage, monkeypatch):
     )
     doc_id = presign["documentId"]
     key = presign["key"]
-    assert key.startswith(f"raw/{SUB}/{kb_id}/{doc_id}/resume.pdf")
+    assert key.startswith(f"raw/{user_id}/{kb_id}/{doc_id}/resume.pdf")
     fake_storage.put_bytes(key, b"hello world")
     completed = _call("POST", f"/v1/knowledge-bases/{kb_id}/documents/{doc_id}/complete")
     assert completed["status"] == "uploaded"

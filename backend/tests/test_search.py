@@ -25,9 +25,15 @@ KB_ID = "kb-search"
 DOC_ID = "doc-search"
 
 
-def _stage(fake, chunks: list[dict], vectors: list[list[float]]) -> tuple[str, str]:
-    chunks_path = chunks_key(SUB, KB_ID, DOC_ID)
-    embeddings_path = embeddings_key(SUB, KB_ID, DOC_ID)
+def _user_id() -> str:
+    return users.upsert_user(
+        {"sub": SUB, "https://get1agent.com/email": "search@example.com"}
+    )["userId"]
+
+
+def _stage(fake, user_id: str, chunks: list[dict], vectors: list[list[float]]) -> tuple[str, str]:
+    chunks_path = chunks_key(user_id, KB_ID, DOC_ID)
+    embeddings_path = embeddings_key(user_id, KB_ID, DOC_ID)
     parent_text = " ".join(chunk["text"] for chunk in chunks)
     fake.put_json(
         chunks_path,
@@ -49,7 +55,7 @@ def _stage(fake, chunks: list[dict], vectors: list[list[float]]) -> tuple[str, s
     return chunks_path, embeddings_path
 
 
-def _index(fake, monkeypatch) -> None:
+def _index(fake, monkeypatch, user_id: str) -> None:
     patch_pipeline(monkeypatch, fake)
     chunks = [
         {
@@ -65,11 +71,13 @@ def _index(fake, monkeypatch) -> None:
             "parentOrdinal": 0,
         },
     ]
-    chunks_path, embeddings_path = _stage(fake, chunks, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    chunks_path, embeddings_path = _stage(
+        fake, user_id, chunks, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    )
     index_document(
         fake,
         load_config(),
-        user_id=SUB,
+        user_id=user_id,
         knowledge_base_id=KB_ID,
         document_id=DOC_ID,
         chunks_key=chunks_path,
@@ -82,19 +90,20 @@ def _index(fake, monkeypatch) -> None:
 
 
 def test_index_search_delete_is_idempotent(fake_storage, monkeypatch):
-    _index(fake_storage, monkeypatch)
-    manifest = fake_storage.get_json(manifest_key(SUB, DOC_ID))
+    user_id = _user_id()
+    _index(fake_storage, monkeypatch, user_id)
+    manifest = fake_storage.get_json(manifest_key(user_id, DOC_ID))
     assert sorted(manifest["chunkIds"]) == [f"{DOC_ID}#0", f"{DOC_ID}#1"]
     assert manifest["parentIds"] == [f"{DOC_ID}#0"]
     assert manifest["tokens"]
-    parent = fake_storage.get_json(parent_key(SUB, f"{DOC_ID}#0"))
+    parent = fake_storage.get_json(parent_key(user_id, f"{DOC_ID}#0"))
     assert parent["children"][1]["text"].startswith("It extracts")
 
     store = vector_store(fake_storage)
     results = search_candidates(
         fake_storage,
         store,
-        SUB,
+        user_id,
         kb_ids=[KB_ID],
         query="personal project resume",
         query_vector=[0.9, 0.1, 0.0],
@@ -108,27 +117,27 @@ def test_index_search_delete_is_idempotent(fake_storage, monkeypatch):
     assert results[0]["vectorScore"] is not None
 
     # Re-index must not grow stats or duplicate postings.
-    before = fake_storage.get_json(stats_key(SUB))
-    _index(fake_storage, monkeypatch)
-    assert fake_storage.get_json(stats_key(SUB)) == before
+    before = fake_storage.get_json(stats_key(user_id))
+    _index(fake_storage, monkeypatch, user_id)
+    assert fake_storage.get_json(stats_key(user_id)) == before
 
-    delete_document_index(fake_storage, store, SUB, DOC_ID)
-    assert fake_storage.get_json(manifest_key(SUB, DOC_ID)) is None
-    assert fake_storage.get_json(parent_key(SUB, f"{DOC_ID}#0")) is None
-    assert not (fake_storage.get_json(vectors_key(SUB)) or {})
-    assert fake_storage.get_json(stats_key(SUB))["chunkCount"] == 0
+    delete_document_index(fake_storage, store, user_id, DOC_ID)
+    assert fake_storage.get_json(manifest_key(user_id, DOC_ID)) is None
+    assert fake_storage.get_json(parent_key(user_id, f"{DOC_ID}#0")) is None
+    assert not (fake_storage.get_json(vectors_key(user_id)) or {})
+    assert fake_storage.get_json(stats_key(user_id))["chunkCount"] == 0
     assert (
         search_candidates(
-            fake_storage, store, SUB, kb_ids=[KB_ID], query="resume", query_vector=[1.0, 0.0, 0.0]
+            fake_storage, store, user_id, kb_ids=[KB_ID], query="resume", query_vector=[1.0, 0.0, 0.0]
         )
         == []
     )
 
 
 def test_service_search_and_tag_filter(fake_storage, monkeypatch):
-    users.upsert_user({"sub": SUB, "https://get1agent.com/email": "search@example.com"})
+    user_id = _user_id()
     kb.create_kb(
-        SUB,
+        user_id,
         kb_id=KB_ID,
         name="my-kb",
         description="d",
@@ -142,7 +151,7 @@ def test_service_search_and_tag_filter(fake_storage, monkeypatch):
     doc = documents.document_item(
         doc_id=DOC_ID,
         kb_id=KB_ID,
-        user_id=SUB,
+        user_id=user_id,
         file_name="resume.pdf",
         s3_key="raw/x",
         content_type="application/pdf",
@@ -151,22 +160,22 @@ def test_service_search_and_tag_filter(fake_storage, monkeypatch):
         status="ready",
     )
     documents.put_document(doc)
-    tags.replace_tags(SUB, DOC_ID, KB_ID, doc["fileKey"], [("Resume", "cv"), ("Python", "")])
-    _index(fake_storage, monkeypatch)
+    tags.replace_tags(user_id, DOC_ID, KB_ID, doc["fileKey"], [("Resume", "cv"), ("Python", "")])
+    _index(fake_storage, monkeypatch, user_id)
     patch_search(monkeypatch, fake_storage)
 
-    discovery = service.list_knowledge_bases(SUB)
+    discovery = service.list_knowledge_bases(user_id)
     assert [item["name"] for item in discovery["knowledgeBases"]] == ["my-kb"]
     assert {t["name"] for t in discovery["knowledgeBases"][0]["tags"]} == {"Resume", "Python"}
 
-    matched = service.search(SUB, "personal project resume", [0.9, 0.1, 0.0], tags=["Resume"])
+    matched = service.search(user_id, "personal project resume", [0.9, 0.1, 0.0], tags=["Resume"])
     assert matched["candidates"]
     assert matched["candidates"][0]["documentId"] == DOC_ID
     assert matched["knowledgeBases"][0]["name"] == "my-kb"
 
-    filtered = service.search(SUB, "personal project resume", [0.9, 0.1, 0.0], tags=["Nope"])
+    filtered = service.search(user_id, "personal project resume", [0.9, 0.1, 0.0], tags=["Nope"])
     assert filtered["candidates"] == []
 
-    unknown = service.search(SUB, "resume", [1.0, 0.0, 0.0], knowledge_base_names=["missing"])
+    unknown = service.search(user_id, "resume", [1.0, 0.0, 0.0], knowledge_base_names=["missing"])
     assert unknown["candidates"] == []
     assert unknown["warnings"] and "Unknown knowledge bases" in unknown["warnings"][0]

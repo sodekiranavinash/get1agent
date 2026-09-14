@@ -635,7 +635,7 @@ def main() -> int:
         lm,
         FUNCTIONS["code_interpreter"],
         f"{ROOT}/backend/tools/code-interpreter/dist/function.zip",
-        layers=[ai_layer_arn],
+        layers=[layer_arn, ai_layer_arn],
         environment={
             "CODE_INTERPRETER_MODE": "local",
             "CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS": "120",
@@ -669,8 +669,9 @@ def main() -> int:
         lm,
         FUNCTIONS["mcp_tester"],
         f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
-        layers=[ai_layer_arn],
+        layers=[layer_arn, ai_layer_arn],
         environment={
+            **ddb_env,
             "MCP_FUNCTIONS": ",".join(
                 [
                     FUNCTIONS["knowledge_mcp"],

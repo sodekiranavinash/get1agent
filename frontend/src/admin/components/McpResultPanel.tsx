@@ -153,9 +153,9 @@ export function McpResultPanel({ result, error, running }: McpResultPanelProps) 
             {item === 'result' ? 'Result' : 'Raw JSON-RPC'}
           </button>
         ))}
-        {result.auth0Sub ? (
+        {result.userId ? (
           <span className="ml-auto max-w-[50%] truncate text-[11px] text-subtle">
-            as {result.auth0Sub}
+            as user <span className="font-mono text-foreground">{result.userId}</span>
           </span>
         ) : null}
       </div>

@@ -17,15 +17,22 @@ SUB = "auth0|mcp"
 KB_ID = "kb-mcp"
 DOC_ID = "doc-mcp"
 
+USER_ID: str | None = None
+
 
 def _setup(fake, monkeypatch) -> None:
+    global USER_ID
     patch_pipeline(monkeypatch, fake)
     patch_search(monkeypatch, fake)
     monkeypatch.setattr(handler, "embed_texts", lambda texts, cfg: [[0.9, 0.1, 0.0]])
 
-    users.upsert_user({"sub": SUB, "https://get1agent.com/email": "mcp@example.com"})
+    profile = users.upsert_user(
+        {"sub": SUB, "https://get1agent.com/email": "mcp@example.com"}
+    )
+    USER_ID = profile["userId"]
+    user_id = USER_ID
     kb.create_kb(
-        SUB,
+        user_id,
         kb_id=KB_ID,
         name="kmcp-kb",
         description="d",
@@ -39,7 +46,7 @@ def _setup(fake, monkeypatch) -> None:
     doc = documents.document_item(
         doc_id=DOC_ID,
         kb_id=KB_ID,
-        user_id=SUB,
+        user_id=user_id,
         file_name="resume.pdf",
         s3_key="raw/x",
         content_type="application/pdf",
@@ -48,10 +55,10 @@ def _setup(fake, monkeypatch) -> None:
         status="ready",
     )
     documents.put_document(doc)
-    tags.replace_tags(SUB, DOC_ID, KB_ID, doc["fileKey"], [("Resume", "cv")])
+    tags.replace_tags(user_id, DOC_ID, KB_ID, doc["fileKey"], [("Resume", "cv")])
 
-    chunks_path = chunks_key(SUB, KB_ID, DOC_ID)
-    embeddings_path = embeddings_key(SUB, KB_ID, DOC_ID)
+    chunks_path = chunks_key(user_id, KB_ID, DOC_ID)
+    embeddings_path = embeddings_key(user_id, KB_ID, DOC_ID)
     fake.put_json(
         chunks_path,
         {
@@ -81,7 +88,7 @@ def _setup(fake, monkeypatch) -> None:
     index_document(
         fake,
         load_config(),
-        user_id=SUB,
+        user_id=user_id,
         knowledge_base_id=KB_ID,
         document_id=DOC_ID,
         chunks_key=chunks_path,
@@ -93,7 +100,7 @@ def _setup(fake, monkeypatch) -> None:
 
 
 def _invoke(method: str, params: dict | None = None, request_id: int = 1) -> dict:
-    event = {"jsonrpc": "2.0", "id": request_id, "method": method, "auth0Sub": SUB}
+    event = {"jsonrpc": "2.0", "id": request_id, "method": method, "userId": USER_ID}
     if params is not None:
         event["params"] = params
     return handler.lambda_handler(event, None)

@@ -1,9 +1,9 @@
 """Thin MCP JSON-RPC client for the ``knowledge-mcp`` Lambda.
 
 ``knowledge-mcp`` supports a direct-invoke transport: send a JSON-RPC message
-plus the caller's ``auth0Sub`` and it returns the raw JSON-RPC response. This
-module builds the standard MCP messages (``tools/list``, ``tools/call``) and
-invokes the function with boto3 — no third-party MCP SDK or HTTP transport
+plus the caller's internal ``userId`` and it returns the raw JSON-RPC response.
+This module builds the standard MCP messages (``tools/list``, ``tools/call``)
+and invokes the function with boto3 — no third-party MCP SDK or HTTP transport
 needed, and the caller's identity travels in the payload.
 """
 
@@ -44,29 +44,29 @@ def _message(method: str, params: dict[str, Any], request_id: int) -> dict[str, 
 
 
 def list_tools(
-    function_name: str, sub: str, region: str | None = None
+    function_name: str, user_id: str, region: str | None = None
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return ``(request, response)`` for an MCP ``tools/list`` call."""
     message = _message("tools/list", {}, 1)
-    response = _invoke(function_name, {**message, "auth0Sub": sub}, region)
+    response = _invoke(function_name, {**message, "userId": user_id}, region)
     return message, response
 
 
 def call_tool(
     function_name: str,
-    sub: str,
+    user_id: str,
     name: str,
     arguments: dict[str, Any],
     region: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return ``(request, response)`` for an MCP ``tools/call`` invocation."""
     message = _message("tools/call", {"name": name, "arguments": arguments}, 2)
-    response = _invoke(function_name, {**message, "auth0Sub": sub}, region)
+    response = _invoke(function_name, {**message, "userId": user_id}, region)
     return message, response
 
 
 def list_tools_multi(
-    function_names: list[str], sub: str, region: str | None = None
+    function_names: list[str], user_id: str, region: str | None = None
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """List tools across several MCP servers.
 
@@ -77,7 +77,7 @@ def list_tools_multi(
     tools: list[dict[str, Any]] = []
     per_server: list[dict[str, Any]] = []
     for function_name in function_names:
-        request, response = list_tools(function_name, sub, region)
+        request, response = list_tools(function_name, user_id, region)
         per_server.append(
             {"function": function_name, "request": request, "response": response}
         )
@@ -88,11 +88,11 @@ def list_tools_multi(
 
 
 def find_tool_server(
-    function_names: list[str], sub: str, tool_name: str, region: str | None = None
+    function_names: list[str], user_id: str, tool_name: str, region: str | None = None
 ) -> str | None:
     """Return the MCP server that exposes ``tool_name``, if any."""
     for function_name in function_names:
-        _, response = list_tools(function_name, sub, region)
+        _, response = list_tools(function_name, user_id, region)
         tools = response.get("result", {}).get("tools", []) or []
         if any(isinstance(tool, dict) and tool.get("name") == tool_name for tool in tools):
             return function_name

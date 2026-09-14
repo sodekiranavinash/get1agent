@@ -986,7 +986,7 @@ def _handle_settings_post(claims: dict[str, Any], body: dict[str, Any]) -> dict[
         # fullName lives on the profile row.
         from shared.dynamo.repositories import users as users_repo
 
-        item = users_repo.get_user_by_sub(sub) or profile
+        item = users_repo.get_user_by_id(sub) or profile
         item["fullName"] = full_name
         users_repo.table().put_item(Item=item)
         profile["fullName"] = full_name

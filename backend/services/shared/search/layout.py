@@ -1,17 +1,17 @@
 """S3 key layout and tokenization for the keyword index.
 
 ```
-raw/<sub>/<kbId>/<docId>/<fileName>            original upload (triggers ingestion)
-derived/<sub>/<kbId>/<docId>/text.md           extracted text
-derived/<sub>/<kbId>/<docId>/images/<page>-<i>.<ext>
-derived/<sub>/<kbId>/<docId>/chunks.json       staged parents + children
-derived/<sub>/<kbId>/<docId>/embeddings.json   staged vectors
-index/<sub>/parents/<parentId>.json            parent + children text (hydration)
-index/<sub>/terms/<token>.json                 postings + df (BM25)
-index/<sub>/catalog/<c0>.json                  token strings per first char
-index/<sub>/docs/<docId>/manifest.json         chunkIds, parentIds, tokens
-index/<sub>/stats.json                         chunkCount, totalTokens, avgdl
-index/<sub>/vectors.json                       local vector store (VECTOR_STORE=local)
+raw/<userId>/<kbId>/<docId>/<fileName>            original upload (triggers ingestion)
+derived/<userId>/<kbId>/<docId>/text.md           extracted text
+derived/<userId>/<kbId>/<docId>/images/<page>-<i>.<ext>
+derived/<userId>/<kbId>/<docId>/chunks.json       staged parents + children
+derived/<userId>/<kbId>/<docId>/embeddings.json   staged vectors
+index/<userId>/parents/<parentId>.json            parent + children text (hydration)
+index/<userId>/terms/<token>.json                 postings + df (BM25)
+index/<userId>/catalog/<c0>.json                  token strings per first char
+index/<userId>/docs/<docId>/manifest.json         chunkIds, parentIds, tokens
+index/<userId>/stats.json                         chunkCount, totalTokens, avgdl
+index/<userId>/vectors.json                       local vector store (VECTOR_STORE=local)
 ```
 """
 

@@ -5,11 +5,13 @@ owns its own tools and uses this module to expose them over two transports:
 
 * **HTTP (API Gateway):** the request body is a JSON-RPC message and the caller's
   identity comes from the JWT authorizer claims. ``authorize`` (default
-  :func:`require_user`) gates the surface.
-* **Direct Lambda invoke:** the event is a JSON-RPC message plus ``auth0Sub``.
-  Used by ``mcp-tester``; the caller's IAM role is the trust boundary.
+  :func:`require_user`) gates the surface, and ``resolve_user_id`` maps the Auth0
+  ``sub`` to the internal userId when the server stores user-scoped data.
+* **Direct Lambda invoke:** the event is a JSON-RPC message plus ``userId``
+  (already the internal id). Used by ``mcp-tester``; the caller's IAM role is the
+  trust boundary.
 
-The active user's ``sub`` is stashed in a ContextVar for the request so tool
+The active user's internal id is stashed in a ContextVar for the request so tool
 functions can read it with :func:`require_sub`.
 """
 
@@ -27,12 +29,12 @@ _current_sub: ContextVar[str | None] = ContextVar("mcp_current_sub", default=Non
 
 
 def current_sub() -> str | None:
-    """The authenticated ``sub`` for the in-flight request, if any."""
+    """The authenticated internal user id for the in-flight request, if any."""
     return _current_sub.get()
 
 
 def require_sub() -> str:
-    """Return the caller's ``sub`` or raise when there is no identity."""
+    """Return the caller's internal user id or raise when there is no identity."""
     sub = _current_sub.get()
     if not sub:
         raise RuntimeError("No authenticated user in request context")
@@ -76,12 +78,20 @@ def _error_response(code: int, message: str, request_id: Any = None) -> dict[str
 
 
 def build_handler(
-    mcp: Any, *, authorize: Callable[[dict[str, Any] | None, dict[str, Any]], None] = require_user
+    mcp: Any,
+    *,
+    authorize: Callable[[dict[str, Any] | None, dict[str, Any]], None] = require_user,
+    resolve_user_id: Callable[[str], str | None] | None = None,
 ) -> Callable[[dict[str, Any], Any], dict[str, Any]]:
     """Wrap an ``MCPLambdaHandler`` in the HTTP + direct-invoke transport.
 
     ``authorize`` is applied to HTTP requests only; direct invokes are trusted
     because only callers with ``lambda:InvokeFunction`` can reach them.
+
+    ``resolve_user_id`` maps the JWT ``sub`` to the internal userId for HTTP
+    requests. Servers that key user data (knowledge-mcp, code-interpreter) pass
+    it; servers that only need an authenticated caller (web-search) leave it out.
+    Direct invokes already carry the internal ``userId`` and are never resolved.
     """
 
     def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -92,7 +102,10 @@ def build_handler(
                 authorize(_claims(event), event)
             except AuthError as exc:
                 return _json_http_error(exc.status, exc.message)
-            _current_sub.set(_claims_sub(event))
+            sub = _claims_sub(event)
+            if resolve_user_id is not None and sub:
+                sub = resolve_user_id(sub)
+            _current_sub.set(sub)
             try:
                 return mcp.handle_request(event, context)
             except Exception as exc:  # noqa: BLE001
@@ -101,8 +114,8 @@ def build_handler(
                 return _error_response(-32603, "Internal error")
 
         # Direct Lambda invoke transport: a JSON-RPC message plus caller identity.
-        sub = event.get("auth0Sub") or event.get("sub")
-        _current_sub.set(str(sub).strip() if sub else None)
+        user_id = event.get("userId")
+        _current_sub.set(str(user_id).strip() if user_id else None)
         message = {
             key: event[key]
             for key in ("jsonrpc", "id", "method", "params")

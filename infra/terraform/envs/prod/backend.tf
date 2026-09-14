@@ -240,10 +240,12 @@ module "mcp_tester" {
   source_code_hash = filebase64sha256(local.mcp_tester_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_ai[0].arn]
+  layer_arns       = [module.layer_data[0].arn, module.layer_ai[0].arn]
 
   memory_size = 512
   timeout     = 300
+
+  dynamodb_table_arns = [module.database[0].table_arn]
 
   lambda_invoke_arns = [
     module.knowledge_mcp[0].function_arn,
@@ -252,6 +254,7 @@ module "mcp_tester" {
   ]
 
   environment = {
+    DYNAMODB_TABLE = module.database[0].table_name
     MCP_FUNCTIONS = join(",", [
       module.knowledge_mcp[0].function_name,
       module.web_search[0].function_name,
@@ -260,7 +263,9 @@ module "mcp_tester" {
   }
 
   depends_on = [
+    module.layer_data,
     module.layer_ai,
+    module.database,
     module.knowledge_mcp,
     module.web_search,
     module.code_interpreter,
@@ -277,7 +282,7 @@ module "code_interpreter" {
   source_code_hash = filebase64sha256(local.code_interpreter_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_ai[0].arn]
+  layer_arns       = [module.layer_data[0].arn, module.layer_ai[0].arn]
 
   memory_size = 1024
   timeout     = var.code_interpreter_timeout_seconds
@@ -298,7 +303,7 @@ module "code_interpreter" {
     CODE_INTERPRETER_MAX_SESSIONS_PER_USER   = tostring(var.code_interpreter_max_sessions_per_user)
   }
 
-  depends_on = [module.database, module.layer_ai]
+  depends_on = [module.database, module.layer_data, module.layer_ai]
 }
 
 module "web_search" {

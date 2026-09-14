@@ -80,7 +80,7 @@ Browser → Cloudflare → API Gateway (JWT) → Lambda functions
 | **API Gateway** | Auth0 JWT, CORS, per-route + stage throttling, access logs |
 | **DynamoDB** | Single table `get1agent` (users, KBs, documents, tags, skills, events, quotas, sessions) |
 | **S3** | Document uploads, derived artifacts, keyword index, parents, manifests |
-| **S3 Vectors** | One vector index per user (`idx-<sub>`) |
+| **S3 Vectors** | One vector index per user (`idx-<userId>`) |
 | **Bedrock** | Titan Text V2 embeddings; opt-in `amazon.rerank-v1:0` rerank (us-west-2) |
 
 ---
@@ -107,8 +107,8 @@ Registry: `backend/services/registry.json` — lists **layers** and **lambdas**
 | `user-api` | `/v1/knowledge-bases*`, `/v1/agent-skills*`, `/v1/user/settings` | `data`, `ai` | All user CRUD |
 | `knowledge-mcp` | `POST /mcp` | `data`, `ai` | Knowledge MCP tools + hybrid retrieval |
 | `web-search` | `POST /mcp/web-search` | `ai` | Exa web search |
-| `code-interpreter` | `POST /mcp/code-interpreter` | `ai` | AgentCore code sandbox |
-| `mcp-tester` | `/v1/admin/mcp/*` | `ai` | Admin MCP client |
+| `code-interpreter` | `POST /mcp/code-interpreter` | `data`, `ai` | AgentCore code sandbox |
+| `mcp-tester` | `/v1/admin/mcp/*` | `data`, `ai` | Admin MCP client |
 | `ingestion-*` | (SQS / Step Functions) | `data` | extract → embed → index (+ mark-failed, watchdog, dispatcher) |
 
 | Layer | Contents |

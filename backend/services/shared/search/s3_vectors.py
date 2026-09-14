@@ -2,8 +2,8 @@
 
 ``VECTOR_STORE`` selects the implementation:
 
-* ``s3vectors`` — Amazon S3 Vectors, one index per user (``idx-<sub>``).
-* ``local``     — brute-force cosine over a single ``index/<sub>/vectors.json``
+* ``s3vectors`` — Amazon S3 Vectors, one index per user (``idx-<userId>``).
+* ``local``     — brute-force cosine over a single ``index/<userId>/vectors.json``
   object in S3 (the same S3 emulator the rest of local dev uses).
 * ``dynamodb``  — reserved for DynamoDB native vectors; not implemented yet.
 """

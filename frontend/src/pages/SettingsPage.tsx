@@ -347,6 +347,14 @@ export function SettingsPage() {
                 </span>
               </div>
             </div>
+            <div className="block sm:col-span-2">
+              <span className="mb-1.5 block text-xs font-medium text-muted">User ID</span>
+              <div className="flex h-9 items-center rounded-md border border-border bg-raised px-3">
+                <span className="font-mono text-[13px] tracking-[0.2em] text-foreground">
+                  {form.id}
+                </span>
+              </div>
+            </div>
           </div>
         </Card>
 

@@ -28,6 +28,7 @@ export type McpToolsResponse = {
   ok: boolean
   tools: McpTool[]
   servers?: unknown[]
+  userId?: string
   error?: { code?: number; message?: string }
   request?: unknown
   response?: unknown
@@ -38,7 +39,7 @@ export type McpCallResponse = {
   ok: boolean
   tool: string
   server?: string
-  auth0Sub?: string
+  userId?: string
   arguments: Record<string, unknown>
   result?: unknown
   data?: unknown

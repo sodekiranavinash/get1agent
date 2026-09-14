@@ -29,6 +29,8 @@ import guard
 import local_exec
 import sessions
 
+from shared.users import get_user_by_sub
+
 _THREAD_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
 
 mcp = MCPLambdaHandler(name="get1agent-code-interpreter", version="1.0.0")
@@ -335,4 +337,13 @@ def code_interpreter(
 mcp.tools[CODE_TOOL] = _CODE_SCHEMA
 mcp.tool_implementations[CODE_TOOL] = code_interpreter
 
-lambda_handler = build_handler(mcp)
+def _resolve_user_id(sub: str) -> str | None:
+    """Map the HTTP caller's Auth0 sub to the internal userId for sessions."""
+    try:
+        profile = get_user_by_sub(sub)
+    except Exception:  # noqa: BLE001 - fall through to an unauthenticated tool error
+        return None
+    return str(profile["userId"]) if profile else None
+
+
+lambda_handler = build_handler(mcp, resolve_user_id=_resolve_user_id)
