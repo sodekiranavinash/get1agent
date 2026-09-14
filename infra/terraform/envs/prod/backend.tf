@@ -506,7 +506,6 @@ module "code_interpreter" {
     CODE_INTERPRETER_SESSION_TIMEOUT_SECONDS = tostring(var.code_interpreter_session_timeout_seconds)
     CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS    = tostring(var.code_interpreter_exec_timeout_seconds)
     CODE_INTERPRETER_MAX_SESSIONS_PER_USER   = tostring(var.code_interpreter_max_sessions_per_user)
-    AWS_REGION                               = var.aws_region
   }
 
   depends_on = [aws_dynamodb_table.code_interpreter_sessions, module.layer_ai]
