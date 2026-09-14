@@ -130,7 +130,18 @@ bash infra/aws/deploy-backend.sh user-api deploy
 
 Layer updates require an **Infra** apply (Terraform publishes a new layer version).
 
-GitHub Actions: **Backend** workflow — check a Lambda to deploy handler code.
+GitHub Actions: **Backend** workflow — pick one or more **groups** to deploy handler code:
+
+| Checkbox | Lambdas |
+|----------|---------|
+| `user-apis` | `user-api` |
+| `knowledge-mcp` | `knowledge-mcp` |
+| `admin-apis` | `mcp-tester` |
+| `mcp-tools` | `web-search`, `code-interpreter` |
+| `ingestion-apis` | `ingestion-dispatcher`, `ingestion-extract`, `ingestion-embed`, `ingestion-index`, `ingestion-mark-failed`, `ingestion-watchdog` |
+
+Groups come from the `group` field in `backend/services/registry.json`. The CLI
+takes the same names: `bash infra/aws/deploy-backend.sh mcp-tools deploy`.
 
 ---
 
@@ -176,7 +187,7 @@ Three workflows — each has checkboxes to run only what you need:
 |----------|-------------------------|
 | **Infra** | Web, API Gateway, Lambdas (DynamoDB + S3 Vectors + state bucket created automatically) |
 | **Frontend** | Build + sync to S3 (separate from Infra) |
-| **Backend** | one checkbox per Lambda = deploy Lambda **code** |
+| **Backend** | grouped checkboxes (`user-apis`, `knowledge-mcp`, `admin-apis`, `mcp-tools`, `ingestion-apis`) = deploy Lambda **code** |
 
 Push to `main` under `frontend/**` auto-runs **Frontend**.
 

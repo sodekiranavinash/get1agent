@@ -31,7 +31,9 @@ if query.lower() == "all":
 else:
     selected = [
         item for item in lambdas
-        if item["name"] == query or item["function_name"] == query
+        if item["name"] == query
+        or item["function_name"] == query
+        or item.get("group") == query
     ]
 
 if not selected:

@@ -61,6 +61,25 @@ chunks or postings in DynamoDB.
   `keys.py`, `repositories/*`). The Auth0 `sub` is the user id everywhere
   (DynamoDB keys, S3 prefixes, ownership).
 
+**Data-access rules — mandatory, do not deviate:**
+
+- **One item per entity.** A user is a *partition* (`pk=USER#<sub>`), not a row;
+  profile/settings/notifications/quota/each KB/each skill/each session are
+  **separate items** distinguished by `sk`. Never model an aggregate as one JSON
+  blob.
+- **DynamoDB holds only small metadata.** Embeddings → **S3 Vectors**; keyword
+  postings, parent text, manifests, staged artifacts and uploads → **S3**. Never
+  put vectors, chunks, postings or large/binary data in an item.
+- **Reads are `GetItem`/`Query` only.** Target a known `pk` (+ `sk` prefix) and
+  use the three sparse GSIs. **Never `Scan` on the request path. Never N+1**
+  (batch-get, don't loop gets).
+- **Writes:** atomic `ADD` counters on their own item (`#QUOTA`); TTL
+  (`expiresAt`) for sessions/events; conditional writes for uniqueness;
+  idempotent delete-then-write per document.
+- These are what deliver the speed: one round trip per concern, no 400 KB item
+  ceiling, no whole-blob write contention, cheap small reads, and the bulky data
+  in the cheap store. See design Part 3 (locked decisions 7–10).
+
 ### S3 layout
 
 ```
@@ -336,10 +355,18 @@ migration.
   file with `cd backend/tests && uv run pytest test_search.py`.
 - Local Lambdas / infra: see "Local development" above (`make floci-*`).
 - Backend Lambdas: `make -C backend/services/<name> package`;
-  `bash infra/aws/deploy-backend.sh <name> [package|deploy]`.
+  `bash infra/aws/deploy-backend.sh <name|group> [package|deploy]`. The
+  `Backend` workflow deploys by group (`user-apis`, `knowledge-mcp`,
+  `admin-apis`, `mcp-tools`, `ingestion-apis`), defined by the `group` field in
+  `backend/services/registry.json`.
 
 ## Rules
 
+- **Follow the data-access rules in "DynamoDB single table" above — they are
+  mandatory.** One item per entity; small metadata only in DynamoDB (vectors and
+  bulky artifacts in S3 Vectors/S3); `GetItem`/`Query` only (no `Scan`, no N+1);
+  atomic counters on their own item; TTL for ephemeral items. This is what keeps
+  the app fast — do not deviate without recording it in the design doc.
 - Run everything locally through the Floci stack (`make floci-*`); it is the
   approved way to run Lambda in Docker and emulate AWS services locally. Do not
   add custom local emulation or Floci-specific branches to application code —

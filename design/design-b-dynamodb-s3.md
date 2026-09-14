@@ -93,6 +93,40 @@ accepted trade-off is S3 Vectors' 100–300 ms semantic latency (with a
 6. **Ingestion stages:** **3 — `extract+chunk → embed → index`**. Matches the
    existing code (`extract_document` already chunks), so it is the smallest
    change.
+7. **Data-access model (mandatory, locked):** **single DynamoDB table +
+   adjacency list, one item per entity.** A user is a *partition*
+   (`pk=USER#<sub>`), not a single row; profile, settings, notifications, quota,
+   each KB, each skill, each session are **separate items** distinguished by
+   `sk`. Never store a user (or any aggregate) as one JSON blob.
+8. **Keep large data out of DynamoDB (mandatory, locked):** embeddings →
+   **S3 Vectors**; keyword postings, parent text, manifests, staged artifacts and
+   uploads → **S3 objects**. DynamoDB holds **only small metadata**. Nothing
+   binary/large/vector ever goes in a DynamoDB item.
+9. **Reads are `GetItem`/`Query` only (mandatory, locked):** every hot-path read
+   targets a known `pk` (+ optional `sk` prefix) and uses the three sparse
+   overloaded GSIs. **No `Scan` on the request path.** No N+1 (batch-get, not
+   per-row get).
+10. **Write patterns (mandatory, locked):** atomic `ADD` counters live on their
+    own item (`#QUOTA`); ephemeral items (sessions, events) carry a TTL
+    (`expiresAt`); conditional writes give uniqueness; idempotent delete-then-write
+    per document.
+
+### Why these are non-negotiable (the speed argument)
+
+- **One round trip per concern.** A user's data is one `Query` on the partition;
+  a page needs its own item, not a whole-user read. This is what keeps the app
+  fast and avoids N+1.
+- **No 400 KB ceiling.** A single blob would hit DynamoDB's item limit as soon as
+  a user has a few skills (100 KB each) or documents. Splitting is the only thing
+  that scales.
+- **No whole-blob write contention.** Counters update atomically; two concurrent
+  uploads don't fight over one user object.
+- **Small items = cheap, fast reads.** DynamoDB reads are rounded to 1 KB (4 KB
+  for eventually-consistent). Small per-entity items keep RCU/latency low; a fat
+  blob pays for every read.
+- **The big data is in the cheap store.** Vectors/postings/parents are ~all of
+  the bytes and live in S3 Vectors / S3 at a fraction of the cost. DynamoDB
+  metadata is tiny, so the ~100 bytes/item overhead of splitting is noise.
 
 ---
 

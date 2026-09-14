@@ -3,48 +3,24 @@ name: Backend
 on:
   workflow_dispatch:
     inputs:
-      user_api:
-        description: Deploy user-api
+      user_apis:
+        description: User APIs (user-api)
         type: boolean
         default: true
       knowledge_mcp:
-        description: Deploy knowledge-mcp
+        description: Knowledge MCP (knowledge-mcp)
         type: boolean
         default: false
-      mcp_tester:
-        description: Deploy mcp-tester (admin MCP client)
+      admin_apis:
+        description: Admin APIs (mcp-tester)
         type: boolean
         default: false
-      code_interpreter:
-        description: Deploy code-interpreter (MCP code sandbox)
+      mcp_tools:
+        description: MCP tools (web-search, code-interpreter)
         type: boolean
         default: false
-      web_search:
-        description: Deploy web-search (MCP Exa web search)
-        type: boolean
-        default: false
-      ingestion_dispatcher:
-        description: Deploy ingestion-dispatcher
-        type: boolean
-        default: false
-      ingestion_extract:
-        description: Deploy ingestion-extract
-        type: boolean
-        default: false
-      ingestion_embed:
-        description: Deploy ingestion-embed
-        type: boolean
-        default: false
-      ingestion_index:
-        description: Deploy ingestion-index
-        type: boolean
-        default: false
-      ingestion_mark_failed:
-        description: Deploy ingestion-mark-failed
-        type: boolean
-        default: false
-      ingestion_watchdog:
-        description: Deploy ingestion-watchdog
+      ingestion_apis:
+        description: Ingestion APIs (dispatcher, extract, embed, index, mark-failed, watchdog)
         type: boolean
         default: false
 
@@ -71,17 +47,11 @@ jobs:
       - name: Build matrix
         id: matrix
         env:
-          SELECT_USER_API: ${{ inputs.user_api }}
+          SELECT_USER_APIS: ${{ inputs.user_apis }}
           SELECT_KNOWLEDGE_MCP: ${{ inputs.knowledge_mcp }}
-          SELECT_MCP_TESTER: ${{ inputs.mcp_tester }}
-          SELECT_CODE_INTERPRETER: ${{ inputs.code_interpreter }}
-          SELECT_WEB_SEARCH: ${{ inputs.web_search }}
-          SELECT_INGESTION_DISPATCHER: ${{ inputs.ingestion_dispatcher }}
-          SELECT_INGESTION_EXTRACT: ${{ inputs.ingestion_extract }}
-          SELECT_INGESTION_EMBED: ${{ inputs.ingestion_embed }}
-          SELECT_INGESTION_INDEX: ${{ inputs.ingestion_index }}
-          SELECT_INGESTION_MARK_FAILED: ${{ inputs.ingestion_mark_failed }}
-          SELECT_INGESTION_WATCHDOG: ${{ inputs.ingestion_watchdog }}
+          SELECT_ADMIN_APIS: ${{ inputs.admin_apis }}
+          SELECT_MCP_TOOLS: ${{ inputs.mcp_tools }}
+          SELECT_INGESTION_APIS: ${{ inputs.ingestion_apis }}
         run: |
           include="$(bash infra/aws/build-backend-matrix.sh)"
           echo "Deploying: $include"

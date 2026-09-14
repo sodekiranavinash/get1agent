@@ -24,13 +24,17 @@ if query.lower() == "all":
 else:
     selected = [
         item for item in lambdas
-        if item["name"] == query or item["function_name"] == query
+        if item["name"] == query
+        or item["function_name"] == query
+        or item.get("group") == query
     ]
 
 if not selected:
     names = ", ".join(item["name"] for item in lambdas)
+    groups = ", ".join(sorted({item["group"] for item in lambdas if item.get("group")}))
     print(
-        f"Unknown lambda {query!r}. Use a name ({names}), a function name, or all.",
+        f"Unknown target {query!r}. Use a lambda name ({names}), a group ({groups}), "
+        "a function name, or all.",
         file=sys.stderr,
     )
     sys.exit(1)
