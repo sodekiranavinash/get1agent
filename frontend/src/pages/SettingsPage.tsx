@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
+import { toast } from 'sonner'
 import {
   AlertCircle,
   Bell,
   Check,
-  ChevronDown,
   Coins,
   Globe2,
   MailWarning,
@@ -17,9 +17,15 @@ import { Card } from '../components/ui/Card'
 import { ErrorState } from '../components/ui/ErrorState'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
-import { SettingsSkeleton } from '../components/ui/Skeleton'
 import { Spinner } from '../components/ui/Spinner'
 import { Switch } from '../components/ui/Switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select'
 import { useTheme } from '../theme/ThemeProvider'
 import {
   useUserSettings,
@@ -40,13 +46,7 @@ const FALLBACK_TIMEZONES = [
   'America/Los_Angeles',
 ]
 
-const inputStyles =
-  'w-full rounded-xl border border-border-strong bg-raised px-3 py-2.5 text-sm text-foreground placeholder:text-subtle transition-colors focus:border-accent/40 focus:outline-none focus:ring-2 focus:ring-accent/25'
-
-const fadeUp = {
-  initial: { opacity: 0, y: 12 },
-  animate: { opacity: 1, y: 0 },
-}
+const inputStyles = 'field'
 
 function initialsFor(name: string | null, email: string): string {
   const source = (name?.trim() || email || '?').trim()
@@ -56,23 +56,25 @@ function initialsFor(name: string | null, email: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
-function SectionHeading({
+function PanelHeader({
   icon,
   title,
   description,
 }: {
   icon: ReactNode
   title: string
-  description: string
+  description?: string
 }) {
   return (
-    <div className="flex items-start gap-3.5">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-raised text-accent">
+    <div className="flex items-start gap-3 border-b border-border px-4 py-3">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-raised text-accent">
         {icon}
       </div>
       <div className="min-w-0">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        <p className="mt-1 text-xs leading-relaxed text-muted">{description}</p>
+        <h3 className="text-[13px] font-semibold text-foreground">{title}</h3>
+        {description ? (
+          <p className="mt-0.5 text-xs leading-relaxed text-muted">{description}</p>
+        ) : null}
       </div>
     </div>
   )
@@ -99,18 +101,16 @@ function ToggleRow({
   }
 
   return (
-    <div className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0">
+    <div className="flex items-center justify-between gap-4 px-4 py-3">
       <div className="flex min-w-0 items-start gap-3">
         <div
-          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${toneStyles[tone]}`}
+          className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${toneStyles[tone]}`}
         >
           {icon}
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-medium text-foreground">{title}</p>
-          <p className="mt-0.5 text-xs leading-relaxed text-muted">
-            {description}
-          </p>
+          <p className="text-[13px] font-medium text-foreground">{title}</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted">{description}</p>
         </div>
       </div>
       <Switch checked={checked} onChange={onChange} label={title} />
@@ -190,9 +190,6 @@ export function SettingsPage() {
   const handleSave = async () => {
     if (!form || !baseline) return
 
-    // Only send the fields the user actually changed. Everything else
-    // (id, email, emailVerified, pictureUrl, …) is owned by the backend and
-    // derived from the Auth0 token — it is never user-editable.
     const update: UserSettingsUpdate = {}
     if ((form.fullName ?? '') !== (baseline.fullName ?? '')) {
       update.fullName = form.fullName
@@ -220,18 +217,28 @@ export function SettingsPage() {
       setSeededId(updated.id)
       setTheme(updated.preferredTheme)
       setSaveStatus('saved')
+      toast.success('Settings saved')
     } catch (err: unknown) {
-      setSaveError(
-        err instanceof Error ? err.message : 'Failed to save settings',
-      )
+      const message =
+        err instanceof Error ? err.message : 'Failed to save settings'
+      setSaveError(message)
       setSaveStatus('error')
+      toast.error('Could not save settings', { description: message })
     }
   }
 
   if (isPending) {
     return (
       <PageShell>
-        <SettingsSkeleton />
+        <div className="mb-5 space-y-2">
+          <div className="skeleton h-5 w-32" />
+          <div className="skeleton h-3.5 w-80 max-w-full" />
+        </div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <div className="skeleton h-40 rounded-lg lg:col-span-2" />
+          <div className="skeleton h-44 rounded-lg" />
+          <div className="skeleton h-44 rounded-lg" />
+        </div>
       </PageShell>
     )
   }
@@ -259,264 +266,220 @@ export function SettingsPage() {
       <PageHeader
         title="Settings"
         description="Manage your profile, appearance, notifications and regional preferences."
-        badge="Account"
-        action={
-          form
-            ? {
-                label: isSaving ? 'Saving…' : isSaved ? 'Saved' : 'Save changes',
-                icon: isSaving ? (
-                  <Spinner size="xs" />
-                ) : (
-                  <Check className="h-4 w-4" />
-                ),
-                onClick: handleSave,
-                disabled: !isDirty || isSaving,
-              }
-            : undefined
-        }
+        action={{
+          label: isSaving ? 'Saving…' : isSaved ? 'Saved' : 'Save changes',
+          icon: isSaving ? (
+            <Spinner size="xs" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          ),
+          onClick: handleSave,
+          disabled: !isDirty || isSaving,
+        }}
       />
 
       {errorMessage ? (
-        <div className="mb-6 flex items-start gap-3 rounded-2xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm text-warning">
+        <div className="mb-3 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-soft px-3.5 py-2.5 text-[13px] text-warning">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{errorMessage}</span>
         </div>
       ) : null}
 
-      <>
-        <div className="grid gap-4 lg:grid-cols-2">
-            <motion.div
-              {...fadeUp}
-              transition={{ duration: 0.35, delay: 0.02 }}
-              className="lg:col-span-2"
-            >
-              <Card padding="lg">
-                <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="relative">
-                      {form.pictureUrl ? (
-                        <img
-                          src={form.pictureUrl}
-                          alt=""
-                          referrerPolicy="no-referrer"
-                          className="h-16 w-16 rounded-2xl object-cover ring-1 ring-border-strong"
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="grid gap-3 lg:grid-cols-2"
+      >
+        <Card padding="none" className="overflow-hidden lg:col-span-2">
+          <div className="flex flex-col gap-4 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3.5">
+              {form.pictureUrl ? (
+                <img
+                  src={form.pictureUrl}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="h-12 w-12 rounded-lg border border-border object-cover"
+                />
+              ) : (
+                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-accent text-base font-semibold text-white">
+                  {initialsFor(form.fullName, form.email)}
+                </div>
+              )}
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-semibold text-foreground">
+                  {form.fullName || 'Add your name'}
+                </h2>
+                <p className="truncate text-xs text-muted">{form.email}</p>
+                <div className="mt-1.5">
+                  {form.emailVerified ? (
+                    <Badge variant="success" dot>
+                      Email verified
+                    </Badge>
+                  ) : (
+                    <Badge variant="warning">Email unverified</Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 p-4 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-muted">
+                Full name
+              </span>
+              <input
+                type="text"
+                value={form.fullName ?? ''}
+                maxLength={255}
+                placeholder="Your full name"
+                onChange={(event) => patch({ fullName: event.target.value })}
+                className={inputStyles}
+              />
+            </label>
+            <div className="block">
+              <span className="mb-1.5 block text-xs font-medium text-muted">Email</span>
+              <div className="flex h-9 items-center justify-between gap-3 rounded-md border border-border bg-raised px-3">
+                <span className="truncate text-[13px] text-foreground">{form.email}</span>
+                <span className="shrink-0 text-[10px] font-medium tracking-wide text-subtle uppercase">
+                  SSO
+                </span>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <Card padding="none" className="overflow-hidden">
+          <PanelHeader
+            icon={<Palette className="h-3.5 w-3.5" strokeWidth={1.75} />}
+            title="Appearance"
+            description="Choose how get1agent looks to you."
+          />
+          <div className="grid grid-cols-2 gap-3 p-4">
+            {(['light', 'dark'] as const).map((option) => {
+              const active = form.preferredTheme === option
+              const isLight = option === 'light'
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => handleThemeChange(option)}
+                  className={`rounded-md border p-2 text-left transition-colors ${
+                    active
+                      ? 'border-accent/50 bg-accent-soft'
+                      : 'border-border bg-raised/40 hover:border-border-strong hover:bg-raised'
+                  }`}
+                >
+                  <div
+                    className={`h-16 overflow-hidden rounded border p-2 ${
+                      isLight
+                        ? 'border-zinc-200 bg-white'
+                        : 'border-white/10 bg-[#0e0e12]'
+                    }`}
+                  >
+                    <div
+                      className={`h-1.5 w-8 rounded-full ${
+                        isLight ? 'bg-zinc-300' : 'bg-zinc-700'
+                      }`}
+                    />
+                    <div className="mt-2 flex gap-1.5">
+                      <div
+                        className={`h-9 w-1/3 rounded ${
+                          isLight ? 'bg-zinc-100' : 'bg-white/5'
+                        }`}
+                      />
+                      <div className="flex-1 space-y-1.5">
+                        <div
+                          className={`h-3 rounded ${
+                            isLight ? 'bg-zinc-100' : 'bg-white/5'
+                          }`}
                         />
-                      ) : (
-                        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-accent to-info text-xl font-bold text-white shadow-glow">
-                          {initialsFor(form.fullName, form.email)}
-                        </div>
-                      )}
-                      {form.emailVerified ? (
-                        <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-surface bg-success">
-                          <Check
-                            className="h-3 w-3 text-white"
-                            strokeWidth={3}
-                          />
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="min-w-0">
-                      <h2 className="truncate text-lg font-semibold text-foreground">
-                        {form.fullName || 'Add your name'}
-                      </h2>
-                      <p className="truncate text-sm text-muted">{form.email}</p>
-                      <div className="mt-2">
-                        {form.emailVerified ? (
-                          <Badge variant="success" dot>
-                            Email verified
-                          </Badge>
-                        ) : (
-                          <Badge variant="warning">Email unverified</Badge>
-                        )}
+                        <div
+                          className={`h-4 rounded ${
+                            isLight ? 'bg-[#ea580c]/15' : 'bg-[#ff6d5a]/20'
+                          }`}
+                        />
                       </div>
                     </div>
                   </div>
-                </div>
-
-                <div className="mt-6 grid gap-4 border-t border-border pt-6 sm:grid-cols-2">
-                  <label className="block">
-                    <span className="mb-1.5 block text-xs font-medium text-muted">
-                      Full name
+                  <div className="mt-2 flex items-center justify-between px-0.5">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground capitalize">
+                      {isLight ? (
+                        <Sun className="h-3.5 w-3.5" />
+                      ) : (
+                        <Moon className="h-3.5 w-3.5" />
+                      )}
+                      {option}
                     </span>
-                    <input
-                      type="text"
-                      value={form.fullName ?? ''}
-                      maxLength={255}
-                      placeholder="Your full name"
-                      onChange={(event) =>
-                        patch({ fullName: event.target.value })
-                      }
-                      className={inputStyles}
-                    />
-                  </label>
-                  <div className="block">
-                    <span className="mb-1.5 block text-xs font-medium text-muted">
-                      Email
-                    </span>
-                    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-raised px-3 py-2.5">
-                      <span className="truncate text-sm text-foreground">
-                        {form.email}
-                      </span>
-                      <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-subtle">
-                        Managed by SSO
-                      </span>
-                    </div>
+                    {active ? (
+                      <Check className="h-3.5 w-3.5 text-accent" strokeWidth={2.5} />
+                    ) : null}
                   </div>
-                </div>
-              </Card>
-            </motion.div>
-
-            <motion.div {...fadeUp} transition={{ duration: 0.35, delay: 0.06 }}>
-              <Card padding="lg" className="h-full">
-                <SectionHeading
-                  icon={<Palette className="h-5 w-5" strokeWidth={1.75} />}
-                  title="Appearance"
-                  description="Choose how get1agent looks to you."
-                />
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  {(['light', 'dark'] as const).map((option) => {
-                    const active = form.preferredTheme === option
-                    const isLight = option === 'light'
-                    return (
-                      <button
-                        key={option}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => handleThemeChange(option)}
-                        className={`group rounded-xl border p-2.5 text-left transition-all duration-200 ${
-                          active
-                            ? 'border-accent/60 bg-accent-soft ring-1 ring-accent/40'
-                            : 'border-border-strong bg-raised hover:border-accent/30 hover:bg-elevated'
-                        }`}
-                      >
-                        <div
-                          className={`relative h-20 overflow-hidden rounded-lg border p-2.5 ${
-                            isLight
-                              ? 'border-zinc-200 bg-white'
-                              : 'border-white/10 bg-[#0e0e12]'
-                          }`}
-                        >
-                          <div
-                            className={`h-1.5 w-10 rounded-full ${
-                              isLight ? 'bg-zinc-300' : 'bg-zinc-700'
-                            }`}
-                          />
-                          <div className="mt-2 flex gap-1.5">
-                            <div
-                              className={`h-12 w-1/3 rounded-md ${
-                                isLight ? 'bg-zinc-100' : 'bg-white/5'
-                              }`}
-                            />
-                            <div className="flex-1 space-y-1.5">
-                              <div
-                                className={`h-4 rounded-md ${
-                                  isLight ? 'bg-zinc-100' : 'bg-white/5'
-                                }`}
-                              />
-                              <div
-                                className={`h-6 rounded-md ${
-                                  isLight ? 'bg-[#ea580c]/15' : 'bg-[#ff6d5a]/20'
-                                }`}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                        <div className="mt-2.5 flex items-center justify-between px-0.5">
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold capitalize text-foreground">
-                            {isLight ? (
-                              <Sun className="h-3.5 w-3.5" />
-                            ) : (
-                              <Moon className="h-3.5 w-3.5" />
-                            )}
-                            {option}
-                          </span>
-                          {active ? (
-                            <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-accent text-white">
-                              <Check
-                                className="h-2.5 w-2.5"
-                                strokeWidth={3}
-                              />
-                            </span>
-                          ) : null}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              </Card>
-            </motion.div>
-
-            <motion.div {...fadeUp} transition={{ duration: 0.35, delay: 0.1 }}>
-              <Card padding="lg" className="h-full">
-                <SectionHeading
-                  icon={<Globe2 className="h-5 w-5" strokeWidth={1.75} />}
-                  title="Language & Region"
-                  description="Timezone used for schedules and reports."
-                />
-                <label className="mt-4 block">
-                  <span className="mb-1.5 block text-xs font-medium text-muted">
-                    Timezone
-                  </span>
-                  <div className="relative">
-                    <select
-                      value={form.timezone}
-                      onChange={(event) =>
-                        patch({ timezone: event.target.value })
-                      }
-                      className={`${inputStyles} appearance-none pr-10`}
-                    >
-                      {timezoneList.map((timezone) => (
-                        <option key={timezone} value={timezone}>
-                          {timezone}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
-                  </div>
-                </label>
-                <p className="mt-2 text-xs text-subtle">
-                  Schedules run in {form.timezone}.
-                </p>
-              </Card>
-            </motion.div>
-
-            <motion.div
-              {...fadeUp}
-              transition={{ duration: 0.35, delay: 0.14 }}
-              className="lg:col-span-2"
-            >
-              <Card padding="lg">
-                <SectionHeading
-                  icon={<Bell className="h-5 w-5" strokeWidth={1.75} />}
-                  title="Notifications"
-                  description="Choose which alerts we send to your inbox."
-                />
-                <div className="mt-4 divide-y divide-border">
-                  <ToggleRow
-                    icon={<MailWarning className="h-4 w-4" />}
-                    tone="info"
-                    title="Email on workflow failure"
-                    description="Get notified when a scheduled workflow run fails."
-                    checked={form.emailOnWorkflowFailure}
-                    onChange={(checked) =>
-                      patch({ emailOnWorkflowFailure: checked })
-                    }
-                  />
-                  <ToggleRow
-                    icon={<Coins className="h-4 w-4" />}
-                    tone="warning"
-                    title="Credit threshold alerts"
-                    description="Get warned when your AI credits run low."
-                    checked={form.creditThresholdAlerts}
-                    onChange={(checked) =>
-                      patch({ creditThresholdAlerts: checked })
-                    }
-                  />
-                </div>
-              </Card>
-            </motion.div>
+                </button>
+              )
+            })}
           </div>
-      </>
+        </Card>
+
+        <Card padding="none" className="overflow-hidden">
+          <PanelHeader
+            icon={<Globe2 className="h-3.5 w-3.5" strokeWidth={1.75} />}
+            title="Language & region"
+            description="Timezone used for schedules and reports."
+          />
+          <div className="p-4">
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-muted">Timezone</span>
+              <Select
+                value={form.timezone}
+                onValueChange={(value) => patch({ timezone: value })}
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Select timezone" />
+                </SelectTrigger>
+                <SelectContent>
+                  {timezoneList.map((timezone) => (
+                    <SelectItem key={timezone} value={timezone}>
+                      {timezone}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <p className="mt-2 text-xs text-subtle">
+              Schedules run in {form.timezone}.
+            </p>
+          </div>
+        </Card>
+
+        <Card padding="none" className="overflow-hidden lg:col-span-2">
+          <PanelHeader
+            icon={<Bell className="h-3.5 w-3.5" strokeWidth={1.75} />}
+            title="Notifications"
+            description="Choose which alerts we send to your inbox."
+          />
+          <div className="divide-y divide-border">
+            <ToggleRow
+              icon={<MailWarning className="h-3.5 w-3.5" />}
+              tone="info"
+              title="Email on workflow failure"
+              description="Get notified when a scheduled workflow run fails."
+              checked={form.emailOnWorkflowFailure}
+              onChange={(checked) => patch({ emailOnWorkflowFailure: checked })}
+            />
+            <ToggleRow
+              icon={<Coins className="h-3.5 w-3.5" />}
+              tone="warning"
+              title="Credit threshold alerts"
+              description="Get warned when your AI credits run low."
+              checked={form.creditThresholdAlerts}
+              onChange={(checked) => patch({ creditThresholdAlerts: checked })}
+            />
+          </div>
+        </Card>
+      </motion.div>
     </PageShell>
   )
 }

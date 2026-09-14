@@ -3,30 +3,10 @@ name: Backend
 on:
   workflow_dispatch:
     inputs:
-      health_check:
-        description: Deploy health-check
+      user_api:
+        description: Deploy user-api
         type: boolean
         default: true
-      account_settings:
-        description: Deploy account-settings
-        type: boolean
-        default: false
-      knowledge_bases:
-        description: Deploy knowledge-bases
-        type: boolean
-        default: false
-      get_user_knowledge_bases:
-        description: Deploy get-user-knowledge-bases
-        type: boolean
-        default: false
-      retrieval_query:
-        description: Deploy retrieval-query
-        type: boolean
-        default: false
-      search_user_knowledge_bases:
-        description: Deploy search-user-knowledge-bases
-        type: boolean
-        default: false
       knowledge_mcp:
         description: Deploy knowledge-mcp
         type: boolean
@@ -91,12 +71,7 @@ jobs:
       - name: Build matrix
         id: matrix
         env:
-          SELECT_HEALTH_CHECK: ${{ inputs.health_check }}
-          SELECT_ACCOUNT_SETTINGS: ${{ inputs.account_settings }}
-          SELECT_KNOWLEDGE_BASES: ${{ inputs.knowledge_bases }}
-          SELECT_GET_USER_KNOWLEDGE_BASES: ${{ inputs.get_user_knowledge_bases }}
-          SELECT_RETRIEVAL_QUERY: ${{ inputs.retrieval_query }}
-          SELECT_SEARCH_USER_KNOWLEDGE_BASES: ${{ inputs.search_user_knowledge_bases }}
+          SELECT_USER_API: ${{ inputs.user_api }}
           SELECT_KNOWLEDGE_MCP: ${{ inputs.knowledge_mcp }}
           SELECT_MCP_TESTER: ${{ inputs.mcp_tester }}
           SELECT_CODE_INTERPRETER: ${{ inputs.code_interpreter }}

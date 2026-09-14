@@ -1,9 +1,11 @@
+import { motion } from 'framer-motion'
 import { Download, GitBranch, Play, Workflow } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
+import { fadeUp, stagger } from '../lib/motion'
 
 const workflows = [
   {
@@ -33,54 +35,57 @@ export function WorkflowStorePage() {
   return (
     <PageShell>
       <PageHeader
-        title="Library"
+        title="Workflows"
         description="Share workflows with the community or import proven automation templates."
-        badge="Workflows"
+        badge="Library"
       />
 
-      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        {workflows.map((workflow) => (
-          <Card key={workflow.name} hover padding="lg">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-info-soft text-info">
-                <Workflow className="h-5 w-5" strokeWidth={1.75} />
+      <Card padding="none" className="overflow-hidden">
+        <motion.div variants={stagger} initial="hidden" animate="show" className="divide-y divide-border">
+          {workflows.map((workflow) => (
+            <motion.div
+              key={workflow.name}
+              variants={fadeUp}
+              className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-raised/40"
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-raised text-info">
+                <Workflow className="h-4 w-4" strokeWidth={1.75} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="truncate text-[13px] font-medium text-foreground">
+                    {workflow.name}
+                  </h3>
+                  <Badge variant={workflow.type === 'mine' ? 'info' : 'default'}>
+                    {workflow.type === 'mine' ? 'Mine' : 'Community'}
+                  </Badge>
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-subtle">
+                  <span className="truncate">{workflow.description}</span>
+                  <span className="flex items-center gap-1">
+                    <GitBranch className="h-3 w-3" />
+                    {workflow.nodes} nodes
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Play className="h-3 w-3" />
+                    {workflow.runs} runs
+                  </span>
+                </div>
               </div>
-              <Badge variant={workflow.type === 'mine' ? 'info' : 'default'}>
-                {workflow.type === 'mine' ? 'Mine' : 'Community'}
-              </Badge>
-            </div>
-
-            <h3 className="mt-4 text-base font-semibold text-foreground">{workflow.name}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-muted">{workflow.description}</p>
-
-            <div className="mt-4 flex items-center gap-4 text-xs text-subtle">
-              <span className="flex items-center gap-1">
-                <GitBranch className="h-3.5 w-3.5" />
-                {workflow.nodes} nodes
-              </span>
-              <span className="flex items-center gap-1">
-                <Play className="h-3.5 w-3.5" />
-                {workflow.runs} runs
-              </span>
-            </div>
-
-            <div className="mt-5 flex gap-2">
-              <Button
-                variant={workflow.type === 'mine' ? 'primary' : 'secondary'}
-                size="sm"
-                className="flex-1"
-              >
-                {workflow.type === 'mine' ? 'Open' : 'Preview'}
-              </Button>
-              {workflow.type === 'public' ? (
-                <Button variant="primary" size="sm" icon={<Download className="h-3.5 w-3.5" />}>
-                  Import
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button variant="outline" size="sm">
+                  {workflow.type === 'mine' ? 'Open' : 'Preview'}
                 </Button>
-              ) : null}
-            </div>
-          </Card>
-        ))}
-      </div>
+                {workflow.type === 'public' ? (
+                  <Button size="sm" icon={<Download className="h-3.5 w-3.5" />}>
+                    Import
+                  </Button>
+                ) : null}
+              </div>
+            </motion.div>
+          ))}
+        </motion.div>
+      </Card>
     </PageShell>
   )
 }

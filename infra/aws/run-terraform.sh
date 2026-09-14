@@ -86,6 +86,17 @@ run_bootstrap() {
   terraform apply -input=false -no-color -auto-approve -lock-timeout=5m
 }
 
+# check_zip <path> <label> <build-command>
+check_zip() {
+  local path="$1" label="$2" command="$3"
+  if [[ "$need_backend" == true && ! -s "$path" ]]; then
+    echo "Backend $label zip missing or empty: $path" >&2
+    echo "Run: $command" >&2
+    exit 1
+  fi
+  [[ "$need_backend" == true ]] && echo "$label zip: $path ($(wc -c <"$path") bytes)"
+}
+
 run_env() {
   local env_name="$1"
   cd "$ROOT/infra/terraform/envs/$env_name"
@@ -100,125 +111,31 @@ run_env() {
   fi
 
   if [[ "$env_name" == "prod" ]]; then
-    local layer_zip="$ROOT/backend/services/layers/data/dist/layer.zip"
-    local ai_layer_zip="$ROOT/backend/services/layers/ai/dist/layer.zip"
-    local health_zip="$ROOT/backend/services/health-check/dist/function.zip"
-    local account_zip="$ROOT/backend/services/account-settings/dist/function.zip"
-    local knowledge_zip="$ROOT/backend/services/knowledge-bases/dist/function.zip"
-    local dispatcher_zip="$ROOT/backend/services/ingestion-dispatcher/dist/function.zip"
-    local extract_zip="$ROOT/backend/services/ingestion-extract/dist/function.zip"
-    local embed_zip="$ROOT/backend/services/ingestion-embed/dist/function.zip"
-    local index_zip="$ROOT/backend/services/ingestion-index/dist/function.zip"
-    local fail_zip="$ROOT/backend/services/ingestion-mark-failed/dist/function.zip"
-    local watchdog_zip="$ROOT/backend/services/ingestion-watchdog/dist/function.zip"
-    local mcp_tester_zip="$ROOT/backend/services/admin/mcp-tester/dist/function.zip"
-    local get_user_kb_zip="$ROOT/backend/services/get-user-knowledge-bases/dist/function.zip"
-    local retrieval_query_zip="$ROOT/backend/services/retrieval-query/dist/function.zip"
-    local search_user_kb_zip="$ROOT/backend/services/search-user-knowledge-bases/dist/function.zip"
-    local knowledge_mcp_zip="$ROOT/backend/services/knowledge-mcp/dist/function.zip"
-    local need_backend=false
+    need_backend=false
 
     if [[ -z "${PROD_TARGETS:-}" ]]; then
       need_backend=true
     else
-      [[ "$PROD_TARGETS" == *layer_data* || "$PROD_TARGETS" == *layer_ai* || "$PROD_TARGETS" == *health_check* || "$PROD_TARGETS" == *knowledge_bases* || "$PROD_TARGETS" == *ingestion* || "$PROD_TARGETS" == *mcp_tester* ]] && need_backend=true
+      case "$PROD_TARGETS" in
+        *layer_data*|*layer_ai*|*user_api*|*knowledge_mcp*|*ingestion*|*mcp_tester*|*code_interpreter*|*web_search*)
+          need_backend=true
+          ;;
+      esac
     fi
 
-    if [[ "$need_backend" == true && ! -s "$layer_zip" ]]; then
-      echo "Backend data layer zip missing or empty: $layer_zip" >&2
-      echo "Run: bash infra/aws/build-backend-layers.sh" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$ai_layer_zip" ]]; then
-      echo "Backend ai layer zip missing or empty: $ai_layer_zip" >&2
-      echo "Run: bash infra/aws/build-backend-layers.sh" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$health_zip" ]]; then
-      echo "Backend health-check zip missing or empty: $health_zip" >&2
-      echo "Run: make -C backend/services/health-check package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$account_zip" ]]; then
-      echo "Backend account-settings zip missing or empty: $account_zip" >&2
-      echo "Run: make -C backend/services/account-settings package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$knowledge_zip" ]]; then
-      echo "Backend knowledge-bases zip missing or empty: $knowledge_zip" >&2
-      echo "Run: make -C backend/services/knowledge-bases package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$dispatcher_zip" ]]; then
-      echo "Backend ingestion-dispatcher zip missing or empty: $dispatcher_zip" >&2
-      echo "Run: make -C backend/services/ingestion-dispatcher package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$extract_zip" ]]; then
-      echo "Backend ingestion-extract zip missing or empty: $extract_zip" >&2
-      echo "Run: make -C backend/services/ingestion-extract package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$embed_zip" ]]; then
-      echo "Backend ingestion-embed zip missing or empty: $embed_zip" >&2
-      echo "Run: make -C backend/services/ingestion-embed package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$index_zip" ]]; then
-      echo "Backend ingestion-index zip missing or empty: $index_zip" >&2
-      echo "Run: make -C backend/services/ingestion-index package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$fail_zip" ]]; then
-      echo "Backend ingestion-mark-failed zip missing or empty: $fail_zip" >&2
-      echo "Run: make -C backend/services/ingestion-mark-failed package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$watchdog_zip" ]]; then
-      echo "Backend ingestion-watchdog zip missing or empty: $watchdog_zip" >&2
-      echo "Run: make -C backend/services/ingestion-watchdog package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$mcp_tester_zip" ]]; then
-      echo "Backend mcp-tester zip missing or empty: $mcp_tester_zip" >&2
-      echo "Run: make -C backend/services/admin/mcp-tester package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$get_user_kb_zip" ]]; then
-      echo "Backend get-user-knowledge-bases zip missing or empty: $get_user_kb_zip" >&2
-      echo "Run: make -C backend/services/get-user-knowledge-bases package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$retrieval_query_zip" ]]; then
-      echo "Backend retrieval-query zip missing or empty: $retrieval_query_zip" >&2
-      echo "Run: make -C backend/services/retrieval-query package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$search_user_kb_zip" ]]; then
-      echo "Backend search-user-knowledge-bases zip missing or empty: $search_user_kb_zip" >&2
-      echo "Run: make -C backend/services/search-user-knowledge-bases package" >&2
-      exit 1
-    fi
-    if [[ "$need_backend" == true && ! -s "$knowledge_mcp_zip" ]]; then
-      echo "Backend knowledge-mcp zip missing or empty: $knowledge_mcp_zip" >&2
-      echo "Run: make -C backend/services/knowledge-mcp package" >&2
-      exit 1
-    fi
-    [[ "$need_backend" == true ]] && echo "Data layer zip: $layer_zip ($(wc -c <"$layer_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "AI layer zip: $ai_layer_zip ($(wc -c <"$ai_layer_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Health-check zip: $health_zip ($(wc -c <"$health_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Knowledge-bases zip: $knowledge_zip ($(wc -c <"$knowledge_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Ingestion-dispatcher zip: $dispatcher_zip ($(wc -c <"$dispatcher_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Ingestion-extract zip: $extract_zip ($(wc -c <"$extract_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Ingestion-embed zip: $embed_zip ($(wc -c <"$embed_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Ingestion-index zip: $index_zip ($(wc -c <"$index_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Ingestion-mark-failed zip: $fail_zip ($(wc -c <"$fail_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Ingestion-watchdog zip: $watchdog_zip ($(wc -c <"$watchdog_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "MCP tester zip: $mcp_tester_zip ($(wc -c <"$mcp_tester_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Get-user-knowledge-bases zip: $get_user_kb_zip ($(wc -c <"$get_user_kb_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Retrieval-query zip: $retrieval_query_zip ($(wc -c <"$retrieval_query_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Search-user-knowledge-bases zip: $search_user_kb_zip ($(wc -c <"$search_user_kb_zip") bytes)"
-    [[ "$need_backend" == true ]] && echo "Knowledge-mcp zip: $knowledge_mcp_zip ($(wc -c <"$knowledge_mcp_zip") bytes)"
+    check_zip "$ROOT/backend/services/layers/data/dist/layer.zip" "data layer" "bash infra/aws/build-backend-layers.sh"
+    check_zip "$ROOT/backend/services/layers/ai/dist/layer.zip" "ai layer" "bash infra/aws/build-backend-layers.sh ai"
+    check_zip "$ROOT/backend/services/user-api/dist/function.zip" "user-api" "make -C backend/services/user-api package"
+    check_zip "$ROOT/backend/services/knowledge-mcp/dist/function.zip" "knowledge-mcp" "make -C backend/services/knowledge-mcp package"
+    check_zip "$ROOT/backend/services/ingestion-dispatcher/dist/function.zip" "ingestion-dispatcher" "make -C backend/services/ingestion-dispatcher package"
+    check_zip "$ROOT/backend/services/ingestion-extract/dist/function.zip" "ingestion-extract" "make -C backend/services/ingestion-extract package"
+    check_zip "$ROOT/backend/services/ingestion-embed/dist/function.zip" "ingestion-embed" "make -C backend/services/ingestion-embed package"
+    check_zip "$ROOT/backend/services/ingestion-index/dist/function.zip" "ingestion-index" "make -C backend/services/ingestion-index package"
+    check_zip "$ROOT/backend/services/ingestion-mark-failed/dist/function.zip" "ingestion-mark-failed" "make -C backend/services/ingestion-mark-failed package"
+    check_zip "$ROOT/backend/services/ingestion-watchdog/dist/function.zip" "ingestion-watchdog" "make -C backend/services/ingestion-watchdog package"
+    check_zip "$ROOT/backend/services/admin/mcp-tester/dist/function.zip" "mcp-tester" "make -C backend/services/admin/mcp-tester package"
+    check_zip "$ROOT/backend/tools/code-interpreter/dist/function.zip" "code-interpreter" "make -C backend/tools/code-interpreter package"
+    check_zip "$ROOT/backend/tools/web-search/dist/function.zip" "web-search" "make -C backend/tools/web-search package"
   fi
 
   init_s3

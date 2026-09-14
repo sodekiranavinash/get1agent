@@ -7,13 +7,17 @@ Runs as a Floci init hook (`/etc/floci/init/ready.d`) inside the
 
 Mirrors infra/terraform:
   * ingestion (infra/terraform/modules/ingestion + envs/prod/backend.tf):
-      S3 (EventBridge notifications) -> EventBridge rule -> SQS (+DLQ)
-        -> ingestion-dispatcher -> Step Functions -> extract/index/mark-failed
+      S3 (EventBridge notifications) -> EventBridge rule (raw/ prefix)
+        -> SQS (+DLQ) -> ingestion-dispatcher -> Step Functions
+        -> extract/embed/index/mark-failed
   * API (infra/terraform/envs/prod/api_gateway.tf):
-      HTTP API -> JWT authorizer (Auth0) -> knowledge-bases / account-settings
+      HTTP API -> JWT authorizer (Auth0) -> user-api / knowledge-mcp /
+        web-search / code-interpreter / mcp-tester
 
-Requires the Lambda zips to exist (run `make floci-build` first). The repo is
-mounted read-only at /opt/get1agent.
+Operational data lives in DynamoDB Local (see docker-compose.yml); vectors use
+``VECTOR_STORE=local`` (brute force over an S3 object) because S3 Vectors is not
+emulated. Requires the Lambda zips to exist (run `make floci-build` first). The
+repo is mounted read-only at /opt/get1agent.
 """
 from __future__ import annotations
 
@@ -29,15 +33,15 @@ ACCOUNT = os.environ.get("FLOCI_DEFAULT_ACCOUNT_ID", "000000000000")
 ROOT = "/opt/get1agent"
 
 BUCKET = os.environ.get("KB_BUCKET", "get1agent-local")
+DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", "get1agent-local")
+DYNAMODB_ENDPOINT_URL = os.environ.get(
+    "DYNAMODB_ENDPOINT_URL", "http://dynamodb:8000"
+)
 QUEUE_NAME = "get1agent-local-ingestion-docs"
 DLQ_NAME = "get1agent-local-ingestion-dlq"
 RULE_NAME = "get1agent-local-ingestion-s3-object-created"
 WATCHDOG_RULE_NAME = "get1agent-local-ingestion-watchdog"
 STATE_MACHINE_NAME = "get1agent-local-ingestion"
-DATABASE_URL = os.environ.get(
-    "APP_DATABASE_URL",
-    "postgresql+asyncpg://get1agent:get1agent@postgres:5432/get1agent",
-)
 # Local embedding backend (real vectors, no Bedrock).
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 LOCAL_EMBED_MODEL = os.environ.get("LOCAL_EMBED_MODEL", "mxbai-embed-large")
@@ -60,11 +64,7 @@ FUNCTIONS = {
     "mark_failed": "get1agent-local-ingestion-mark-failed",
     "watchdog": "get1agent-local-ingestion-watchdog",
     "dispatcher": "get1agent-local-ingestion-dispatcher",
-    "knowledge_bases": "get1agent-local-knowledge-bases",
-    "account_settings": "get1agent-local-account-settings",
-    "get_user_kb": "get1agent-local-get-user-knowledge-bases",
-    "retrieval_query": "get1agent-local-retrieval-query",
-    "search_user_kb": "get1agent-local-search-user-knowledge-bases",
+    "user_api": "get1agent-local-user-api",
     "knowledge_mcp": "get1agent-local-knowledge-mcp",
     "mcp_tester": "get1agent-local-mcp-tester",
     "code_interpreter": "get1agent-local-code-interpreter",
@@ -73,11 +73,9 @@ FUNCTIONS = {
 
 # Mirrors infra/terraform/envs/prod/api_gateway.tf.
 ROUTES = {
-    "account_settings": [
+    "user_api": [
         ("GET", "/v1/user/settings"),
         ("POST", "/v1/user/settings"),
-    ],
-    "knowledge_bases": [
         ("GET", "/v1/knowledge-bases"),
         ("POST", "/v1/knowledge-bases"),
         ("GET", "/v1/knowledge-bases/tags"),
@@ -87,8 +85,14 @@ ROUTES = {
         ("POST", "/v1/knowledge-bases/{id}/documents/presign"),
         ("POST", "/v1/knowledge-bases/{id}/documents/inline"),
         ("POST", "/v1/knowledge-bases/{id}/documents/{docId}/complete"),
-        ("POST", "/v1/knowledge-bases/{id}/documents/{docId}/upload"),
         ("DELETE", "/v1/knowledge-bases/{id}/documents/{docId}"),
+        ("GET", "/v1/agent-skills"),
+        ("POST", "/v1/agent-skills"),
+        ("GET", "/v1/agent-skills/tools"),
+        ("POST", "/v1/agent-skills/parse"),
+        ("GET", "/v1/agent-skills/{id}"),
+        ("PUT", "/v1/agent-skills/{id}"),
+        ("DELETE", "/v1/agent-skills/{id}"),
     ],
     "knowledge_mcp": [
         ("POST", "/mcp"),
@@ -116,6 +120,59 @@ def function_arn(name: str) -> str:
 
 def client(service: str):
     return boto3.client(service, region_name=REGION)
+
+
+# --- dynamodb ----------------------------------------------------------------
+
+
+def ensure_table() -> None:
+    ddb = boto3.client(
+        "dynamodb", region_name=REGION, endpoint_url=DYNAMODB_ENDPOINT_URL
+    )
+    try:
+        ddb.describe_table(TableName=DYNAMODB_TABLE)
+        log(f"table {DYNAMODB_TABLE} exists")
+        return
+    except ClientError:
+        pass
+
+    attributes = [
+        {"AttributeName": "pk", "AttributeType": "S"},
+        {"AttributeName": "sk", "AttributeType": "S"},
+        {"AttributeName": "gsi1pk", "AttributeType": "S"},
+        {"AttributeName": "gsi1sk", "AttributeType": "S"},
+        {"AttributeName": "gsi2pk", "AttributeType": "S"},
+        {"AttributeName": "gsi2sk", "AttributeType": "S"},
+        {"AttributeName": "gsi3pk", "AttributeType": "S"},
+        {"AttributeName": "gsi3sk", "AttributeType": "S"},
+    ]
+
+    def index(name: str, pk: str, sk: str) -> dict:
+        return {
+            "IndexName": name,
+            "KeySchema": [
+                {"AttributeName": pk, "KeyType": "HASH"},
+                {"AttributeName": sk, "KeyType": "RANGE"},
+            ],
+            "Projection": {"ProjectionType": "ALL"},
+        }
+
+    ddb.create_table(
+        TableName=DYNAMODB_TABLE,
+        BillingMode="PAY_PER_REQUEST",
+        KeySchema=[
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=attributes,
+        GlobalSecondaryIndexes=[
+            index("byId", "gsi1pk", "gsi1sk"),
+            index("byUser", "gsi2pk", "gsi2sk"),
+            index("byStatus", "gsi3pk", "gsi3sk"),
+        ],
+    )
+    ddb.get_waiter("table_exists").wait(TableName=DYNAMODB_TABLE)
+    log(f"created table {DYNAMODB_TABLE} (+ byId/byUser/byStatus)")
 
 
 # --- ingestion ---------------------------------------------------------------
@@ -198,7 +255,11 @@ def ensure_rule(events, queue_arn: str) -> None:
         {
             "source": ["aws.s3"],
             "detail-type": ["Object Created"],
-            "detail": {"bucket": {"name": [BUCKET]}},
+            "detail": {
+                "bucket": {"name": [BUCKET]},
+                # Only raw/ uploads trigger ingestion; derived/ and index/ do not.
+                "object": {"key": [{"prefix": "raw/"}]},
+            },
         }
     )
     events.put_rule(Name=RULE_NAME, EventPattern=pattern, State="ENABLED")
@@ -206,10 +267,21 @@ def ensure_rule(events, queue_arn: str) -> None:
         Rule=RULE_NAME,
         Targets=[{"Id": "ingestion-queue", "Arn": queue_arn}],
     )
-    log(f"created EventBridge rule {RULE_NAME} -> SQS")
+    log(f"created EventBridge rule {RULE_NAME} (raw/ only) -> SQS")
 
 
 def ensure_watchdog_rule(events, function_arn: str) -> None:
+    # Floci misfires EventBridge `rate()` schedules (it invokes the target
+    # continuously), which floods the logs and spins containers. The watchdog is
+    # only a production backstop, so it is off locally unless explicitly enabled.
+    # The function is still created and can be invoked manually.
+    if os.environ.get("ENABLE_LOCAL_WATCHDOG", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
+        log("skipped watchdog schedule (set ENABLE_LOCAL_WATCHDOG=true to enable)")
+        return
     try:
         events.put_rule(
             Name=WATCHDOG_RULE_NAME,
@@ -222,8 +294,6 @@ def ensure_watchdog_rule(events, function_arn: str) -> None:
         )
         log(f"created EventBridge schedule {WATCHDOG_RULE_NAME} -> watchdog")
     except ClientError as exc:
-        # Not all emulators support scheduled rules; the function still works
-        # when invoked manually.
         log(f"skipped watchdog schedule ({exc.response['Error']['Code']})")
 
 
@@ -343,7 +413,6 @@ def ensure_event_source_mapping(lm, function_name: str, queue_arn: str) -> None:
 
 
 def ensure_http_api(apigw, function_arns: dict[str, str]) -> str:
-    # Recreate on every boot so route/authorizer changes take effect.
     for api in apigw.get_apis().get("Items", []):
         if api["Name"] == API_NAME:
             apigw.delete_api(ApiId=api["ApiId"])
@@ -362,25 +431,19 @@ def ensure_http_api(apigw, function_arns: dict[str, str]) -> str:
     api_id = api["ApiId"]
     log(f"created HTTP API {api_id}")
 
-    # Audience is intentionally omitted locally. Auth0 access tokens carry `aud`
-    # as an array (e.g. [api, <tenant>/userinfo]); Floci's JWT authorizer only
-    # reads a scalar `aud` (ApiGatewayExecuteController.parseJwtClaims), so any
-    # configured audience fails to match and every request is rejected with 401.
-    # Signature, issuer and expiry are still verified against Auth0's JWKS.
+    # Audience is intentionally omitted locally (Floci's JWT authorizer only
+    # reads a scalar `aud`). Signature, issuer and expiry are still verified.
     authorizer = apigw.create_authorizer(
         ApiId=api_id,
         Name="auth0",
         AuthorizerType="JWT",
         IdentitySource=["$request.header.Authorization"],
-        JwtConfiguration={
-            "Issuer": AUTH0_ISSUER,
-        },
+        JwtConfiguration={"Issuer": AUTH0_ISSUER},
     )
     authorizer_id = authorizer["AuthorizerId"]
-    log(
-        f"created JWT authorizer (issuer={AUTH0_ISSUER}; "
-        f"audience {AUTH0_AUDIENCE} not enforced locally)"
-    )
+    log(f"created JWT authorizer (issuer={AUTH0_ISSUER}; audience not enforced)")
+
+    # There is no `/health` route (the app does not call one).
 
     integrations: dict[str, str] = {}
     for key, arn in function_arns.items():
@@ -421,11 +484,7 @@ def main() -> int:
         f"{ROOT}/backend/services/ingestion-mark-failed/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-watchdog/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-dispatcher/dist/function.zip",
-        f"{ROOT}/backend/services/knowledge-bases/dist/function.zip",
-        f"{ROOT}/backend/services/account-settings/dist/function.zip",
-        f"{ROOT}/backend/services/get-user-knowledge-bases/dist/function.zip",
-        f"{ROOT}/backend/services/retrieval-query/dist/function.zip",
-        f"{ROOT}/backend/services/search-user-knowledge-bases/dist/function.zip",
+        f"{ROOT}/backend/services/user-api/dist/function.zip",
         f"{ROOT}/backend/services/knowledge-mcp/dist/function.zip",
         f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
         f"{ROOT}/backend/tools/code-interpreter/dist/function.zip",
@@ -435,6 +494,8 @@ def main() -> int:
         if not os.path.exists(path):
             log(f"ERROR missing {path}. Run `make floci-build` first.")
             return 1
+
+    ensure_table()
 
     s3 = client("s3")
     sqs = client("sqs")
@@ -458,14 +519,19 @@ def main() -> int:
         f"{ROOT}/backend/services/layers/ai/dist/layer.zip",
     )
 
+    ddb_env = {
+        "DYNAMODB_TABLE": DYNAMODB_TABLE,
+        "DYNAMODB_ENDPOINT_URL": DYNAMODB_ENDPOINT_URL,
+    }
     worker_env = {
-        "DATABASE_URL": DATABASE_URL,
+        **ddb_env,
         "S3_BUCKET": BUCKET,
         "S3_REGION": REGION,
         "EMBED_MODE": "local",
         "LOCAL_EMBED_URL": OLLAMA_URL,
         "LOCAL_EMBED_MODEL": LOCAL_EMBED_MODEL,
         "TEXT_EMBED_MODEL": LOCAL_EMBED_MODEL,
+        "VECTOR_STORE": "local",
         "AWS_REGION": REGION,
         "AWS_DEFAULT_REGION": REGION,
     }
@@ -534,80 +600,34 @@ def main() -> int:
     ensure_event_source_mapping(lm, FUNCTIONS["dispatcher"], queue_arn)
 
     api_env = {
-        "DATABASE_URL": DATABASE_URL,
+        **ddb_env,
         "S3_BUCKET": BUCKET,
         "S3_REGION": REGION,
+        "VECTOR_STORE": "local",
         "AWS_REGION": REGION,
         "AWS_DEFAULT_REGION": REGION,
     }
-    kb_arn = ensure_function(
+    user_api_arn = ensure_function(
         lm,
-        FUNCTIONS["knowledge_bases"],
-        f"{ROOT}/backend/services/knowledge-bases/dist/function.zip",
+        FUNCTIONS["user_api"],
+        f"{ROOT}/backend/services/user-api/dist/function.zip",
         layers=[layer_arn, ai_layer_arn],
         environment=api_env,
         timeout=30,
         memory=512,
-    )
-    account_arn = ensure_function(
-        lm,
-        FUNCTIONS["account_settings"],
-        f"{ROOT}/backend/services/account-settings/dist/function.zip",
-        layers=[layer_arn, ai_layer_arn],
-        environment={
-            "DATABASE_URL": DATABASE_URL,
-            "AWS_REGION": REGION,
-            "AWS_DEFAULT_REGION": REGION,
-        },
-        timeout=30,
-        memory=512,
-    )
-
-    ensure_function(
-        lm,
-        FUNCTIONS["get_user_kb"],
-        f"{ROOT}/backend/services/get-user-knowledge-bases/dist/function.zip",
-        layers=[layer_arn],
-        environment=api_env,
-        timeout=30,
-        memory=512,
-    )
-    ensure_function(
-        lm,
-        FUNCTIONS["retrieval_query"],
-        f"{ROOT}/backend/services/retrieval-query/dist/function.zip",
-        layers=[layer_arn],
-        environment=api_env,
-        timeout=30,
-        memory=512,
-    )
-    ensure_function(
-        lm,
-        FUNCTIONS["search_user_kb"],
-        f"{ROOT}/backend/services/search-user-knowledge-bases/dist/function.zip",
-        layers=[layer_arn],
-        environment={
-            **worker_env,
-            "RETRIEVAL_QUERY_FUNCTION": FUNCTIONS["retrieval_query"],
-            "RERANK_MODE": "local",
-            "LOCAL_RERANK_URL": RERANK_URL,
-        },
-        timeout=60,
-        memory=1024,
     )
     mcp_arn = ensure_function(
         lm,
         FUNCTIONS["knowledge_mcp"],
         f"{ROOT}/backend/services/knowledge-mcp/dist/function.zip",
-        layers=[ai_layer_arn],
+        layers=[layer_arn, ai_layer_arn],
         environment={
-            "GET_USER_KB_FUNCTION": FUNCTIONS["get_user_kb"],
-            "SEARCH_USER_KB_FUNCTION": FUNCTIONS["search_user_kb"],
-            "AWS_REGION": REGION,
-            "AWS_DEFAULT_REGION": REGION,
+            **worker_env,
+            "RERANK_MODE": "local",
+            "LOCAL_RERANK_URL": RERANK_URL,
         },
         timeout=300,
-        memory=512,
+        memory=1024,
     )
     # AgentCore Code Interpreter is not emulated by Floci, so locally the tool
     # runs the guarded code in a subprocess of the Lambda container.
@@ -619,6 +639,8 @@ def main() -> int:
         environment={
             "CODE_INTERPRETER_MODE": "local",
             "CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS": "120",
+            "DYNAMODB_TABLE": DYNAMODB_TABLE,
+            "DYNAMODB_ENDPOINT_URL": DYNAMODB_ENDPOINT_URL,
             "AWS_REGION": REGION,
             "AWS_DEFAULT_REGION": REGION,
         },
@@ -666,8 +688,7 @@ def main() -> int:
     api_id = ensure_http_api(
         apigw,
         {
-            "knowledge_bases": kb_arn,
-            "account_settings": account_arn,
+            "user_api": user_api_arn,
             "knowledge_mcp": mcp_arn,
             "web_search": web_search_arn,
             "code_interpreter": code_interpreter_arn,
@@ -677,6 +698,7 @@ def main() -> int:
 
     log("done. resources:")
     log(f"  bucket:        {BUCKET}")
+    log(f"  table:         {DYNAMODB_TABLE} @ {DYNAMODB_ENDPOINT_URL}")
     log(f"  queue url:     {queue_url}")
     log(f"  state machine: {state_machine_arn}")
     log(f"  api:           http://{api_id}.execute-api.localhost.floci.io:4566")

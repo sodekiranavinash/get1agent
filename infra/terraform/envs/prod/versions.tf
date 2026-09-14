@@ -6,14 +6,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.21"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.7"
-    }
-    archive = {
-      source  = "hashicorp/archive"
-      version = "~> 2.7"
-    }
   }
 
   # Bucket is created by infra/terraform/bootstrap. After bootstrap exists:

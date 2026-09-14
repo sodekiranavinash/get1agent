@@ -4,18 +4,6 @@ variable "aws_region" {
   description = "AWS region for prod resources (API, VPC, RDS, Lambdas)"
 }
 
-variable "enable_network" {
-  type        = bool
-  default     = false
-  description = "VPC, subnets, jumpbox (on-demand public IPv4)"
-}
-
-variable "enable_rds" {
-  type        = bool
-  default     = false
-  description = "RDS PostgreSQL (requires Network)"
-}
-
 variable "enable_api_gateway" {
   type        = bool
   default     = false
@@ -25,7 +13,7 @@ variable "enable_api_gateway" {
 variable "enable_backend_lambdas" {
   type        = bool
   default     = false
-  description = "Terraform backend Lambdas (e.g. health-check; requires Network + RDS)"
+  description = "Terraform backend Lambdas (DynamoDB + S3; no VPC/RDS)"
 }
 
 variable "enable_ingestion" {
@@ -34,19 +22,16 @@ variable "enable_ingestion" {
   description = "S3 -> EventBridge -> SQS -> Step Functions ingestion pipeline"
 }
 
-variable "rds_db_name" {
-  type    = string
-  default = "get1agent"
+variable "dynamodb_table_name" {
+  type        = string
+  default     = "get1agent"
+  description = "Single DynamoDB table holding all operational data"
 }
 
-variable "rds_db_username" {
-  type    = string
-  default = "get1agent"
-}
-
-variable "rds_db_iam_username" {
-  type    = string
-  default = "get1agent_app"
+variable "vector_bucket_name" {
+  type        = string
+  default     = "get1agent-prod-vectors"
+  description = "S3 Vectors bucket holding the per-user embedding indexes"
 }
 
 variable "api_hostname" {

@@ -11,7 +11,7 @@ import { useQuery } from '../lib/query'
 export function usePageQuery<T>(
   key: string,
   fetcher: () => Promise<T>,
-  options?: { refetchOnMount?: boolean },
+  options?: { refetchOnMount?: boolean; enabled?: boolean },
 ) {
   const query = useQuery(key, fetcher, options)
   // Only treat "no data yet while still loading" as pending, so a background

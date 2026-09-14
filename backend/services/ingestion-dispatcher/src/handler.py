@@ -8,8 +8,6 @@ from typing import Any
 
 import boto3
 
-DERIVED_SEGMENT = ".derived"
-
 
 def _execution_token(etag: str, event_id: str) -> str:
     """Stable per-object-event token for the Step Functions execution name.
@@ -40,16 +38,20 @@ def _is_uuid(value: str) -> bool:
 
 
 def _parse_key(key: str) -> dict[str, str] | None:
-    """Original uploads look like ``{user}/{kb}/{doc}/{filename}``."""
+    """Original uploads look like ``raw/{user}/{kb}/{doc}/{filename}``.
+
+    Only the ``raw/`` prefix triggers ingestion; derived and index writes live
+    under other prefixes and never reach this function.
+    """
     if not key:
         return None
-    parts = key.split("/", 3)
-    if len(parts) != 4:
+    parts = key.split("/", 4)
+    if len(parts) != 5 or parts[0] != "raw":
         return None
-    user_id, kb_id, doc_id, file_name = parts
-    if not (_is_uuid(user_id) and _is_uuid(kb_id) and _is_uuid(doc_id)):
+    _, user_id, kb_id, doc_id, file_name = parts
+    if not (_is_uuid(kb_id) and _is_uuid(doc_id)):
         return None
-    if file_name.startswith(".") or DERIVED_SEGMENT in parts:
+    if not user_id or not file_name or file_name.startswith("."):
         return None
     return {
         "userId": user_id,

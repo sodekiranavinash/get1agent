@@ -305,7 +305,7 @@ export function IngestionActivity({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b border-border px-5 py-4">
+      <div className="border-b border-border px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="relative flex h-2 w-2">
@@ -318,7 +318,7 @@ export function IngestionActivity({
                 }`}
               />
             </span>
-            <h2 className="text-sm font-semibold text-foreground">
+            <h2 className="text-[13px] font-semibold text-foreground">
               Ingestion activity
             </h2>
           </div>
@@ -329,22 +329,22 @@ export function IngestionActivity({
               title="Close activity"
               onClick={onClose}
             >
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5" />
             </IconButton>
           ) : null}
         </div>
-        <p className="mt-1 text-xs text-muted">
+        <p className="mt-0.5 text-xs text-muted">
           Live RAG pipeline — upload, parse, chunk, embed, index.
         </p>
         {capped && onRefresh ? (
-          <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-warning/30 bg-warning-soft/40 px-3 py-2">
+          <div className="mt-2.5 flex items-center justify-between gap-2 rounded-md border border-warning/30 bg-warning-soft/40 px-2.5 py-1.5">
             <p className="text-[11px] text-muted">
               Live updates paused after 10 minutes.
             </p>
             <button
               type="button"
               onClick={onRefresh}
-              className="shrink-0 text-[11px] font-semibold text-accent hover:underline"
+              className="shrink-0 text-[11px] font-medium text-accent hover:underline"
             >
               Refresh
             </button>
@@ -352,13 +352,13 @@ export function IngestionActivity({
         ) : null}
       </div>
 
-      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4">
         {!hasActivity ? (
           <div className="flex h-full flex-col items-center justify-center py-16 text-center">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-raised text-subtle">
-              <Radio className="h-5 w-5" strokeWidth={1.5} />
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-raised text-subtle">
+              <Radio className="h-4 w-4" strokeWidth={1.5} />
             </div>
-            <p className="mt-3 text-sm font-medium text-foreground">
+            <p className="mt-3 text-[13px] font-medium text-foreground">
               No activity yet
             </p>
             <p className="mt-1 max-w-[15rem] text-xs text-muted">
@@ -366,14 +366,14 @@ export function IngestionActivity({
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {active.map((activity) => (
               <PipelineCard key={activity.documentId} activity={activity} />
             ))}
 
             {recent.length > 0 ? (
               <div className={active.length > 0 ? 'pt-1' : ''}>
-                <p className="mb-2 px-0.5 text-[10px] font-bold tracking-[0.16em] text-subtle uppercase">
+                <p className="mb-1.5 px-0.5 text-[10px] font-semibold tracking-[0.1em] text-subtle uppercase">
                   Recent
                 </p>
                 <div className="space-y-0.5">
@@ -405,10 +405,10 @@ function PipelineCard({ activity }: { activity: DocumentActivity }) {
     now !== null && now - new Date(activity.latest.createdAt).getTime() > STALL_MS
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-accent/25 bg-accent-soft/20">
-      <div className="flex items-center justify-between gap-2 border-b border-accent/15 px-3.5 py-2.5">
+    <div className="overflow-hidden rounded-lg border border-accent/25 bg-accent-soft/15">
+      <div className="flex items-center justify-between gap-2 border-b border-accent/15 px-3 py-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">
+          <p className="truncate text-[13px] font-medium text-foreground">
             {activity.fileName}
           </p>
           <p className="mt-0.5 truncate text-[11px] text-muted">
@@ -422,8 +422,8 @@ function PipelineCard({ activity }: { activity: DocumentActivity }) {
         </Badge>
       </div>
 
-      <div className="px-3.5 py-3">
-        <div className="mb-3 h-1 w-full overflow-hidden rounded-full bg-accent-soft">
+      <div className="px-3 py-2.5">
+        <div className="mb-2.5 h-1 w-full overflow-hidden rounded-full bg-accent-soft">
           <div
             className="h-full rounded-full bg-accent transition-[width] duration-700 ease-out"
             style={{ width: `${progress}%` }}
@@ -446,12 +446,12 @@ function RecentEvent({
 }) {
   const failed = activity.failed !== null
   return (
-    <div className="rounded-xl transition-colors hover:bg-raised/60">
+    <div className="rounded-md transition-colors hover:bg-raised/60">
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-left"
+        className="flex w-full items-start gap-3 rounded-md px-2 py-2 text-left"
       >
         <span
           className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${

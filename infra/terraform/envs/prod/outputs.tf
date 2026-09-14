@@ -31,46 +31,19 @@ output "auth0_audience" {
   value       = try(module.api_gateway[0].auth0_audience, null)
 }
 
-output "jumpbox_instance_id" {
-  description = "On-demand jumpbox EC2 (stop when idle to avoid public IPv4 charges)"
-  value       = try(module.network[0].jumpbox_instance_id, null)
-}
-
-output "db_access_command" {
-  description = "Start jumpbox, tunnel to RDS, stop on exit (minimal IPv4 cost)"
-  value       = try(module.network[0].db_access_command, null)
-}
-
-output "postgres_endpoint" {
-  description = "RDS hostname (private)"
-  value       = try(module.rds[0].postgres_endpoint, null)
-}
-
-output "postgres_db_name" {
-  value = try(module.rds[0].postgres_db_name, null)
-}
-
-output "postgres_username" {
-  value = try(module.rds[0].postgres_username, null)
-}
-
-output "db_iam_username" {
-  value = try(module.rds[0].db_iam_username, null)
-}
-
-output "postgres_credentials_parameter_name" {
-  description = "SSM path for master DB credentials (SecureString)"
-  value       = try(module.rds[0].postgres_credentials_parameter_name, null)
-}
-
-output "postgres_connection_parameter_name" {
-  description = "SSM path for connection JSON (SecureString)"
-  value       = try(module.rds[0].postgres_connection_parameter_name, null)
-}
-
 output "knowledge_bases_bucket_name" {
-  description = "S3 bucket holding knowledge base documents"
+  description = "S3 bucket holding knowledge base documents + retrieval artifacts"
   value       = try(module.knowledge_storage[0].bucket_name, null)
+}
+
+output "dynamodb_table_name" {
+  description = "Single DynamoDB table holding all operational data"
+  value       = try(module.database[0].table_name, null)
+}
+
+output "vector_bucket_name" {
+  description = "S3 Vectors bucket holding the per-user embedding indexes"
+  value       = try(module.vectors[0].vector_bucket_name, null)
 }
 
 output "ingestion_queue_url" {

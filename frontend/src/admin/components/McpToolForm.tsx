@@ -1,87 +1,57 @@
-import { useMemo, useState } from 'react'
-import { Play, Server } from 'lucide-react'
+import { createElement } from 'react'
+import { AlertCircle, ChevronDown, Loader2, Play, SlidersHorizontal } from 'lucide-react'
 import { Button } from '../../components/ui/Button'
 import { Switch } from '../../components/ui/Switch'
 import type { McpProperty, McpTool } from '../lib/mcpAdmin'
+import { toolIcon, toolLabel } from '../lib/mcpToolMeta'
+import type { FieldState, ToolForm } from '../lib/toolForm'
 
 const inputStyles =
-  'w-full rounded-xl border border-border-strong bg-raised px-3 py-2.5 text-sm text-foreground placeholder:text-subtle transition-colors focus:border-accent/40 focus:outline-none focus:ring-2 focus:ring-accent/25'
+  'w-full rounded-md border border-border-strong bg-canvas/50 px-3 py-2.5 text-sm text-foreground placeholder:text-subtle transition-colors focus:border-accent/40 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-accent/25'
 
-type FieldState = { value: string | boolean; touched: boolean }
-
-type McpToolFormProps = {
-  tool: McpTool
-  running: boolean
-  onRun: (name: string, args: Record<string, unknown>) => void
+/** Short placeholders for the big text fields (the schema hints are verbose). */
+const FIELD_PLACEHOLDERS: Record<string, string> = {
+  query: 'Describe what you are looking for…',
+  code: 'print("hello")',
 }
 
-function serverLabel(server?: string): string | null {
-  if (!server) return null
-  return server.replace(/^get1agent-(prod|local)-/, '')
+/** Keep schema hints to one short line; the full text stays in the tooltip. */
+function shortText(text?: string, max = 90): string | undefined {
+  if (!text) return undefined
+  // The required/optional state is already shown as a badge next to the label.
+  const cleaned = text.trim().replace(/^(required|optional)\.\s*/i, '')
+  const firstSentence = (cleaned.match(/^[^.!?]*[.!?]?/)?.[0] ?? cleaned).trim()
+  return firstSentence.length > max
+    ? `${firstSentence.slice(0, max).trimEnd()}…`
+    : firstSentence
 }
 
-function initialFields(tool: McpTool): Record<string, FieldState> {
-  const fields: Record<string, FieldState> = {}
-  for (const [name, prop] of Object.entries(tool.inputSchema?.properties ?? {})) {
-    fields[name] = {
-      value: prop.type === 'boolean' ? false : '',
-      touched: false,
-    }
-  }
-  return fields
-}
-
-function buildArguments(
-  tool: McpTool,
-  fields: Record<string, FieldState>,
-): Record<string, unknown> {
-  const required = new Set(tool.inputSchema?.required ?? [])
-  const args: Record<string, unknown> = {}
-  for (const [name, prop] of Object.entries(tool.inputSchema?.properties ?? {})) {
-    const state = fields[name]
-    if (!state) continue
-
-    if (prop.type === 'boolean') {
-      // Only send a boolean once it is required or the user has toggled it,
-      // so an untouched optional flag keeps the tool's own default.
-      if (required.has(name) || state.touched) args[name] = Boolean(state.value)
-      continue
-    }
-
-    const raw = String(state.value).trim()
-    if (raw === '') continue
-
-    if (prop.type === 'array') {
-      const items = raw
-        .split(/[\n,]/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-      if (items.length) args[name] = items
-    } else if (prop.type === 'integer' || prop.type === 'number') {
-      if (!Number.isNaN(Number(raw))) args[name] = Number(raw)
-    } else {
-      args[name] = raw
-    }
-  }
-  return args
-}
-
-function missingRequired(
-  tool: McpTool,
-  fields: Record<string, FieldState>,
-): string[] {
-  const missing: string[] = []
-  for (const name of tool.inputSchema?.required ?? []) {
-    const prop = tool.inputSchema?.properties?.[name]
-    const state = fields[name]
-    if (!state) {
-      missing.push(name)
-      continue
-    }
-    if (prop?.type === 'boolean') continue
-    if (String(state.value).trim() === '') missing.push(name)
-  }
-  return missing
+function FieldLabel({
+  name,
+  prop,
+  required,
+}: {
+  name: string
+  prop: McpProperty
+  required: boolean
+}) {
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-2">
+      <code className="rounded-md border border-accent/20 bg-accent-soft px-2 py-0.5 font-mono text-[11px] font-semibold text-accent">
+        {name}
+      </code>
+      <span className="rounded-md border border-border bg-raised px-1.5 py-0.5 font-mono text-[10px] text-subtle">
+        {prop.type ?? 'string'}
+      </span>
+      {required ? (
+        <span className="text-[10px] font-bold tracking-[0.12em] text-warning uppercase">
+          required
+        </span>
+      ) : (
+        <span className="text-[10px] text-subtle">optional</span>
+      )}
+    </div>
+  )
 }
 
 function FieldControl({
@@ -97,13 +67,15 @@ function FieldControl({
 }) {
   if (prop.type === 'boolean') {
     return (
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 rounded-md border border-border bg-raised/40 px-3 py-2.5">
         <Switch
           checked={Boolean(state.value)}
           onChange={(checked) => onChange({ value: checked, touched: true })}
           label={name}
         />
-        <span className="text-xs text-muted">{state.value ? 'true' : 'false'}</span>
+        <span className="font-mono text-xs text-muted">
+          {state.value ? 'true' : 'false'}
+        </span>
       </div>
     )
   }
@@ -163,7 +135,7 @@ function FieldControl({
           onChange({ value: event.target.value, touched: true })
         }
         rows={name === 'code' ? 8 : 3}
-        placeholder={prop.description ?? 'Enter a value'}
+        placeholder={FIELD_PLACEHOLDERS[name] ?? 'Enter a value'}
         spellCheck={name !== 'code'}
         className={`${inputStyles} resize-y ${name === 'code' ? 'font-mono' : ''}`}
       />
@@ -181,119 +153,198 @@ function FieldControl({
   )
 }
 
-export function McpToolForm({ tool, running, onRun }: McpToolFormProps) {
-  const [fields, setFields] = useState<Record<string, FieldState>>(() =>
-    initialFields(tool),
+function ToolField({
+  name,
+  prop,
+  isRequired,
+  state,
+  onChange,
+}: {
+  name: string
+  prop: McpProperty
+  isRequired: boolean
+  state: FieldState
+  onChange: (next: FieldState) => void
+}) {
+  const hint = shortText(prop.description)
+  return (
+    <div className="min-w-0">
+      <FieldLabel name={name} prop={prop} required={isRequired} />
+      {hint ? (
+        <p
+          title={prop.description}
+          className="mb-2 text-[11px] leading-relaxed break-words text-muted"
+        >
+          {hint}
+        </p>
+      ) : null}
+      <FieldControl name={name} prop={prop} state={state} onChange={onChange} />
+      {prop.type === 'boolean' && !isRequired && !state.touched ? (
+        <p className="mt-1.5 text-[11px] text-subtle">
+          Unchanged — the tool's default applies
+        </p>
+      ) : null}
+    </div>
   )
+}
 
-  const required = useMemo(
-    () => new Set(tool.inputSchema?.required ?? []),
-    [tool],
-  )
-  const properties = Object.entries(tool.inputSchema?.properties ?? {})
-  const args = buildArguments(tool, fields)
-  const missing = missingRequired(tool, fields)
+type McpToolFormProps = {
+  tool: McpTool
+  running: boolean
+  onRun: (name: string, args: Record<string, unknown>) => void
+  form: ToolForm
+}
+
+export function McpToolForm({ tool, running, onRun, form }: McpToolFormProps) {
+  const {
+    fields,
+    setField,
+    required,
+    primaryProperties,
+    properties,
+    args,
+    missing,
+  } = form
   const canRun = !running && missing.length === 0
-  const server = serverLabel(tool.server)
+
+  const renderField = ([name, prop]: [string, McpProperty]) => {
+    const isRequired = required.has(name)
+    const state =
+      fields[name] ??
+      ({ value: prop.type === 'boolean' ? false : '', touched: false } as FieldState)
+    return (
+      <ToolField
+        key={name}
+        name={name}
+        prop={prop}
+        isRequired={isRequired}
+        state={state}
+        onChange={(next) => setField(name, next)}
+      />
+    )
+  }
 
   return (
-    <div className="min-w-0 space-y-5">
-      <div className="min-w-0 space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="min-w-0 text-sm font-semibold break-words text-foreground">
-            {tool.name}
-          </h3>
-          {server ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-border bg-raised px-2 py-0.5 text-[10px] font-medium text-subtle">
-              <Server className="h-3 w-3" strokeWidth={1.75} />
-              {server}
+    <div className="min-w-0">
+      <div className="sticky top-0 z-20 -mx-5 -mt-5 mb-4 rounded-t-lg border-b border-border bg-surface/95 px-5 py-3.5 backdrop-blur-xl">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-accent/25 bg-accent-soft text-accent">
+              {createElement(toolIcon(tool.name), {
+                className: 'h-5 w-5',
+                strokeWidth: 1.75,
+              })}
             </span>
-          ) : null}
+            <div className="min-w-0">
+              <h3 className="text-base font-bold tracking-tight text-foreground">
+                {toolLabel(tool.name)}
+              </h3>
+              <code className="mt-0.5 block font-mono text-[11px] text-subtle">
+                {tool.name}
+              </code>
+            </div>
+          </div>
+          <Button
+            onClick={() => onRun(tool.name, args)}
+            disabled={!canRun}
+            icon={running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            className="shrink-0"
+          >
+            {running ? 'Running' : 'Run'}
+          </Button>
         </div>
-        {tool.description ? (
-          <p className="rounded-lg border border-border bg-raised/40 px-3 py-2 text-[11px] leading-relaxed break-words text-muted">
-            {tool.description}
-          </p>
-        ) : null}
       </div>
 
-      {properties.length === 0 ? (
-        <p className="text-xs text-muted">This tool takes no arguments.</p>
-      ) : (
-        <div className="space-y-4">
-          {properties.map(([name, prop]) => {
-            const isRequired = required.has(name)
-            const state =
-              fields[name] ??
-              ({ value: prop.type === 'boolean' ? false : '', touched: false } as FieldState)
-            return (
-              <div key={name} className="min-w-0">
-                <div className="mb-1.5 flex items-center gap-2">
-                  <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-foreground">
-                    <code className="rounded bg-raised px-1.5 py-0.5 text-[11px] text-accent">
-                      {name}
-                    </code>
-                    <span className="font-normal text-subtle">
-                      {prop.type ?? 'string'}
-                    </span>
-                    {isRequired ? (
-                      <span className="text-[10px] font-bold tracking-wide text-warning uppercase">
-                        required
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-subtle">optional</span>
-                    )}
-                  </label>
-                </div>
-                {prop.description ? (
-                  <p className="mb-1.5 text-[11px] leading-relaxed break-words text-muted">
-                    {prop.description}
-                  </p>
-                ) : null}
-                <FieldControl
-                  name={name}
-                  prop={prop}
-                  state={state}
-                  onChange={(next) =>
-                    setFields((current) => ({ ...current, [name]: next }))
-                  }
-                />
-                {prop.type === 'boolean' && !isRequired && !state.touched ? (
-                  <p className="mt-1 text-[11px] text-subtle">
-                    Unchanged — the tool's default applies
-                  </p>
-                ) : null}
-              </div>
-            )
-          })}
-        </div>
-      )}
+      {tool.description ? (
+        <p
+          title={tool.description}
+          className="mb-5 rounded-md border border-border bg-raised/40 px-3 py-2.5 text-xs leading-relaxed break-words text-muted"
+        >
+          {shortText(tool.description, 140)}
+        </p>
+      ) : null}
 
-      <details className="min-w-0 rounded-xl border border-border bg-raised/40 px-3 py-2">
-        <summary className="cursor-pointer text-[11px] font-semibold tracking-wide text-muted uppercase select-none">
+      {missing.length > 0 ? (
+        <div className="mb-5 flex items-start gap-2 rounded-md border border-warning/25 bg-warning-soft/40 px-3 py-2.5">
+          <AlertCircle
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning"
+            strokeWidth={2}
+          />
+          <p className="text-xs leading-relaxed text-warning">
+            Missing required: {missing.join(', ')}
+          </p>
+        </div>
+      ) : null}
+
+      {properties.length === 0 ? (
+        <p className="rounded-md border border-border bg-raised/40 px-3 py-3 text-xs text-muted">
+          This tool takes no arguments.
+        </p>
+      ) : (
+        <div className="space-y-5">{primaryProperties.map(renderField)}</div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Advanced arguments and the live JSON payload, rendered full-width below the
+ * console grid so the result panel only has to match the primary fields.
+ */
+export function McpAdvancedFields({ form }: { form: ToolForm }) {
+  const { fields, setField, required, advancedProperties, args } = form
+
+  const renderField = ([name, prop]: [string, McpProperty]) => {
+    const isRequired = required.has(name)
+    const state =
+      fields[name] ??
+      ({ value: prop.type === 'boolean' ? false : '', touched: false } as FieldState)
+    return (
+      <ToolField
+        key={name}
+        name={name}
+        prop={prop}
+        isRequired={isRequired}
+        state={state}
+        onChange={(next) => setField(name, next)}
+      />
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {advancedProperties.length > 0 ? (
+        <details className="group rounded-lg border border-border bg-raised/30">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 select-none [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center gap-2 text-xs font-semibold text-foreground">
+              <SlidersHorizontal
+                className="h-4 w-4 text-accent"
+                strokeWidth={1.75}
+              />
+              Advanced options
+              <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-subtle">
+                {advancedProperties.length}
+              </span>
+            </span>
+            <ChevronDown
+              className="h-4 w-4 text-subtle transition-transform duration-200 group-open:rotate-180"
+              strokeWidth={1.75}
+            />
+          </summary>
+          <div className="grid gap-5 border-t border-border px-4 py-4 md:grid-cols-2">
+            {advancedProperties.map(renderField)}
+          </div>
+        </details>
+      ) : null}
+
+      <details className="group min-w-0 rounded-md border border-border bg-canvas/40 px-3 py-2.5">
+        <summary className="cursor-pointer text-[11px] font-semibold tracking-[0.12em] text-muted uppercase select-none">
           Arguments JSON
         </summary>
         <pre className="scrollbar-thin mt-2 max-h-48 w-full max-w-full overflow-auto text-[11px] leading-relaxed break-words whitespace-pre-wrap text-foreground">
           {JSON.stringify(args, null, 2)}
         </pre>
       </details>
-
-      <div className="flex items-center justify-between gap-3">
-        {missing.length > 0 ? (
-          <p className="text-xs text-warning">
-            Missing required: {missing.join(', ')}
-          </p>
-        ) : (
-          <span />
-        )}
-        <Button
-          onClick={() => onRun(tool.name, args)}
-          disabled={!canRun}
-          icon={<Play className="h-4 w-4" />}
-        >
-          {running ? 'Running…' : 'Run tool'}
-        </Button>
-      </div>
     </div>
   )
 }

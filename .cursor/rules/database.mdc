@@ -1,9 +1,16 @@
 ---
 alwaysApply: false
 ---
-# UI Rules
+# Data Rules
 
-## overview 
-- we will use postgreSQL db as our primary db
-- Use SQLAlchemy as ORM, and also use async postgres driver.
-- 
+## Overview
+- The primary datastore is **DynamoDB** — a single table (`get1agent`) with
+  adjacency-list keys (`pk`/`sk`) and three sparse overloaded GSIs (`byId`,
+  `byUser`, `byStatus`).
+- Access goes through the repository functions in
+  `backend/services/shared/dynamo/repositories/`; do not hand-roll item access.
+- Embeddings live in **S3 Vectors**; the keyword (BM25) index, parents and
+  manifests live in **S3 objects** (`index/<sub>/...`). There is no SQL database
+  and no ORM.
+- Numbers read from DynamoDB are `Decimal`; serialize responses through
+  `shared.json_utils.dumps` and coerce to `int` where arithmetic/slicing needs it.

@@ -7,20 +7,12 @@ on:
         description: Web - S3 static site bucket (www.get1agent.com)
         type: boolean
         default: false
-      vpc:
-        description: VPC - network, subnets, jumpbox
-        type: boolean
-        default: false
-      rds:
-        description: RDS - PostgreSQL
-        type: boolean
-        default: false
       api_gateway:
         description: API Gateway - HTTP API + Auth0 JWT + custom domain
         type: boolean
         default: false
       lambdas:
-        description: Lambdas
+        description: Lambdas - DynamoDB + S3 Vectors + backend Lambdas
         type: boolean
         default: false
 
@@ -49,8 +41,6 @@ jobs:
       - name: Require at least one component
         if: >-
           inputs.web == false &&
-          inputs.vpc == false &&
-          inputs.rds == false &&
           inputs.api_gateway == false &&
           inputs.lambdas == false
         run: |
@@ -68,123 +58,88 @@ jobs:
           terraform_wrapper: false
 
       - name: Setup uv
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        if: inputs.api_gateway || inputs.lambdas
         uses: astral-sh/setup-uv@v5
 
       - name: Terraform fmt
         run: terraform fmt -check -recursive infra/terraform
 
       - name: Write prod terraform.tfvars
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        if: inputs.api_gateway || inputs.lambdas
         run: bash infra/aws/write-prod-tfvars.sh
 
       - name: Set up QEMU
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        if: inputs.api_gateway || inputs.lambdas
         uses: docker/setup-qemu-action@v3
 
       - name: Build backend data layer
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        if: inputs.api_gateway || inputs.lambdas
         run: bash infra/aws/build-backend-layers.sh
 
-      - name: Package backend health-check zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+      - name: Package user-api zip
+        if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/health-check
+        working-directory: backend/services/user-api
 
-      - name: Package backend account-settings zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
-        run: make package
-        working-directory: backend/services/account-settings
-
-      - name: Package backend knowledge-bases zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
-        run: make package
-        working-directory: backend/services/knowledge-bases
-
-      - name: Package backend get-user-knowledge-bases zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
-        run: make package
-        working-directory: backend/services/get-user-knowledge-bases
-
-      - name: Package backend retrieval-query zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
-        run: make package
-        working-directory: backend/services/retrieval-query
-
-      - name: Package backend search-user-knowledge-bases zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
-        run: make package
-        working-directory: backend/services/search-user-knowledge-bases
-
-      - name: Package backend knowledge-mcp zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+      - name: Package knowledge-mcp zip
+        if: inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/services/knowledge-mcp
 
-      - name: Package backend mcp-tester zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+      - name: Package mcp-tester zip
+        if: inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/services/admin/mcp-tester
 
-      - name: Package backend code-interpreter zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+      - name: Package code-interpreter zip
+        if: inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/tools/code-interpreter
 
-      - name: Package backend web-search zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+      - name: Package web-search zip
+        if: inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/tools/web-search
 
-      - name: Package backend ingestion-dispatcher zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+      - name: Package ingestion-dispatcher zip
+        if: inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/services/ingestion-dispatcher
 
-      - name: Package backend ingestion-extract zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+      - name: Package ingestion-extract zip
+        if: inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/services/ingestion-extract
 
-      - name: Package backend ingestion-embed zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+      - name: Package ingestion-embed zip
+        if: inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/services/ingestion-embed
 
-      - name: Package backend ingestion-index zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+      - name: Package ingestion-index zip
+        if: inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/services/ingestion-index
 
-      - name: Package backend ingestion-mark-failed zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+      - name: Package ingestion-mark-failed zip
+        if: inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/services/ingestion-mark-failed
 
-      - name: Package backend ingestion-watchdog zip
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+      - name: Package ingestion-watchdog zip
+        if: inputs.api_gateway || inputs.lambdas
         run: make package
         working-directory: backend/services/ingestion-watchdog
 
       - name: Verify Lambda zips
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        if: inputs.api_gateway || inputs.lambdas
         run: |
           test -s backend/services/layers/data/dist/layer.zip
-          unzip -l backend/services/layers/data/dist/layer.zip | grep 'python/sqlalchemy'
+          unzip -l backend/services/layers/data/dist/layer.zip | grep 'python/shared/dynamo'
           test -s backend/services/layers/ai/dist/layer.zip
           unzip -l backend/services/layers/ai/dist/layer.zip | grep 'python/ai/auth.py'
-          test -s backend/services/health-check/dist/function.zip
-          unzip -l backend/services/health-check/dist/function.zip | grep handler.py
-          test -s backend/services/account-settings/dist/function.zip
-          unzip -l backend/services/account-settings/dist/function.zip | grep handler.py
-          test -s backend/services/knowledge-bases/dist/function.zip
-          unzip -l backend/services/knowledge-bases/dist/function.zip | grep handler.py
-          test -s backend/services/get-user-knowledge-bases/dist/function.zip
-          unzip -l backend/services/get-user-knowledge-bases/dist/function.zip | grep handler.py
-          test -s backend/services/retrieval-query/dist/function.zip
-          unzip -l backend/services/retrieval-query/dist/function.zip | grep handler.py
-          test -s backend/services/search-user-knowledge-bases/dist/function.zip
-          unzip -l backend/services/search-user-knowledge-bases/dist/function.zip | grep handler.py
+          test -s backend/services/user-api/dist/function.zip
+          unzip -l backend/services/user-api/dist/function.zip | grep handler.py
           test -s backend/services/knowledge-mcp/dist/function.zip
           unzip -l backend/services/knowledge-mcp/dist/function.zip | grep handler.py
           test -s backend/services/ingestion-dispatcher/dist/function.zip
@@ -207,14 +162,14 @@ jobs:
           unzip -l backend/tools/web-search/dist/function.zip | grep handler.py
 
       - name: Terraform validate
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        if: inputs.api_gateway || inputs.lambdas
         working-directory: infra/terraform/envs/prod
         run: |
           terraform init -backend=false -input=false
           terraform validate
 
       - name: Configure AWS credentials
-        if: inputs.web || inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        if: inputs.web || inputs.api_gateway || inputs.lambdas
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -222,7 +177,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Bootstrap state bucket
-        if: inputs.web || inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        if: inputs.web || inputs.api_gateway || inputs.lambdas
         run: bash infra/aws/run-terraform.sh bootstrap apply
 
       - name: Web
@@ -230,18 +185,16 @@ jobs:
         run: bash infra/aws/run-terraform.sh web apply
 
       - name: Prod
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        if: inputs.api_gateway || inputs.lambdas
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
-          APPLY_NETWORK: ${{ inputs.vpc }}
-          APPLY_RDS: ${{ inputs.rds }}
           APPLY_API_GATEWAY: ${{ inputs.api_gateway }}
           APPLY_BACKEND_LAMBDAS: ${{ inputs.lambdas }}
           TF_VAR_exa_api_key: ${{ secrets.EXA_API_KEY }}
         run: bash infra/aws/apply-prod.sh
 
       - name: Print prod outputs
-        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        if: inputs.api_gateway || inputs.lambdas
         working-directory: infra/terraform/envs/prod
         run: |
           terraform init -input=false -no-color
@@ -249,14 +202,12 @@ jobs:
             API_URL="$(terraform output -raw api_url)"
             echo "## API Gateway" >> "$GITHUB_STEP_SUMMARY"
             echo "- API URL: ${API_URL}" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Health: ${API_URL%/}/health" >> "$GITHUB_STEP_SUMMARY"
-            echo "- DB health: ${API_URL%/}/health/db" >> "$GITHUB_STEP_SUMMARY"
             echo "- Auth0 audience: $(terraform output -raw auth0_audience)" >> "$GITHUB_STEP_SUMMARY"
           fi
-          if terraform output -raw jumpbox_instance_id >/dev/null 2>&1; then
+          if terraform output -raw dynamodb_table_name >/dev/null 2>&1; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "## Network / RDS" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Jumpbox: $(terraform output -raw jumpbox_instance_id) (stopped after apply)" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Local DB: bash infra/aws/db-access.sh" >> "$GITHUB_STEP_SUMMARY"
+            echo "## Data" >> "$GITHUB_STEP_SUMMARY"
+            echo "- DynamoDB: $(terraform output -raw dynamodb_table_name)" >> "$GITHUB_STEP_SUMMARY"
+            echo "- S3 Vectors: $(terraform output -raw vector_bucket_name)" >> "$GITHUB_STEP_SUMMARY"
             echo "- API CNAME: $(terraform output -raw api_gateway_cname_target 2>/dev/null || echo n/a)" >> "$GITHUB_STEP_SUMMARY"
           fi

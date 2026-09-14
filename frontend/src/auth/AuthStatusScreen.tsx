@@ -1,6 +1,4 @@
 import type { ReactNode } from 'react'
-import { motion } from 'framer-motion'
-import { Card } from '../components/ui/Card'
 import { Spinner } from '../components/ui/Spinner'
 
 type AuthStatusScreenProps = {
@@ -15,26 +13,22 @@ export function AuthStatusScreen({
   action,
 }: AuthStatusScreenProps) {
   return (
-    <main className="relative flex min-h-screen items-center justify-center app-mesh-bg px-6">
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-      >
-        <Card glow padding="lg" className="w-full max-w-md text-center">
-          {tone === 'default' ? (
-            <div className="mb-4 flex justify-center">
-              <Spinner size="lg" />
-            </div>
-          ) : null}
-          <p
-            className={`text-sm leading-relaxed ${tone === 'error' ? 'text-accent' : 'text-muted'}`}
-          >
-            {children}
-          </p>
-          {action ? <div className="mt-6 flex justify-center">{action}</div> : null}
-        </Card>
-      </motion.div>
+    <main className="flex min-h-screen items-center justify-center bg-canvas px-6">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-surface p-8 text-center">
+        {tone === 'default' ? (
+          <div className="mb-4 flex justify-center">
+            <Spinner size="lg" />
+          </div>
+        ) : null}
+        <p
+          className={`text-[13px] leading-relaxed ${
+            tone === 'error' ? 'text-accent' : 'text-muted'
+          }`}
+        >
+          {children}
+        </p>
+        {action ? <div className="mt-6 flex justify-center">{action}</div> : null}
+      </div>
     </main>
   )
 }

@@ -50,11 +50,6 @@ def _format_bytes(size: int) -> str:
 
 
 def _extract_message(stats: dict[str, int]) -> str:
-    """Human summary, e.g. "1.2 MB · 5 images · 12 pages · 3,204 words".
-
-    Images are only mentioned when present so a text-only file never reads
-    "0 images".
-    """
     parts: list[str] = []
     source_bytes = stats.get("sourceBytes")
     if source_bytes:
@@ -72,9 +67,9 @@ def _extract_message(stats: dict[str, int]) -> str:
     return " · ".join(parts) or "Parsed"
 
 
-async def extract_action(event: dict[str, Any]) -> dict[str, Any]:
-    """Stage 1: download, parse text + images, and stage derived artifacts."""
-    document = await get_document(event["documentId"])
+def extract_action(event: dict[str, Any]) -> dict[str, Any]:
+    """Stage 1: download, parse text + images, chunk, and stage derived artifacts."""
+    document = get_document(event["documentId"])
     if document is None:
         raise DocumentMissing(f"Document {event['documentId']} not found")
     if document["status"] == "pending":
@@ -89,15 +84,16 @@ async def extract_action(event: dict[str, Any]) -> dict[str, Any]:
         },
     )
 
-    config = await load_config_for_knowledge_base(document["knowledge_base_id"])
-    await set_document_status(document["id"], "processing")
-    await emit_event(
+    config = load_config_for_knowledge_base(document["knowledge_base_id"])
+    set_document_status(document["id"], "processing")
+    emit_event(
         document_id=document["id"],
         knowledge_base_id=document["knowledge_base_id"],
         user_id=document["user_id"],
         stage="extracted",
         status="started",
         message=document["file_name"],
+        file_name=document["file_name"],
     )
     extracted = extract_document(
         _storage(),
@@ -108,7 +104,7 @@ async def extract_action(event: dict[str, Any]) -> dict[str, Any]:
         s3_key=document["s3_key"],
         file_name=document["file_name"],
     )
-    await emit_event(
+    emit_event(
         document_id=document["id"],
         knowledge_base_id=document["knowledge_base_id"],
         user_id=document["user_id"],
@@ -116,10 +112,9 @@ async def extract_action(event: dict[str, Any]) -> dict[str, Any]:
         status="succeeded",
         message=_extract_message(extracted.stats),
         details=extracted.stats,
+        file_name=document["file_name"],
     )
-    # Chunking happens here (extract is in the VPC and owns the timeline), and
-    # the embed stage — which runs outside the VPC — is announced next.
-    await emit_event(
+    emit_event(
         document_id=document["id"],
         knowledge_base_id=document["knowledge_base_id"],
         user_id=document["user_id"],
@@ -137,8 +132,9 @@ async def extract_action(event: dict[str, Any]) -> dict[str, Any]:
             )
         ),
         details=extracted.chunk_stats,
+        file_name=document["file_name"],
     )
-    await emit_event(
+    emit_event(
         document_id=document["id"],
         knowledge_base_id=document["knowledge_base_id"],
         user_id=document["user_id"],
@@ -159,6 +155,7 @@ async def extract_action(event: dict[str, Any]) -> dict[str, Any]:
             "imageEmbeddings": extracted.image_count,
             "dimension": config.embedding_dim,
         },
+        file_name=document["file_name"],
     )
     logger.info(
         "extract succeeded",
@@ -180,12 +177,8 @@ async def extract_action(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def embed_action(event: dict[str, Any]) -> dict[str, Any]:
-    """Stage 2: compute embeddings. Runs outside the VPC (no RDS access).
-
-    The per-KB settings the extract stage loaded are carried in the event, so
-    this worker never needs to read the database.
-    """
+def embed_action(event: dict[str, Any]) -> dict[str, Any]:
+    """Stage 2: compute embeddings (S3 + Bedrock/Ollama only)."""
     config = config_from_dict(load_config(), event.get("config"))
     logger.info(
         "embed started",
@@ -200,6 +193,25 @@ async def embed_action(event: dict[str, Any]) -> dict[str, Any]:
         config,
         chunks_key=event["chunksKey"],
         images=event.get("images") or [],
+    )
+    total = embedded.chunk_count + embedded.image_count
+    emit_event(
+        document_id=event["documentId"],
+        knowledge_base_id=event["knowledgeBaseId"],
+        user_id=event["userId"],
+        stage="embedding",
+        status="succeeded",
+        message=(
+            f"{embedded.chunk_count} text"
+            + (f" · {embedded.image_count} image" if embedded.image_count else "")
+            + f" embedding{'s' if total != 1 else ''}"
+        ),
+        details={
+            "textEmbeddings": embedded.chunk_count,
+            "imageEmbeddings": embedded.image_count,
+            "dimension": embedded.dimension,
+            "model": embedded.text_model,
+        },
     )
     logger.info(
         "embed succeeded",
@@ -219,8 +231,8 @@ async def embed_action(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def index_action(event: dict[str, Any]) -> dict[str, Any]:
-    """Stage 3: persist the embed stage's vectors (in-VPC, RDS write)."""
+def index_action(event: dict[str, Any]) -> dict[str, Any]:
+    """Stage 3: persist vectors, parents, postings, catalog and manifest."""
     config = config_from_dict(load_config(), event.get("config"))
     logger.info(
         "index started",
@@ -230,7 +242,7 @@ async def index_action(event: dict[str, Any]) -> dict[str, Any]:
             "stage": "indexed",
         },
     )
-    indexed = await index_document(
+    indexed = index_document(
         _storage(),
         config,
         user_id=event["userId"],
@@ -240,7 +252,7 @@ async def index_action(event: dict[str, Any]) -> dict[str, Any]:
         embeddings_key=event["embeddingsKey"],
         images=event.get("images") or [],
     )
-    await set_document_status(
+    set_document_status(
         event["documentId"],
         "ready",
         chunk_count=indexed.chunk_count,
@@ -248,7 +260,7 @@ async def index_action(event: dict[str, Any]) -> dict[str, Any]:
         embed_model=config.text_embed_model,
         image_embed_model=config.image_embed_model if indexed.image_count else None,
     )
-    await emit_event(
+    emit_event(
         document_id=event["documentId"],
         knowledge_base_id=event["knowledgeBaseId"],
         user_id=event["userId"],
@@ -259,12 +271,12 @@ async def index_action(event: dict[str, Any]) -> dict[str, Any]:
             f"{indexed.image_count} image{'s' if indexed.image_count != 1 else ''} indexed"
         ),
         details={
-            "vectors": indexed.chunk_count + indexed.image_count,
+            "vectors": indexed.chunk_count,
             "chunks": indexed.chunk_count,
             "parents": indexed.parent_count,
             "images": indexed.image_count,
             "dimension": config.embedding_dim,
-            "tables": ["chunks", "document_parents", "document_images"],
+            "store": "s3",
         },
     )
     logger.info(
@@ -282,7 +294,7 @@ async def index_action(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def mark_failed_action(event: dict[str, Any]) -> dict[str, Any]:
+def mark_failed_action(event: dict[str, Any]) -> dict[str, Any]:
     """Failure handler: mark the document failed and record the failed stage."""
     failed_stage = event.get("stage") or "unknown"
     message = _error_message(event.get("error"))
@@ -294,8 +306,8 @@ async def mark_failed_action(event: dict[str, Any]) -> dict[str, Any]:
             "stage": failed_stage,
         },
     )
-    await set_document_status(event["documentId"], "failed")
-    await emit_event(
+    set_document_status(event["documentId"], "failed")
+    emit_event(
         document_id=event["documentId"],
         knowledge_base_id=event["knowledgeBaseId"],
         user_id=event["userId"],
@@ -307,14 +319,10 @@ async def mark_failed_action(event: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True}
 
 
-async def watchdog_action(event: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Scheduled safety net: fail documents stuck in ``processing``.
-
-    Catches executions that were aborted before ``mark_failed`` could run, so a
-    document can never stay silently stuck in the UI.
-    """
+def watchdog_action(event: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Scheduled safety net: fail documents stuck in ``processing``."""
     threshold = int(os.environ.get("STALL_THRESHOLD_MINUTES", "75"))
-    stalled = await find_stalled_documents(threshold)
+    stalled = find_stalled_documents(threshold)
     for document in stalled:
         logger.warning(
             "reaping stalled document",
@@ -324,8 +332,8 @@ async def watchdog_action(event: dict[str, Any] | None = None) -> dict[str, Any]
                 "stage": "failed",
             },
         )
-        await set_document_status(document["id"], "failed")
-        await emit_event(
+        set_document_status(document["id"], "failed")
+        emit_event(
             document_id=document["id"],
             knowledge_base_id=document["knowledge_base_id"],
             user_id=document["user_id"],
@@ -336,6 +344,7 @@ async def watchdog_action(event: dict[str, Any] | None = None) -> dict[str, Any]
                 f"({document['file_name']})"
             ),
             details={"failedStage": "stalled", "reason": "watchdog"},
+            file_name=document.get("file_name"),
         )
     logger.info(
         "watchdog scan complete",

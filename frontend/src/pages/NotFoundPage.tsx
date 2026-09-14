@@ -1,9 +1,7 @@
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import { ArrowLeft, Home } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
-import { Card } from '../components/ui/Card'
 
 type NotFoundPageProps = {
   title?: string
@@ -17,35 +15,28 @@ export function NotFoundPage({
   homeHref = '/dashboard',
 }: NotFoundPageProps) {
   return (
-    <main className="relative flex min-h-screen items-center justify-center app-mesh-bg px-6">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-        className="w-full max-w-lg"
-      >
-        <Card glow padding="lg" className="text-center">
-          <Badge variant="warning" className="mb-5">
-            Error 404
-          </Badge>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">{title}</h1>
-          <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-muted">
-            {description}
-          </p>
-          <div className="mt-8 flex flex-col gap-2 sm:flex-row sm:justify-center">
-            <Link to={homeHref} className="no-underline">
-              <Button icon={<Home className="h-4 w-4" />}>Go to Dashboard</Button>
-            </Link>
-            <Button
-              variant="outline"
-              icon={<ArrowLeft className="h-4 w-4" />}
-              onClick={() => window.history.back()}
-            >
-              Go Back
-            </Button>
-          </div>
-        </Card>
-      </motion.div>
+    <main className="flex min-h-screen items-center justify-center bg-canvas px-6">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-surface p-8 text-center">
+        <Badge variant="warning" className="mb-4">
+          Error 404
+        </Badge>
+        <h1 className="text-lg font-semibold tracking-tight text-foreground">{title}</h1>
+        <p className="mx-auto mt-2 max-w-xs text-[13px] leading-relaxed text-muted">
+          {description}
+        </p>
+        <div className="mt-6 flex flex-col justify-center gap-2 sm:flex-row">
+          <Link to={homeHref} className="no-underline">
+            <Button icon={<Home className="h-3.5 w-3.5" />}>Go to dashboard</Button>
+          </Link>
+          <Button
+            variant="outline"
+            icon={<ArrowLeft className="h-3.5 w-3.5" />}
+            onClick={() => window.history.back()}
+          >
+            Go back
+          </Button>
+        </div>
+      </div>
     </main>
   )
 }

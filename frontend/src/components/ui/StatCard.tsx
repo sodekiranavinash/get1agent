@@ -1,7 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import { TrendingDown, TrendingUp } from 'lucide-react'
-import { motion } from 'framer-motion'
-import { Card } from './Card'
+import { Sparkline } from './Sparkline'
 
 type StatCardProps = {
   label: string
@@ -10,7 +9,7 @@ type StatCardProps = {
   trend?: 'up' | 'down' | 'neutral'
   icon: LucideIcon
   iconColor?: string
-  delay?: number
+  spark?: number[]
 }
 
 export function StatCard({
@@ -20,47 +19,44 @@ export function StatCard({
   trend = 'neutral',
   icon: Icon,
   iconColor = 'text-accent',
-  delay = 0,
+  spark,
 }: StatCardProps) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay, ease: [0.25, 0.46, 0.45, 0.94] }}
-    >
-      <Card hover className="group relative overflow-hidden">
-        <div
-          className="pointer-events-none absolute -right-4 -top-4 h-24 w-24 rounded-full bg-accent-soft opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-100"
-          aria-hidden="true"
-        />
-        <div className="relative flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-muted">{label}</p>
-            <p className="mt-2 text-2xl font-bold tracking-tight text-foreground">
-              {value}
-            </p>
-            {change ? (
-              <div className="mt-2 flex items-center gap-1">
-                {trend === 'up' ? (
-                  <TrendingUp className="h-3.5 w-3.5 text-success" />
-                ) : trend === 'down' ? (
-                  <TrendingDown className="h-3.5 w-3.5 text-accent" />
-                ) : null}
-                <span
-                  className={`text-xs font-medium ${trend === 'up' ? 'text-success' : trend === 'down' ? 'text-accent' : 'text-muted'}`}
-                >
-                  {change}
-                </span>
-              </div>
-            ) : null}
-          </div>
-          <div
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft ${iconColor}`}
+    <div className="group relative overflow-hidden rounded-lg border border-border bg-surface p-3.5 transition-colors hover:border-border-strong">
+      <div className="flex items-center justify-between gap-2">
+        <p className="truncate text-xs font-medium text-muted">{label}</p>
+        <span
+          className={`flex size-7 shrink-0 items-center justify-center rounded-md bg-raised ${iconColor}`}
+        >
+          <Icon className="size-3.5" strokeWidth={1.75} />
+        </span>
+      </div>
+      <div className="mt-2 flex items-end justify-between gap-2">
+        <p className="text-xl font-semibold tracking-tight text-foreground">
+          {value}
+        </p>
+        {spark ? <Sparkline data={spark} className="text-accent/70" /> : null}
+      </div>
+      {change ? (
+        <div className="mt-1 flex items-center gap-1">
+          {trend === 'up' ? (
+            <TrendingUp className="size-3.5 text-success" />
+          ) : trend === 'down' ? (
+            <TrendingDown className="size-3.5 text-accent" />
+          ) : null}
+          <span
+            className={`truncate text-[11px] ${
+              trend === 'up'
+                ? 'text-success'
+                : trend === 'down'
+                  ? 'text-accent'
+                  : 'text-subtle'
+            }`}
           >
-            <Icon className="h-5 w-5" strokeWidth={1.75} />
-          </div>
+            {change}
+          </span>
         </div>
-      </Card>
-    </motion.div>
+      ) : null}
+    </div>
   )
 }

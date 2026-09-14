@@ -26,44 +26,27 @@ if [[ ! -s "$ROOT/backend/services/layers/ai/dist/layer.zip" ]]; then
   bash "$ROOT/infra/aws/build-backend-layers.sh" ai
 fi
 
-if [[ ! -s "$ROOT/backend/services/health-check/dist/function.zip" ]]; then
-  echo "Packaging backend health-check Lambda zip..."
-  make -C "$ROOT/backend/services/health-check" package
-fi
-
-if [[ ! -s "$ROOT/backend/services/account-settings/dist/function.zip" ]]; then
-  echo "Packaging backend account-settings Lambda zip..."
-  make -C "$ROOT/backend/services/account-settings" package
-fi
-
-if [[ ! -s "$ROOT/backend/services/knowledge-bases/dist/function.zip" ]]; then
-  echo "Packaging backend knowledge-bases Lambda zip..."
-  make -C "$ROOT/backend/services/knowledge-bases" package
-fi
-
-if [[ ! -s "$ROOT/backend/services/ingestion-dispatcher/dist/function.zip" ]]; then
-  echo "Packaging backend ingestion-dispatcher Lambda zip..."
-  make -C "$ROOT/backend/services/ingestion-dispatcher" package
-fi
-
-if [[ ! -s "$ROOT/backend/services/ingestion-extract/dist/function.zip" ]]; then
-  echo "Packaging backend ingestion-extract Lambda zip..."
-  make -C "$ROOT/backend/services/ingestion-extract" package
-fi
-
-if [[ ! -s "$ROOT/backend/services/ingestion-index/dist/function.zip" ]]; then
-  echo "Packaging backend ingestion-index Lambda zip..."
-  make -C "$ROOT/backend/services/ingestion-index" package
-fi
-
-if [[ ! -s "$ROOT/backend/services/ingestion-mark-failed/dist/function.zip" ]]; then
-  echo "Packaging backend ingestion-mark-failed Lambda zip..."
-  make -C "$ROOT/backend/services/ingestion-mark-failed" package
-fi
+for service in user-api knowledge-mcp ingestion-dispatcher ingestion-extract \
+  ingestion-embed ingestion-index ingestion-mark-failed ingestion-watchdog; do
+  if [[ ! -s "$ROOT/backend/services/$service/dist/function.zip" ]]; then
+    echo "Packaging backend $service Lambda zip..."
+    make -C "$ROOT/backend/services/$service" package
+  fi
+done
 
 if [[ ! -s "$ROOT/backend/services/admin/mcp-tester/dist/function.zip" ]]; then
   echo "Packaging backend mcp-tester Lambda zip..."
   make -C "$ROOT/backend/services/admin/mcp-tester" package
+fi
+
+if [[ ! -s "$ROOT/backend/tools/code-interpreter/dist/function.zip" ]]; then
+  echo "Packaging code-interpreter Lambda zip..."
+  make -C "$ROOT/backend/tools/code-interpreter" package
+fi
+
+if [[ ! -s "$ROOT/backend/tools/web-search/dist/function.zip" ]]; then
+  echo "Packaging web-search Lambda zip..."
+  make -C "$ROOT/backend/tools/web-search" package
 fi
 
 bash "$ROOT/infra/aws/run-terraform.sh" bootstrap "$MODE"
@@ -71,19 +54,14 @@ bash "$ROOT/infra/aws/run-terraform.sh" web "$MODE"
 bash "$ROOT/infra/aws/run-terraform.sh" prod "$MODE"
 
 if [[ "$MODE" == "apply" ]]; then
-  bash "$ROOT/infra/aws/bootstrap-db-iam-user.sh" || true
   cd "$ROOT/infra/terraform/envs/prod"
   terraform init -input=false >/dev/null
   echo ""
   echo "=== Infra deployed ==="
   echo "API URL:     $(terraform output -raw api_url 2>/dev/null || echo n/a)"
   echo "API CNAME:   $(terraform output -raw api_gateway_cname_target 2>/dev/null || echo n/a)"
-  echo "RDS host:    $(terraform output -raw postgres_endpoint 2>/dev/null || echo n/a)"
-  echo "DB access:   bash infra/aws/db-access.sh  (starts jumpbox only while in use)"
-  JUMPBOX_ID="$(terraform output -raw jumpbox_instance_id 2>/dev/null || true)"
-  if [[ -n "$JUMPBOX_ID" ]]; then
-    echo "Jumpbox ${JUMPBOX_ID} left running. Access: bash infra/aws/db-access.sh"
-  fi
+  echo "DynamoDB:    $(terraform output -raw dynamodb_table_name 2>/dev/null || echo n/a)"
+  echo "Vectors:     $(terraform output -raw vector_bucket_name 2>/dev/null || echo n/a)"
   echo ""
   echo "Auth0 API identifier: https://api.get1agent.com"
 fi

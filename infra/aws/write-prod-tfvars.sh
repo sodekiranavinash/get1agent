@@ -7,8 +7,6 @@ TFVARS="$ROOT/infra/terraform/envs/prod/terraform.tfvars"
 
 cat >"$TFVARS" <<'EOF'
 aws_region               = "ap-south-1"
-enable_network           = true
-enable_rds               = true
 enable_api_gateway       = true
 enable_backend_lambdas   = true
 enable_ingestion         = true

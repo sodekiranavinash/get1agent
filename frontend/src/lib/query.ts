@@ -98,12 +98,13 @@ export function getQueryData<T>(key: string): T | undefined {
 export function useQuery<T>(
   key: string,
   fetcher: () => Promise<T>,
-  options: { refetchOnMount?: boolean } = {},
+  options: { refetchOnMount?: boolean; enabled?: boolean } = {},
 ): QueryResult<T> {
   const entry = getEntry(key)
   const fetcherRef = useRef(fetcher)
   const [, forceRender] = useState(0)
   const refetchOnMount = options.refetchOnMount ?? false
+  const enabled = options.enabled ?? true
 
   useEffect(() => {
     fetcherRef.current = fetcher
@@ -123,6 +124,7 @@ export function useQuery<T>(
   }, [key])
 
   useEffect(() => {
+    if (!enabled) return
     // On remount with cached data, refresh so stale rows (e.g. after data was
     // removed elsewhere) don't linger.
     if (refetchOnMount && entry.data !== undefined) {
@@ -132,7 +134,7 @@ export function useQuery<T>(
     if (!entry.promise && entry.status !== 'success') {
       void load(key, () => fetcherRef.current()).catch(() => {})
     }
-  }, [entry, key, refetch, refetchOnMount])
+  }, [entry, key, refetch, refetchOnMount, enabled])
 
   return {
     data: entry.data as T | undefined,

@@ -1,15 +1,5 @@
-from shared.db.engine import (
-    create_engine_from_env,
-    create_engine_from_url,
-    get_session_factory,
-    run_async,
-)
-from shared.db.session import get_session
+"""Shared backend package (DynamoDB + S3 + search).
 
-__all__ = [
-    "create_engine_from_env",
-    "create_engine_from_url",
-    "get_session_factory",
-    "get_session",
-    "run_async",
-]
+Intentionally empty: importing ``shared`` must not pull in optional
+dependencies. Import the submodule you need explicitly.
+"""

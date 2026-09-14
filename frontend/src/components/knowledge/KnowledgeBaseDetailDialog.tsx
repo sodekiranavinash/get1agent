@@ -231,14 +231,14 @@ export function KnowledgeBaseDetailDialog({
       }
     >
       {error ? (
-        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning-soft/50 px-3.5 py-2.5">
+        <div className="mb-4 flex items-start gap-2.5 rounded-md border border-warning/30 bg-warning-soft/50 px-3.5 py-2.5">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           <p className="text-sm text-foreground">{error}</p>
         </div>
       ) : null}
 
       {detail ? (
-        <div className="mb-4 rounded-xl border border-border bg-raised/30 p-3">
+        <div className="mb-4 rounded-md border border-border bg-raised/30 p-3">
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-subtle">
             <Scissors className="h-3.5 w-3.5" />
             Chunking
@@ -279,7 +279,7 @@ export function KnowledgeBaseDetailDialog({
           {detail.documents.map((document) => (
             <li
               key={document.id}
-              className="rounded-xl border border-border bg-raised/40 p-3.5"
+              className="rounded-md border border-border bg-raised/40 p-3.5"
             >
               <div className="flex items-start gap-3">
                 <FileText className="mt-0.5 h-4 w-4 shrink-0 text-accent" />

@@ -13,7 +13,7 @@ _PARAGRAPH_SPLIT = re.compile(r"\n{2,}")
 
 
 def _max_chars(chunk_size: int) -> int:
-    return max(200, chunk_size * _CHARS_PER_TOKEN)
+    return max(200, int(chunk_size) * _CHARS_PER_TOKEN)
 
 
 def _normalize(text: str) -> str:
@@ -117,7 +117,7 @@ def _units(text: str, limit: int) -> list[_Unit]:
 def _chunk_spans(normalized: str, chunk_size: int, overlap: int) -> list[Chunk]:
     """Split normalized text into overlapping chunks, tracking source spans."""
     limit = _max_chars(chunk_size)
-    overlap_chars = max(0, overlap) * _CHARS_PER_TOKEN
+    overlap_chars = max(0, int(overlap)) * _CHARS_PER_TOKEN
     if not normalized:
         return []
 

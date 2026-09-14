@@ -78,11 +78,15 @@ class SessionStore:
 
     def _get_table(self) -> Any:
         if self._table is None:
+            import os
+
             import boto3
 
-            self._table = boto3.resource(
-                "dynamodb", region_name=self._region
-            ).Table(self._table_name)
+            kwargs: dict[str, Any] = {"region_name": self._region}
+            endpoint = os.environ.get("DYNAMODB_ENDPOINT_URL")
+            if endpoint:
+                kwargs["endpoint_url"] = endpoint
+            self._table = boto3.resource("dynamodb", **kwargs).Table(self._table_name)
         return self._table
 
     def get(self, pk: str, sk: str) -> dict[str, Any] | None:

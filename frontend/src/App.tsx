@@ -45,9 +45,27 @@ const UsagePage = lazy(() =>
 const InsightsPage = lazy(() =>
   import('./pages/InsightsPage').then((m) => ({ default: m.InsightsPage })),
 )
+const ExperimentsPage = lazy(() =>
+  import('./pages/ExperimentsPage').then((m) => ({
+    default: m.ExperimentsPage,
+  })),
+)
+const EvaluationsPage = lazy(() =>
+  import('./pages/EvaluationsPage').then((m) => ({
+    default: m.EvaluationsPage,
+  })),
+)
+const MetricsPage = lazy(() =>
+  import('./pages/MetricsPage').then((m) => ({ default: m.MetricsPage })),
+)
 const KnowledgeBasesPage = lazy(() =>
   import('./pages/KnowledgeBasesPage').then((m) => ({
     default: m.KnowledgeBasesPage,
+  })),
+)
+const AgentSkillsPage = lazy(() =>
+  import('./pages/AgentSkillsPage').then((m) => ({
+    default: m.AgentSkillsPage,
   })),
 )
 const ToolsPage = lazy(() =>
@@ -88,7 +106,11 @@ function App() {
             <Route path="/scheduled-jobs" element={<ScheduledJobsPage />} />
             <Route path="/usage" element={<UsagePage />} />
             <Route path="/insights" element={<InsightsPage />} />
+            <Route path="/experiments" element={<ExperimentsPage />} />
+            <Route path="/evaluations" element={<EvaluationsPage />} />
+            <Route path="/metrics" element={<MetricsPage />} />
             <Route path="/knowledge-bases" element={<KnowledgeBasesPage />} />
+            <Route path="/agent-skills" element={<AgentSkillsPage />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
@@ -99,6 +121,7 @@ function App() {
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<Navigate to="mcp-tools" replace />} />
             <Route path="mcp-tools" element={<AdminIntegrationsPage />} />
+            <Route path="mcp-tools/:server" element={<AdminIntegrationsPage />} />
             <Route
               path="integrations"
               element={<Navigate to="/admin/mcp-tools" replace />}

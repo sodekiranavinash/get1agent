@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import { motion } from 'framer-motion'
 import { Badge } from './Badge'
 import { Button } from './Button'
 
@@ -23,32 +22,30 @@ type PageHeaderProps = {
   }
 }
 
+/**
+ * Compact page toolbar: title (with optional badge) and description on the
+ * left, primary/secondary actions on the right. Kept dense so it reads like a
+ * tool header rather than a marketing hero.
+ */
 export function PageHeader({
   title,
   description,
   badge,
-  badgeVariant = 'accent',
+  badgeVariant = 'default',
   action,
   secondaryAction,
 }: PageHeaderProps) {
   return (
-    <motion.header
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] }}
-      className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"
-    >
+    <header className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
-        {badge ? (
-          <Badge variant={badgeVariant} className="mb-3">
-            {badge}
-          </Badge>
-        ) : null}
-        <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-          {title}
-        </h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-lg font-semibold tracking-tight text-foreground">
+            {title}
+          </h1>
+          {badge ? <Badge variant={badgeVariant}>{badge}</Badge> : null}
+        </div>
         {description ? (
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
+          <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted">
             {description}
           </p>
         ) : null}
@@ -76,6 +73,6 @@ export function PageHeader({
           ) : null}
         </div>
       ) : null}
-    </motion.header>
+    </header>
   )
 }

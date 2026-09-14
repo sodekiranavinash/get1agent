@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import { motion } from 'framer-motion'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
 import { Button } from './Button'
 import { Card } from './Card'
@@ -32,29 +31,24 @@ export function ErrorState({
   action,
 }: ErrorStateProps) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="mx-auto w-full max-w-lg"
-    >
-      <Card glow padding="lg" className="text-center">
+    <div className="mx-auto w-full max-w-md">
+      <Card padding="lg" className="text-center">
         <div className="mb-4 flex justify-center">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-warning-soft text-warning">
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-warning/25 bg-warning-soft text-warning">
             <AlertTriangle className="h-5 w-5" strokeWidth={1.75} />
           </span>
         </div>
-        <h2 className="text-lg font-semibold tracking-tight text-foreground">
+        <h2 className="text-sm font-semibold tracking-tight text-foreground">
           {title}
         </h2>
-        <p className="mt-2 text-sm leading-relaxed text-muted">
+        <p className="mt-1.5 text-[13px] leading-relaxed text-muted">
           {description ?? getErrorMessage(error)}
         </p>
         {onRetry || action ? (
-          <div className="mt-6 flex flex-col justify-center gap-2 sm:flex-row">
+          <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
             {onRetry ? (
               <Button
-                icon={<RefreshCw className="h-4 w-4" />}
+                icon={<RefreshCw className="h-3.5 w-3.5" />}
                 onClick={onRetry}
               >
                 {retryLabel}
@@ -64,6 +58,6 @@ export function ErrorState({
           </div>
         ) : null}
       </Card>
-    </motion.div>
+    </div>
   )
 }

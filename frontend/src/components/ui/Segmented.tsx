@@ -15,7 +15,7 @@ export function Segmented<T extends number | string>({
 }: SegmentedProps<T>) {
   return (
     <div
-      className={`flex gap-0.5 rounded-xl border border-border-strong bg-raised p-0.5 ${
+      className={`flex gap-0.5 rounded-md border border-border-strong bg-raised p-0.5 ${
         disabled ? 'opacity-60' : ''
       }`}
     >
@@ -27,13 +27,13 @@ export function Segmented<T extends number | string>({
             type="button"
             onClick={() => onChange?.(option)}
             disabled={disabled}
-            className={`flex-1 rounded-lg px-2 font-semibold tabular-nums transition-colors ${
+            className={`flex-1 rounded-[5px] px-2 font-medium tabular-nums transition-colors ${
               size === 'sm' ? 'py-1 text-[11px]' : 'py-1.5 text-xs'
             } ${
               active
                 ? disabled
-                  ? 'bg-elevated text-foreground shadow-control'
-                  : 'bg-accent text-white shadow-[0_0_12px_var(--app-accent-glow)]'
+                  ? 'bg-elevated text-foreground'
+                  : 'bg-accent text-white'
                 : 'text-muted'
             } ${disabled ? 'cursor-not-allowed' : 'hover:text-foreground'}`}
           >

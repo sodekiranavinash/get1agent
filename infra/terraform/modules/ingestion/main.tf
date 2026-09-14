@@ -51,6 +51,8 @@ resource "aws_cloudwatch_event_rule" "s3" {
     "detail-type" = ["Object Created"]
     detail = {
       bucket = { name = [var.bucket_name] }
+      # Only raw/ uploads trigger ingestion; derived/ and index/ writes do not.
+      object = { key = [{ prefix = "raw/" }] }
     }
   })
 

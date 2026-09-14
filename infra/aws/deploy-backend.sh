@@ -2,13 +2,13 @@
 # Package and optionally deploy backend/services/* Lambdas (Python handler zips + registry layers).
 #
 # Usage:
-#   bash infra/aws/deploy-backend.sh health-check          # package only
-#   bash infra/aws/deploy-backend.sh health-check deploy   # package + upload
+#   bash infra/aws/deploy-backend.sh user-api             # package only
+#   bash infra/aws/deploy-backend.sh user-api deploy      # package + upload
 #   bash infra/aws/deploy-backend.sh all deploy
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-QUERY="${1:-health-check}"
+QUERY="${1:-user-api}"
 MODE="${2:-package}"
 AWS_REGION="${AWS_REGION:-ap-south-1}"
 

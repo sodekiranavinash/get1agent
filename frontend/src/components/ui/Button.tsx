@@ -12,21 +12,21 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    'bg-accent text-white shadow-[0_0_20px_var(--app-accent-glow)] hover:bg-accent-hover hover:shadow-[0_0_28px_var(--app-accent-glow)] border border-accent/20',
+    'bg-accent text-white hover:bg-accent-hover border border-transparent',
   secondary:
-    'bg-raised text-foreground border border-border-strong hover:bg-elevated hover:border-accent/30',
+    'bg-raised text-foreground border border-border-strong hover:bg-elevated hover:border-border-strong',
   ghost:
-    'bg-transparent text-muted hover:bg-accent-soft hover:text-accent border border-transparent',
+    'bg-transparent text-muted border border-transparent hover:bg-raised hover:text-foreground',
   outline:
-    'bg-transparent text-foreground border border-border-strong hover:border-accent/40 hover:bg-accent-soft hover:text-accent',
+    'bg-transparent text-foreground border border-border-strong hover:bg-raised hover:border-accent/50 hover:text-accent',
   danger:
-    'bg-warning-soft text-warning border border-warning/40 hover:bg-warning/20 hover:border-warning/60',
+    'bg-transparent text-warning border border-warning/40 hover:bg-warning-soft hover:border-warning/60',
 }
 
 const sizeStyles: Record<ButtonSize, string> = {
-  sm: 'h-8 px-3 text-xs gap-1.5 rounded-lg',
-  md: 'h-10 px-4 text-sm gap-2 rounded-xl',
-  lg: 'h-12 px-6 text-sm gap-2.5 rounded-xl',
+  sm: 'h-7 px-2.5 text-xs gap-1.5 rounded-md',
+  md: 'h-8 px-3 text-[13px] gap-1.5 rounded-md',
+  lg: 'h-9 px-4 text-sm gap-2 rounded-md',
 }
 
 export function Button({
@@ -41,7 +41,7 @@ export function Button({
   return (
     <button
       type={type}
-      className={`inline-flex items-center justify-center font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 ${variantStyles[variant]} ${sizeStyles[size]} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-50 ${variantStyles[variant]} ${sizeStyles[size]} ${className}`}
       {...props}
     >
       {icon ? <span className="shrink-0">{icon}</span> : null}

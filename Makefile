@@ -2,15 +2,12 @@
 #
 # Everything runs locally on Floci — a free, LocalStack-compatible AWS emulator
 # (no AWS account, no auth token). Lambda, API Gateway, S3, SQS, EventBridge and
-# Step Functions run in Docker; Postgres + pgvector run alongside.
+# Step Functions run in Docker; DynamoDB Local stores operational data.
 #
-#   make floci        Build + start + provision + migrate; prints the API URL
+#   make floci        Build + start + provision; prints the API URL
 #   make ui           React app -> http://localhost:5173
 #   make floci-logs   Follow Floci logs
 #   make floci-down   Stop and remove the stack
-#
-# Migrations against the Floci Postgres:
-#   make floci-migrate
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
@@ -24,24 +21,23 @@ RERANKER_IMAGE ?= ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
 RERANKER_PORT ?= 8080
 export RERANKER_IMAGE RERANKER_PORT
 
-.PHONY: help ui floci floci-env floci-artifacts floci-build floci-up floci-wait \
-	floci-embed floci-rerank floci-reload floci-down floci-logs floci-migrate floci-migrate-down
+.PHONY: help ui test floci floci-env floci-artifacts floci-build floci-up floci-wait \
+	floci-embed floci-rerank floci-reload floci-down floci-logs
 
 help:
-	@echo "get1agent local dev (Floci)"
+	@echo "get1agent local dev (Floci + DynamoDB Local)"
 	@echo ""
-	@echo "  make floci            One command: build, start Floci + Postgres, provision"
-	@echo "                        S3/SQS/EventBridge/Step Functions/Lambda + API Gateway,"
-	@echo "                        migrate, and print the local API URL"
+	@echo "  make floci            One command: build, start Floci + DynamoDB Local,"
+	@echo "                        provision S3/SQS/EventBridge/Step Functions/Lambda"
+	@echo "                        + API Gateway, and print the local API URL"
 	@echo "  make ui               Start the React app (localhost:5173)"
+	@echo "  make test             Run backend integration tests (no Docker; moto)"
 	@echo ""
 	@echo "  Floci stack:"
-	@echo "    make floci          Build + up + provision + migrate"
+	@echo "    make floci          Build + up + provision"
 	@echo "    make floci-build    Build Lambda zips (after code changes)"
 	@echo "    make floci-reload   Rebuild + re-upload code to the running stack"
 	@echo "    make floci-up       Start the stack and provision resources"
-	@echo "    make floci-migrate  Apply DB migrations"
-	@echo "    make floci-migrate-down  Roll back one migration"
 	@echo "    make floci-logs     Follow the Floci logs"
 	@echo "    make floci-down     Stop and remove the stack"
 	@echo ""
@@ -49,6 +45,10 @@ help:
 
 ui:
 	cd frontend && npm run dev
+
+# Backend integration tests: moto-backed DynamoDB + in-memory S3. No Docker/AWS.
+test:
+	cd backend/tests && uv run pytest
 
 # --- Floci local stack -------------------------------------------------------
 
@@ -63,11 +63,7 @@ floci-build:
 	$(MAKE) -C backend/services/ingestion-index package
 	$(MAKE) -C backend/services/ingestion-mark-failed package
 	$(MAKE) -C backend/services/ingestion-watchdog package
-	$(MAKE) -C backend/services/knowledge-bases package
-	$(MAKE) -C backend/services/account-settings package
-	$(MAKE) -C backend/services/get-user-knowledge-bases package
-	$(MAKE) -C backend/services/retrieval-query package
-	$(MAKE) -C backend/services/search-user-knowledge-bases package
+	$(MAKE) -C backend/services/user-api package
 	$(MAKE) -C backend/services/knowledge-mcp package
 	$(MAKE) -C backend/services/admin/mcp-tester package
 	$(MAKE) -C backend/tools/code-interpreter package
@@ -84,11 +80,7 @@ floci-artifacts:
 		backend/services/ingestion-index/dist/function.zip \
 		backend/services/ingestion-mark-failed/dist/function.zip \
 		backend/services/ingestion-watchdog/dist/function.zip \
-		backend/services/knowledge-bases/dist/function.zip \
-		backend/services/account-settings/dist/function.zip \
-		backend/services/get-user-knowledge-bases/dist/function.zip \
-		backend/services/retrieval-query/dist/function.zip \
-		backend/services/search-user-knowledge-bases/dist/function.zip \
+		backend/services/user-api/dist/function.zip \
 		backend/services/knowledge-mcp/dist/function.zip \
 		backend/services/admin/mcp-tester/dist/function.zip \
 		backend/tools/code-interpreter/dist/function.zip \
@@ -109,7 +101,7 @@ floci-wait:
 	bash infra/local/floci/wait.sh
 
 # After changing Lambda code: rebuild the zips and re-upload them to the running
-# Floci instance (re-runs the init hook in place; keeps S3/SQS/DB state).
+# Floci instance (re-runs the init hook in place; keeps S3/DynamoDB state).
 floci-reload: floci-env
 	$(MAKE) floci-build
 	$(COMPOSE) exec -T floci python3 /etc/floci/init/ready.d/10-provision.py
@@ -132,20 +124,13 @@ floci-down: floci-env
 floci-logs: floci-env
 	$(COMPOSE) logs -f floci
 
-floci-migrate: floci-env
-	bash infra/local/floci/migrate.sh upgrade
-
-floci-migrate-down: floci-env
-	bash infra/local/floci/migrate.sh downgrade
-
-# One command: build (if needed), start, provision, migrate, print the API URL.
+# One command: build (if needed), start, provision, print the API URL.
 floci: floci-env
 	$(MAKE) floci-artifacts
 	$(MAKE) floci-up
 	$(MAKE) floci-wait
 	$(MAKE) floci-embed
 	$(MAKE) floci-rerank
-	$(MAKE) floci-migrate
 	@echo ""
 	@echo "Floci stack ready."
 	@echo "  API base URL: $(FLOCI_API_URL)"

@@ -37,23 +37,24 @@ export function Dialog({
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <RadixDialog.Portal>
-        <RadixDialog.Overlay className="dialog-overlay fixed inset-0 z-50 bg-black/65 backdrop-blur-sm" />
-        <RadixDialog.Content
-          className={`dialog-content fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border-strong bg-surface shadow-panel focus:outline-none ${sizeStyles[size]} ${contentClassName}`}
-        >
-          <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
+        <RadixDialog.Overlay className="dialog-overlay fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px]" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <RadixDialog.Content
+            className={`dialog-content relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-panel focus:outline-none ${sizeStyles[size]} ${contentClassName}`}
+          >
+          <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-3.5">
             <div className="min-w-0">
-              <RadixDialog.Title className="text-lg font-semibold tracking-tight text-foreground">
+              <RadixDialog.Title className="text-sm font-semibold tracking-tight text-foreground">
                 {title}
               </RadixDialog.Title>
               {description ? (
-                <RadixDialog.Description className="mt-1 text-sm leading-relaxed text-muted">
+                <RadixDialog.Description className="mt-0.5 text-xs leading-relaxed text-muted">
                   {description}
                 </RadixDialog.Description>
               ) : null}
             </div>
             <RadixDialog.Close
-              className="rounded-lg p-1.5 text-subtle transition-colors hover:bg-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+              className="-mr-1 rounded-md p-1.5 text-subtle transition-colors hover:bg-raised hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
               aria-label="Close dialog"
             >
               <X className="h-4 w-4" />
@@ -61,19 +62,20 @@ export function Dialog({
           </div>
 
           {banner ? (
-            <div className="border-b border-border px-6 py-3">{banner}</div>
+            <div className="border-b border-border px-5 py-3">{banner}</div>
           ) : null}
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 scrollbar-thin">
+          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {children}
           </div>
 
           {footer ? (
-            <div className="flex items-center justify-end gap-3 border-t border-border bg-raised/40 px-6 py-4">
+            <div className="flex items-center justify-end gap-2 border-t border-border bg-raised/40 px-5 py-3">
               {footer}
             </div>
           ) : null}
-        </RadixDialog.Content>
+          </RadixDialog.Content>
+        </div>
       </RadixDialog.Portal>
     </RadixDialog.Root>
   )

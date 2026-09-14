@@ -45,26 +45,32 @@ export function FileDropzone({
   return (
     <div
       {...getRootProps()}
-      className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed text-center transition-colors ${
-        compact ? 'px-4 py-6' : 'px-6 py-10'
+      className={`flex cursor-pointer items-center justify-center gap-3 rounded-lg border border-dashed text-center transition-colors ${
+        compact ? 'px-4 py-3' : 'flex-col px-6 py-8'
       } ${
         isDragActive
-          ? 'border-accent bg-accent-soft/40'
-          : 'border-border-strong bg-raised/20 hover:border-accent/40 hover:bg-raised/40'
+          ? 'border-accent bg-accent-soft'
+          : 'border-border-strong bg-raised/20 hover:border-accent/50 hover:bg-raised/40'
       } ${disabled || remaining <= 0 ? 'pointer-events-none opacity-60' : ''} ${className}`}
     >
       <input {...getInputProps()} />
-      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent">
-        <UploadCloud className="h-5 w-5" strokeWidth={1.5} />
+      <div
+        className={`flex shrink-0 items-center justify-center rounded-md border border-border bg-raised text-accent ${
+          compact ? 'h-8 w-8' : 'h-10 w-10'
+        }`}
+      >
+        <UploadCloud className={compact ? 'h-4 w-4' : 'h-5 w-5'} strokeWidth={1.5} />
       </div>
-      <p className="mt-3 text-sm font-medium text-foreground">
-        {isDragActive ? 'Drop files to add them' : 'Drag & drop files, or click to browse'}
-      </p>
-      <p className="mt-1 text-xs text-muted">
-        {remaining <= 0
-          ? `Limit of ${MAX_FILES_PER_KB} files reached`
-          : `PDF, DOCX, TXT, MD, CSV, XLSX · up to ${formatBytes(MAX_FILE_BYTES)} each · ${remaining} slot${remaining === 1 ? '' : 's'} left`}
-      </p>
+      <div className={compact ? 'text-left' : ''}>
+        <p className="text-[13px] font-medium text-foreground">
+          {isDragActive ? 'Drop files to add them' : 'Drag & drop files, or click to browse'}
+        </p>
+        <p className="mt-0.5 text-xs text-muted">
+          {remaining <= 0
+            ? `Limit of ${MAX_FILES_PER_KB} files reached`
+            : `PDF, DOCX, TXT, MD, CSV, XLSX · up to ${formatBytes(MAX_FILE_BYTES)} each · ${remaining} slot${remaining === 1 ? '' : 's'} left`}
+        </p>
+      </div>
     </div>
   )
 }

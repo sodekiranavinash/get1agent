@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Targeted prod apply. Set any of these to "true" to include that component:
-#   APPLY_NETWORK APPLY_RDS APPLY_API_GATEWAY APPLY_BACKEND_LAMBDAS
+#   APPLY_API_GATEWAY APPLY_BACKEND_LAMBDAS
 # If none are set, runs a full prod apply.
 set -euo pipefail
 
@@ -9,23 +9,14 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 bash "$ROOT/infra/aws/write-prod-tfvars.sh"
 
 TARGETS=()
-[[ "${APPLY_NETWORK:-false}" == "true" ]] && TARGETS+=(-target=module.network)
-[[ "${APPLY_RDS:-false}" == "true" ]] && {
-  TARGETS+=(-target=module.rds)
-  TARGETS+=(-target=module.network)
-}
 [[ "${APPLY_API_GATEWAY:-false}" == "true" ]] && TARGETS+=(-target=module.api_gateway)
-# health-check only needs existing VPC/RDS in state — do not -target module.network (pulls jumpbox).
 [[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && {
   TARGETS+=(-target='module.layer_data[0]')
   TARGETS+=(-target='module.layer_ai[0]')
-  TARGETS+=(-target='module.health_check[0]')
-  TARGETS+=(-target='module.account_settings[0]')
+  TARGETS+=(-target='module.database[0]')
+  TARGETS+=(-target='module.vectors[0]')
   TARGETS+=(-target='module.knowledge_storage[0]')
-  TARGETS+=(-target='module.knowledge_bases[0]')
-  TARGETS+=(-target='module.get_user_knowledge_bases[0]')
-  TARGETS+=(-target='module.retrieval_query[0]')
-  TARGETS+=(-target='module.search_user_knowledge_bases[0]')
+  TARGETS+=(-target='module.user_api[0]')
   TARGETS+=(-target='module.knowledge_mcp[0]')
   TARGETS+=(-target='module.ingestion_extract[0]')
   TARGETS+=(-target='module.ingestion_embed[0]')
@@ -35,7 +26,6 @@ TARGETS=()
   TARGETS+=(-target='module.ingestion[0]')
   TARGETS+=(-target='module.ingestion_dispatcher[0]')
   TARGETS+=(-target='module.mcp_tester[0]')
-  TARGETS+=(-target='aws_dynamodb_table.code_interpreter_sessions[0]')
   TARGETS+=(-target='module.code_interpreter[0]')
   TARGETS+=(-target='module.web_search[0]')
 }
@@ -54,45 +44,12 @@ if [[ "$need_backend_artifacts" == true ]]; then
   if [[ ! -s "$ROOT/backend/services/layers/ai/dist/layer.zip" ]]; then
     bash "$ROOT/infra/aws/build-backend-layers.sh" ai
   fi
-  if [[ ! -s "$ROOT/backend/services/health-check/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/health-check" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/account-settings/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/account-settings" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/knowledge-bases/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/knowledge-bases" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/get-user-knowledge-bases/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/get-user-knowledge-bases" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/retrieval-query/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/retrieval-query" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/search-user-knowledge-bases/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/search-user-knowledge-bases" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/knowledge-mcp/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/knowledge-mcp" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/ingestion-dispatcher/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/ingestion-dispatcher" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/ingestion-extract/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/ingestion-extract" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/ingestion-embed/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/ingestion-embed" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/ingestion-index/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/ingestion-index" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/ingestion-mark-failed/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/ingestion-mark-failed" package
-  fi
-  if [[ ! -s "$ROOT/backend/services/ingestion-watchdog/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/ingestion-watchdog" package
-  fi
+  for service in user-api knowledge-mcp ingestion-dispatcher ingestion-extract \
+    ingestion-embed ingestion-index ingestion-mark-failed ingestion-watchdog; do
+    if [[ ! -s "$ROOT/backend/services/$service/dist/function.zip" ]]; then
+      make -C "$ROOT/backend/services/$service" package
+    fi
+  done
   if [[ ! -s "$ROOT/backend/services/admin/mcp-tester/dist/function.zip" ]]; then
     make -C "$ROOT/backend/services/admin/mcp-tester" package
   fi
@@ -106,16 +63,3 @@ fi
 
 export PROD_TARGETS="${TARGETS[*]}"
 bash "$ROOT/infra/aws/run-terraform.sh" prod apply
-
-if [[ "${APPLY_RDS:-false}" == "true" || ${#TARGETS[@]} -eq 0 ]]; then
-  bash "$ROOT/infra/aws/bootstrap-db-iam-user.sh"
-fi
-
-if [[ "${APPLY_NETWORK:-false}" == "true" || ${#TARGETS[@]} -eq 0 ]]; then
-  cd "$ROOT/infra/terraform/envs/prod"
-  terraform init -input=false >/dev/null
-  JUMPBOX_ID="$(terraform output -raw jumpbox_instance_id 2>/dev/null || true)"
-  if [[ -n "$JUMPBOX_ID" ]]; then
-    echo "Jumpbox ${JUMPBOX_ID} left running. Access: bash infra/aws/db-access.sh"
-  fi
-fi

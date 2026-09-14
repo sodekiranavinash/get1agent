@@ -50,12 +50,12 @@ export type McpCallResponse = {
 
 export const MCP_TOOLS_QUERY_KEY = 'admin-mcp-tools'
 
-export function useMcpTools() {
+export function useMcpTools(options?: { enabled?: boolean }) {
   const api = useApiClient()
   return usePageQuery(
     MCP_TOOLS_QUERY_KEY,
     () => api.get<McpToolsResponse>('/v1/admin/mcp/tools'),
-    { refetchOnMount: true },
+    { refetchOnMount: true, enabled: options?.enabled ?? true },
   )
 }
 

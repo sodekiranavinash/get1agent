@@ -7,8 +7,8 @@ type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 }
 
 const sizeStyles = {
-  sm: 'h-8 w-8 rounded-lg',
-  md: 'h-9 w-9 rounded-xl',
+  sm: 'h-7 w-7 rounded-md',
+  md: 'h-8 w-8 rounded-md',
 }
 
 export function IconButton({
@@ -22,10 +22,10 @@ export function IconButton({
   return (
     <button
       type={type}
-      className={`inline-flex shrink-0 items-center justify-center border text-muted shadow-control transition-all duration-200 hover:border-accent/30 hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas active:scale-95 ${
+      className={`inline-flex shrink-0 items-center justify-center border transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 ${
         active
-          ? 'border-accent/40 bg-accent-soft text-accent'
-          : 'border-border bg-raised'
+          ? 'border-accent/30 bg-accent-soft text-accent'
+          : 'border-border bg-transparent text-muted hover:bg-raised hover:text-foreground'
       } ${sizeStyles[size]} ${className}`}
       {...props}
     >

@@ -11,22 +11,71 @@ import {
   Zap,
 } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
-import { Button } from '../components/ui/Button'
-import { Card, CardDescription, CardHeader, CardTitle } from '../components/ui/Card'
+import { Card } from '../components/ui/Card'
+import { MiniBars } from '../components/ui/MiniBars'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
 import { StatCard } from '../components/ui/StatCard'
+import { fadeUp, stagger } from '../lib/motion'
 
-const recentAgents = [
+const kpis = [
+  {
+    label: 'Active agents',
+    value: '12',
+    change: '+3 this week',
+    trend: 'up' as const,
+    icon: Bot,
+    spark: [4, 5, 5, 7, 8, 10, 12],
+  },
+  {
+    label: 'Workflows',
+    value: '8',
+    change: '2 running now',
+    trend: 'neutral' as const,
+    icon: Workflow,
+    iconColor: 'text-info',
+    spark: [3, 4, 4, 5, 6, 7, 8],
+  },
+  {
+    label: 'Tokens used',
+    value: '1.2M',
+    change: '+18% vs last week',
+    trend: 'up' as const,
+    icon: Zap,
+    iconColor: 'text-warning',
+    spark: [40, 52, 48, 66, 60, 78, 92],
+  },
+  {
+    label: 'AI credits',
+    value: '$47.20',
+    change: '$12.80 remaining',
+    trend: 'down' as const,
+    icon: Coins,
+    iconColor: 'text-success',
+    spark: [70, 66, 60, 58, 50, 44, 40],
+  },
+]
+
+const agents = [
   { name: 'Research Assistant', model: 'Claude Sonnet', status: 'active' },
   { name: 'Code Reviewer', model: 'GPT-4o', status: 'active' },
   { name: 'Data Analyst', model: 'Gemini Pro', status: 'draft' },
 ]
 
-const recentWorkflows = [
-  { name: 'Daily Report Pipeline', runs: 12, status: 'running' },
-  { name: 'Customer Support Flow', runs: 48, status: 'idle' },
-  { name: 'Content Generator', runs: 7, status: 'scheduled' },
+const quickActions = [
+  { label: 'New workflow', to: '/workflow-builder', icon: Workflow },
+  { label: 'Open chat', to: '/chat', icon: Sparkles },
+  { label: 'New schedule', to: '/scheduled-jobs', icon: CalendarClock },
+]
+
+const runs = [
+  { label: 'Mon', value: 12 },
+  { label: 'Tue', value: 18 },
+  { label: 'Wed', value: 15 },
+  { label: 'Thu', value: 22 },
+  { label: 'Fri', value: 19 },
+  { label: 'Sat', value: 24 },
+  { label: 'Sun', value: 21 },
 ]
 
 const activity = [
@@ -36,12 +85,28 @@ const activity = [
   { action: 'Credits topped up', detail: '$25.00 added', time: 'Yesterday' },
 ]
 
-const quickActions = [
-  { label: 'New Agent', to: '/agent-builder', icon: Bot },
-  { label: 'New Workflow', to: '/workflow-builder', icon: Workflow },
-  { label: 'Open Chat', to: '/chat', icon: Sparkles },
-  { label: 'New Schedule', to: '/scheduled-jobs', icon: CalendarClock },
-]
+function PanelHeader({
+  title,
+  action,
+}: {
+  title: string
+  action?: { label: string; to: string }
+}) {
+  return (
+    <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+      <h2 className="text-[13px] font-semibold text-foreground">{title}</h2>
+      {action ? (
+        <Link
+          to={action.to}
+          className="inline-flex items-center gap-1 text-xs font-medium text-muted no-underline transition-colors hover:text-accent"
+        >
+          {action.label}
+          <ArrowRight className="size-3" />
+        </Link>
+      ) : null}
+    </div>
+  )
+}
 
 export function DashboardPage() {
   return (
@@ -49,222 +114,124 @@ export function DashboardPage() {
       <PageHeader
         title="Dashboard"
         description="Overview of your agents, workflows, usage, and recent activity."
-        badge="Workspace"
-        action={{ label: 'Create Agent', icon: <Plus className="h-4 w-4" /> }}
+        action={{ label: 'Create agent', icon: <Plus className="size-3.5" /> }}
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Active Agents"
-          value="12"
-          change="+3 this week"
-          trend="up"
-          icon={Bot}
-          delay={0}
-        />
-        <StatCard
-          label="Workflows"
-          value="8"
-          change="2 running now"
-          trend="neutral"
-          icon={Workflow}
-          iconColor="text-info"
-          delay={0.05}
-        />
-        <StatCard
-          label="Tokens Used"
-          value="1.2M"
-          change="+18% vs last week"
-          trend="up"
-          icon={Zap}
-          iconColor="text-warning"
-          delay={0.1}
-        />
-        <StatCard
-          label="AI Credits"
-          value="$47.20"
-          change="$12.80 remaining"
-          trend="down"
-          icon={Coins}
-          iconColor="text-success"
-          delay={0.15}
-        />
-      </div>
-
-      <div className="mt-8 grid gap-6 lg:grid-cols-3">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="lg:col-span-2"
-        >
-          <Card padding="lg">
-            <CardHeader>
-              <div>
-                <CardTitle>Recent Agents</CardTitle>
-                <CardDescription>Your latest configured agents</CardDescription>
+      <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-3">
+        <motion.div variants={fadeUp}>
+          <div className="relative overflow-hidden rounded-lg border border-border bg-surface p-5">
+            <div
+              className="pointer-events-none absolute -top-24 -right-16 size-64 rounded-full bg-accent/10 blur-3xl"
+              aria-hidden="true"
+            />
+            <div className="relative">
+              <div className="flex items-center gap-2">
+                <Sparkles className="size-4 text-accent" />
+                <span className="text-xs font-medium text-accent">
+                  Workspace overview
+                </span>
               </div>
-              <Link
-                to="/agent-builder"
-                className="text-xs font-semibold text-accent no-underline hover:text-accent-hover"
-              >
-                View all
-              </Link>
-            </CardHeader>
-
-            <div className="space-y-2">
-              {recentAgents.map((agent, index) => (
-                <motion.div
-                  key={agent.name}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.25 + index * 0.05 }}
-                  className="flex items-center justify-between rounded-xl border border-border bg-raised/50 px-4 py-3 transition-colors hover:border-accent/20 hover:bg-raised"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent-soft text-accent">
-                      <Bot className="h-4 w-4" strokeWidth={1.75} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{agent.name}</p>
-                      <p className="text-xs text-muted">{agent.model}</p>
-                    </div>
-                  </div>
-                  <Badge
-                    variant={agent.status === 'active' ? 'success' : 'default'}
-                    dot={agent.status === 'active'}
-                  >
-                    {agent.status}
-                  </Badge>
-                </motion.div>
-              ))}
+              <h2 className="mt-2 text-base font-semibold tracking-tight text-foreground">
+                Everything is running smoothly
+              </h2>
+              <p className="mt-1 max-w-xl text-[13px] text-muted">
+                12 agents active, 2 workflows executing now, and no failed runs
+                in the last 24 hours.
+              </p>
             </div>
-          </Card>
+          </div>
         </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-        >
-          <Card padding="lg" className="h-full">
-            <CardHeader>
-              <div>
-                <CardTitle>Quick Actions</CardTitle>
-                <CardDescription>Jump into your workflow</CardDescription>
-              </div>
-            </CardHeader>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {kpis.map((kpi) => (
+            <motion.div key={kpi.label} variants={fadeUp}>
+              <StatCard {...kpi} />
+            </motion.div>
+          ))}
+        </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              {quickActions.map(({ label, to, icon: Icon }) => (
+        <div className="grid gap-3 lg:grid-cols-3">
+          <motion.div variants={fadeUp} className="lg:col-span-2">
+            <div className="grid h-full gap-3 sm:grid-cols-3">
+              {agents.map((agent) => (
                 <Link
-                  key={to}
-                  to={to}
-                  className="group flex flex-col items-center gap-2 rounded-xl border border-border bg-raised/50 p-4 text-center no-underline transition-all hover:border-accent/30 hover:bg-accent-soft"
+                  key={agent.name}
+                  to="/agent-store"
+                  className="group flex flex-col rounded-lg border border-border bg-surface p-4 no-underline transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/30"
                 >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface text-accent transition-transform group-hover:scale-110">
-                    <Icon className="h-5 w-5" strokeWidth={1.75} />
+                  <div className="flex items-start justify-between">
+                    <span className="flex size-9 items-center justify-center rounded-md border border-border bg-raised text-accent">
+                      <Bot className="size-4" strokeWidth={1.75} />
+                    </span>
+                    <Badge
+                      variant={agent.status === 'active' ? 'success' : 'default'}
+                      dot={agent.status === 'active'}
+                    >
+                      {agent.status}
+                    </Badge>
                   </div>
-                  <span className="text-xs font-semibold text-foreground">{label}</span>
+                  <p className="mt-3 truncate text-[13px] font-semibold text-foreground">
+                    {agent.name}
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-muted">{agent.model}</p>
                 </Link>
               ))}
             </div>
-          </Card>
-        </motion.div>
-      </div>
+          </motion.div>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-        >
-          <Card padding="lg">
-            <CardHeader>
-              <div>
-                <CardTitle>Recent Workflows</CardTitle>
-                <CardDescription>Execution status at a glance</CardDescription>
-              </div>
-              <Link
-                to="/workflow-builder"
-                className="text-xs font-semibold text-accent no-underline hover:text-accent-hover"
-              >
-                View all
-              </Link>
-            </CardHeader>
-
-            <div className="space-y-2">
-              {recentWorkflows.map((workflow) => (
-                <div
-                  key={workflow.name}
-                  className="flex items-center justify-between rounded-xl border border-border px-4 py-3 transition-colors hover:border-accent/20"
-                >
-                  <div className="flex items-center gap-3">
-                    <Workflow className="h-4 w-4 text-info" strokeWidth={1.75} />
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{workflow.name}</p>
-                      <p className="text-xs text-muted">{workflow.runs} runs</p>
-                    </div>
-                  </div>
-                  <Badge
-                    variant={
-                      workflow.status === 'running'
-                        ? 'success'
-                        : workflow.status === 'scheduled'
-                          ? 'warning'
-                          : 'default'
-                    }
-                    dot={workflow.status === 'running'}
+          <motion.div variants={fadeUp}>
+            <Card padding="none" className="h-full overflow-hidden">
+              <PanelHeader title="Quick actions" />
+              <div className="divide-y divide-border">
+                {quickActions.map(({ label, to, icon: Icon }) => (
+                  <Link
+                    key={to}
+                    to={to}
+                    className="flex items-center gap-3 px-4 py-2.5 text-[13px] font-medium text-foreground no-underline transition-colors hover:bg-raised/40"
                   >
-                    {workflow.status}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35 }}
-        >
-          <Card padding="lg">
-            <CardHeader>
-              <div>
-                <CardTitle>Activity Feed</CardTitle>
-                <CardDescription>Latest events across your workspace</CardDescription>
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-raised text-muted">
+                      <Icon className="size-3.5" strokeWidth={1.75} />
+                    </span>
+                    {label}
+                    <ArrowRight className="ml-auto size-3.5 text-subtle" />
+                  </Link>
+                ))}
               </div>
-            </CardHeader>
+            </Card>
+          </motion.div>
+        </div>
 
-            <div className="relative space-y-0">
-              {activity.map((item, index) => (
-                <div
-                  key={`${item.action}-${index}`}
-                  className="relative flex gap-3 pb-4 last:pb-0"
-                >
-                  {index < activity.length - 1 ? (
-                    <span
-                      className="absolute top-6 left-[7px] h-[calc(100%-12px)] w-px bg-border"
-                      aria-hidden="true"
-                    />
-                  ) : null}
-                  <span className="relative z-10 mt-1.5 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-accent bg-surface" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground">{item.action}</p>
-                    <p className="text-xs text-muted">{item.detail}</p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <motion.div variants={fadeUp}>
+            <Card padding="none" className="h-full overflow-hidden">
+              <PanelHeader title="Workflow runs · last 7 days" />
+              <div className="p-4">
+                <MiniBars data={runs} max={24} tone="bg-gradient-to-t from-info/50 to-info" />
+              </div>
+            </Card>
+          </motion.div>
+
+          <motion.div variants={fadeUp}>
+            <Card padding="none" className="h-full overflow-hidden">
+              <PanelHeader title="Activity" />
+              <div className="divide-y divide-border">
+                {activity.map((item, index) => (
+                  <div key={`${item.action}-${index}`} className="flex items-center gap-3 px-4 py-2.5">
+                    <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-medium text-foreground">
+                        {item.action}
+                      </p>
+                      <p className="truncate text-xs text-muted">{item.detail}</p>
+                    </div>
+                    <span className="shrink-0 text-[11px] text-subtle">{item.time}</span>
                   </div>
-                  <span className="shrink-0 text-[11px] text-subtle">{item.time}</span>
-                </div>
-              ))}
-            </div>
-
-            <Button variant="ghost" size="sm" className="mt-4 w-full" icon={<ArrowRight className="h-3.5 w-3.5" />}>
-              View full activity
-            </Button>
-          </Card>
-        </motion.div>
-      </div>
+                ))}
+              </div>
+            </Card>
+          </motion.div>
+        </div>
+      </motion.div>
     </PageShell>
   )
 }

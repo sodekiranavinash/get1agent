@@ -2,22 +2,17 @@ locals {
   backend_python_runtime   = "python3.14"
   layer_data_zip           = abspath("${path.module}/../../../../backend/services/layers/data/dist/layer.zip")
   layer_ai_zip             = abspath("${path.module}/../../../../backend/services/layers/ai/dist/layer.zip")
-  health_check_zip         = abspath("${path.module}/../../../../backend/services/health-check/dist/function.zip")
-  account_settings_zip     = abspath("${path.module}/../../../../backend/services/account-settings/dist/function.zip")
-  knowledge_bases_zip      = abspath("${path.module}/../../../../backend/services/knowledge-bases/dist/function.zip")
+  user_api_zip             = abspath("${path.module}/../../../../backend/services/user-api/dist/function.zip")
+  knowledge_mcp_zip        = abspath("${path.module}/../../../../backend/services/knowledge-mcp/dist/function.zip")
+  mcp_tester_zip           = abspath("${path.module}/../../../../backend/services/admin/mcp-tester/dist/function.zip")
+  code_interpreter_zip     = abspath("${path.module}/../../../../backend/tools/code-interpreter/dist/function.zip")
+  web_search_zip           = abspath("${path.module}/../../../../backend/tools/web-search/dist/function.zip")
   ingestion_dispatcher_zip = abspath("${path.module}/../../../../backend/services/ingestion-dispatcher/dist/function.zip")
   ingestion_extract_zip    = abspath("${path.module}/../../../../backend/services/ingestion-extract/dist/function.zip")
   ingestion_embed_zip      = abspath("${path.module}/../../../../backend/services/ingestion-embed/dist/function.zip")
   ingestion_index_zip      = abspath("${path.module}/../../../../backend/services/ingestion-index/dist/function.zip")
   ingestion_fail_zip       = abspath("${path.module}/../../../../backend/services/ingestion-mark-failed/dist/function.zip")
   ingestion_watchdog_zip   = abspath("${path.module}/../../../../backend/services/ingestion-watchdog/dist/function.zip")
-  get_user_kb_zip          = abspath("${path.module}/../../../../backend/services/get-user-knowledge-bases/dist/function.zip")
-  retrieval_query_zip      = abspath("${path.module}/../../../../backend/services/retrieval-query/dist/function.zip")
-  search_user_kb_zip       = abspath("${path.module}/../../../../backend/services/search-user-knowledge-bases/dist/function.zip")
-  knowledge_mcp_zip        = abspath("${path.module}/../../../../backend/services/knowledge-mcp/dist/function.zip")
-  mcp_tester_zip           = abspath("${path.module}/../../../../backend/services/admin/mcp-tester/dist/function.zip")
-  code_interpreter_zip     = abspath("${path.module}/../../../../backend/tools/code-interpreter/dist/function.zip")
-  web_search_zip           = abspath("${path.module}/../../../../backend/tools/web-search/dist/function.zip")
 }
 
 check "layer_data_zip_exists" {
@@ -34,24 +29,38 @@ check "layer_ai_zip_exists" {
   }
 }
 
-check "health_check_zip_exists" {
+check "user_api_zip_exists" {
   assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.health_check_zip)
-    error_message = "Backend health-check zip not found at ${local.health_check_zip}. Run: make -C backend/services/health-check package"
+    condition     = !var.enable_backend_lambdas || fileexists(local.user_api_zip)
+    error_message = "user-api zip not found at ${local.user_api_zip}. Run: make -C backend/services/user-api package"
   }
 }
 
-check "account_settings_zip_exists" {
+check "knowledge_mcp_zip_exists" {
   assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.account_settings_zip)
-    error_message = "Account settings zip not found at ${local.account_settings_zip}. Run: make -C backend/services/account-settings package"
+    condition     = !var.enable_backend_lambdas || fileexists(local.knowledge_mcp_zip)
+    error_message = "knowledge-mcp zip not found at ${local.knowledge_mcp_zip}. Run: make -C backend/services/knowledge-mcp package"
   }
 }
 
-check "knowledge_bases_zip_exists" {
+check "mcp_tester_zip_exists" {
   assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.knowledge_bases_zip)
-    error_message = "Knowledge bases zip not found at ${local.knowledge_bases_zip}. Run: make -C backend/services/knowledge-bases package"
+    condition     = !var.enable_backend_lambdas || fileexists(local.mcp_tester_zip)
+    error_message = "mcp-tester zip not found at ${local.mcp_tester_zip}. Run: make -C backend/services/admin/mcp-tester package"
+  }
+}
+
+check "code_interpreter_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.code_interpreter_zip)
+    error_message = "code-interpreter zip not found at ${local.code_interpreter_zip}. Run: make -C backend/tools/code-interpreter package"
+  }
+}
+
+check "web_search_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.web_search_zip)
+    error_message = "web-search zip not found at ${local.web_search_zip}. Run: make -C backend/tools/web-search package"
   }
 }
 
@@ -97,62 +106,6 @@ check "ingestion_watchdog_zip_exists" {
   }
 }
 
-check "get_user_kb_zip_exists" {
-  assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.get_user_kb_zip)
-    error_message = "get-user-knowledge-bases zip not found at ${local.get_user_kb_zip}. Run: make -C backend/services/get-user-knowledge-bases package"
-  }
-}
-
-check "retrieval_query_zip_exists" {
-  assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.retrieval_query_zip)
-    error_message = "retrieval-query zip not found at ${local.retrieval_query_zip}. Run: make -C backend/services/retrieval-query package"
-  }
-}
-
-check "search_user_kb_zip_exists" {
-  assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.search_user_kb_zip)
-    error_message = "search-user-knowledge-bases zip not found at ${local.search_user_kb_zip}. Run: make -C backend/services/search-user-knowledge-bases package"
-  }
-}
-
-check "knowledge_mcp_zip_exists" {
-  assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.knowledge_mcp_zip)
-    error_message = "knowledge-mcp zip not found at ${local.knowledge_mcp_zip}. Run: make -C backend/services/knowledge-mcp package"
-  }
-}
-
-check "mcp_tester_zip_exists" {
-  assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.mcp_tester_zip)
-    error_message = "mcp-tester zip not found at ${local.mcp_tester_zip}. Run: make -C backend/services/admin/mcp-tester package"
-  }
-}
-
-check "code_interpreter_zip_exists" {
-  assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.code_interpreter_zip)
-    error_message = "code-interpreter zip not found at ${local.code_interpreter_zip}. Run: make -C backend/tools/code-interpreter package"
-  }
-}
-
-check "web_search_zip_exists" {
-  assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.web_search_zip)
-    error_message = "web-search zip not found at ${local.web_search_zip}. Run: make -C backend/tools/web-search package"
-  }
-}
-
-check "backend_lambdas_need_network_and_rds" {
-  assert {
-    condition     = !var.enable_backend_lambdas || (var.enable_network && var.enable_rds)
-    error_message = "Backend Lambdas require Network and RDS to be enabled."
-  }
-}
-
 module "layer_data" {
   count  = var.enable_backend_lambdas ? 1 : 0
   source = "../../modules/lambda_layer"
@@ -161,7 +114,7 @@ module "layer_data" {
   filename            = local.layer_data_zip
   source_code_hash    = filebase64sha256(local.layer_data_zip)
   compatible_runtimes = [local.backend_python_runtime]
-  description         = "SQLAlchemy async + asyncpg + alembic + shared/db + models"
+  description         = "Shared layer: DynamoDB + S3 search/ingestion code"
 }
 
 module "layer_ai" {
@@ -175,76 +128,28 @@ module "layer_ai" {
   description         = "AI/MCP shared helpers: admin/user role checks + MCP JSON-RPC client"
 }
 
-module "health_check" {
+module "database" {
   count  = var.enable_backend_lambdas ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/dynamodb"
 
-  name             = "get1agent-prod-health-check"
-  filename         = local.health_check_zip
-  source_code_hash = filebase64sha256(local.health_check_zip)
-  handler          = "handler.lambda_handler"
-  runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn]
-
-  memory_size = 256
-  timeout     = 15
-
-  vpc_id                     = module.network[0].vpc_id
-  subnet_ids                 = module.network[0].private_subnet_ids
-  postgres_security_group_id = module.network[0].postgres_security_group_id
-  aws_region                 = var.aws_region
-  rds_resource_id            = module.rds[0].postgres_resource_id
-  db_iam_username            = module.rds[0].db_iam_username
-
-  environment = {
-    DB_HOST     = module.rds[0].postgres_endpoint
-    DB_PORT     = tostring(module.rds[0].postgres_port)
-    DB_NAME     = module.rds[0].postgres_db_name
-    DB_IAM_USER = module.rds[0].db_iam_username
-  }
-
-  depends_on = [module.layer_data]
+  table_name = var.dynamodb_table_name
 }
 
-
-module "account_settings" {
+module "vectors" {
   count  = var.enable_backend_lambdas ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/s3_vectors"
 
-  name             = "get1agent-prod-account-settings"
-  filename         = local.account_settings_zip
-  source_code_hash = filebase64sha256(local.account_settings_zip)
-  handler          = "handler.lambda_handler"
-  runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn, module.layer_ai[0].arn]
-
-  memory_size = 256
-  timeout     = 15
-
-  vpc_id                     = module.network[0].vpc_id
-  subnet_ids                 = module.network[0].private_subnet_ids
-  postgres_security_group_id = module.network[0].postgres_security_group_id
-  aws_region                 = var.aws_region
-  rds_resource_id            = module.rds[0].postgres_resource_id
-  db_iam_username            = module.rds[0].db_iam_username
-
-  environment = {
-    DB_HOST     = module.rds[0].postgres_endpoint
-    DB_PORT     = tostring(module.rds[0].postgres_port)
-    DB_NAME     = module.rds[0].postgres_db_name
-    DB_IAM_USER = module.rds[0].db_iam_username
-  }
-
-  depends_on = [module.layer_data, module.layer_ai]
+  vector_bucket_name = var.vector_bucket_name
 }
 
-module "knowledge_bases" {
+module "user_api" {
   count  = var.enable_backend_lambdas ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/lambda_function"
 
-  name             = "get1agent-prod-knowledge-bases"
-  filename         = local.knowledge_bases_zip
-  source_code_hash = filebase64sha256(local.knowledge_bases_zip)
+  name             = "get1agent-prod-user-api"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.user_api_zip
+  source_code_hash = filebase64sha256(local.user_api_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
   layer_arns       = [module.layer_data[0].arn, module.layer_ai[0].arn]
@@ -252,132 +157,33 @@ module "knowledge_bases" {
   memory_size = 512
   timeout     = 30
 
-  vpc_id                     = module.network[0].vpc_id
-  subnet_ids                 = module.network[0].private_subnet_ids
-  postgres_security_group_id = module.network[0].postgres_security_group_id
-  aws_region                 = var.aws_region
-  rds_resource_id            = module.rds[0].postgres_resource_id
-  db_iam_username            = module.rds[0].db_iam_username
-  s3_bucket_arns             = [module.knowledge_storage[0].bucket_arn]
+  s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
+  s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
+  dynamodb_table_arns   = [module.database[0].table_arn]
 
   environment = {
-    DB_HOST        = module.rds[0].postgres_endpoint
-    DB_PORT        = tostring(module.rds[0].postgres_port)
-    DB_NAME        = module.rds[0].postgres_db_name
-    DB_IAM_USER    = module.rds[0].db_iam_username
-    S3_BUCKET      = module.knowledge_storage[0].bucket_name
-    S3_REGION      = var.aws_region
-    INGESTION_MODE = "sqs"
+    DYNAMODB_TABLE   = module.database[0].table_name
+    S3_BUCKET        = module.knowledge_storage[0].bucket_name
+    S3_REGION        = var.aws_region
+    VECTOR_STORE     = "s3vectors"
+    S3_VECTOR_BUCKET = module.vectors[0].vector_bucket_name
+    EMBED_MODE       = "bedrock"
+    BEDROCK_REGION   = var.aws_region
+    TEXT_EMBED_MODEL = "amazon.titan-embed-text-v2:0"
   }
 
-  depends_on = [module.layer_data, module.layer_ai, module.knowledge_storage]
-}
-
-module "get_user_knowledge_bases" {
-  count  = var.enable_backend_lambdas ? 1 : 0
-  source = "../../modules/lambda_rds"
-
-  name             = "get1agent-prod-get-user-knowledge-bases"
-  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
-  filename         = local.get_user_kb_zip
-  source_code_hash = filebase64sha256(local.get_user_kb_zip)
-  handler          = "handler.lambda_handler"
-  runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn]
-
-  memory_size = 512
-  timeout     = 30
-
-  vpc_id                     = module.network[0].vpc_id
-  subnet_ids                 = module.network[0].private_subnet_ids
-  postgres_security_group_id = module.network[0].postgres_security_group_id
-  aws_region                 = var.aws_region
-  rds_resource_id            = module.rds[0].postgres_resource_id
-  db_iam_username            = module.rds[0].db_iam_username
-
-  environment = {
-    DB_HOST     = module.rds[0].postgres_endpoint
-    DB_PORT     = tostring(module.rds[0].postgres_port)
-    DB_NAME     = module.rds[0].postgres_db_name
-    DB_IAM_USER = module.rds[0].db_iam_username
-  }
-
-  depends_on = [module.layer_data]
-}
-
-module "retrieval_query" {
-  count  = var.enable_backend_lambdas ? 1 : 0
-  source = "../../modules/lambda_rds"
-
-  name             = "get1agent-prod-retrieval-query"
-  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
-  filename         = local.retrieval_query_zip
-  source_code_hash = filebase64sha256(local.retrieval_query_zip)
-  handler          = "handler.lambda_handler"
-  runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn]
-
-  memory_size = 512
-  timeout     = 30
-
-  vpc_id                     = module.network[0].vpc_id
-  subnet_ids                 = module.network[0].private_subnet_ids
-  postgres_security_group_id = module.network[0].postgres_security_group_id
-  aws_region                 = var.aws_region
-  rds_resource_id            = module.rds[0].postgres_resource_id
-  db_iam_username            = module.rds[0].db_iam_username
-
-  environment = {
-    DB_HOST     = module.rds[0].postgres_endpoint
-    DB_PORT     = tostring(module.rds[0].postgres_port)
-    DB_NAME     = module.rds[0].postgres_db_name
-    DB_IAM_USER = module.rds[0].db_iam_username
-  }
-
-  depends_on = [module.layer_data]
-}
-
-module "search_user_knowledge_bases" {
-  count  = var.enable_backend_lambdas ? 1 : 0
-  source = "../../modules/lambda_rds"
-
-  name             = "get1agent-prod-search-user-knowledge-bases"
-  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
-  filename         = local.search_user_kb_zip
-  source_code_hash = filebase64sha256(local.search_user_kb_zip)
-  handler          = "handler.lambda_handler"
-  runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn]
-
-  memory_size = 1024
-  timeout     = 60
-
-  # Outside the VPC: embeds + reranks over the public internet, then invokes the
-  # in-VPC retrieval-query worker. Mirrors the ingestion-embed split.
-  bedrock_model_arns = [
-    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0",
+  depends_on = [
+    module.layer_data,
+    module.layer_ai,
+    module.knowledge_storage,
+    module.database,
+    module.vectors,
   ]
-  bedrock_rerank_arns = [
-    "arn:aws:bedrock:${var.rerank_region}::foundation-model/${var.rerank_model}",
-  ]
-  lambda_invoke_arns = [module.retrieval_query[0].function_arn]
-
-  environment = {
-    EMBED_MODE               = "bedrock"
-    BEDROCK_REGION           = var.aws_region
-    TEXT_EMBED_MODEL         = "amazon.titan-embed-text-v2:0"
-    RETRIEVAL_QUERY_FUNCTION = module.retrieval_query[0].function_name
-    RERANK_MODE              = "bedrock"
-    RERANK_REGION            = var.rerank_region
-    RERANK_MODEL_ARN         = "arn:aws:bedrock:${var.rerank_region}::foundation-model/${var.rerank_model}"
-  }
-
-  depends_on = [module.layer_data, module.retrieval_query]
 }
 
 module "knowledge_mcp" {
   count  = var.enable_backend_lambdas ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/lambda_function"
 
   name             = "get1agent-prod-knowledge-mcp"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
@@ -385,31 +191,48 @@ module "knowledge_mcp" {
   source_code_hash = filebase64sha256(local.knowledge_mcp_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_ai[0].arn]
+  layer_arns       = [module.layer_data[0].arn, module.layer_ai[0].arn]
 
-  memory_size = 512
+  memory_size = 1024
   timeout     = 300
 
-  lambda_invoke_arns = [
-    module.get_user_knowledge_bases[0].function_arn,
-    module.search_user_knowledge_bases[0].function_arn,
+  s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
+  s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
+  dynamodb_table_arns   = [module.database[0].table_arn]
+  bedrock_model_arns = [
+    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0",
+  ]
+  bedrock_rerank_arns = [
+    "arn:aws:bedrock:${var.rerank_region}::foundation-model/${var.rerank_model}",
   ]
 
   environment = {
-    GET_USER_KB_FUNCTION    = module.get_user_knowledge_bases[0].function_name
-    SEARCH_USER_KB_FUNCTION = module.search_user_knowledge_bases[0].function_name
+    DYNAMODB_TABLE    = module.database[0].table_name
+    S3_BUCKET         = module.knowledge_storage[0].bucket_name
+    S3_REGION         = var.aws_region
+    VECTOR_STORE      = "s3vectors"
+    S3_VECTOR_BUCKET  = module.vectors[0].vector_bucket_name
+    EMBED_MODE        = "bedrock"
+    BEDROCK_REGION    = var.aws_region
+    TEXT_EMBED_MODEL  = "amazon.titan-embed-text-v2:0"
+    IMAGE_EMBED_MODEL = "amazon.titan-embed-image-v1"
+    RERANK_MODE       = "bedrock"
+    RERANK_REGION     = var.rerank_region
+    RERANK_MODEL_ARN  = "arn:aws:bedrock:${var.rerank_region}::foundation-model/${var.rerank_model}"
   }
 
   depends_on = [
+    module.layer_data,
     module.layer_ai,
-    module.get_user_knowledge_bases,
-    module.search_user_knowledge_bases,
+    module.knowledge_storage,
+    module.database,
+    module.vectors,
   ]
 }
 
 module "mcp_tester" {
   count  = var.enable_backend_lambdas ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/lambda_function"
 
   name             = "get1agent-prod-mcp-tester"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
@@ -444,39 +267,9 @@ module "mcp_tester" {
   ]
 }
 
-resource "aws_dynamodb_table" "code_interpreter_sessions" {
-  count = var.enable_backend_lambdas ? 1 : 0
-
-  name         = "get1agent-prod-code-interpreter-sessions"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "pk"
-  range_key    = "sk"
-
-  attribute {
-    name = "pk"
-    type = "S"
-  }
-
-  attribute {
-    name = "sk"
-    type = "S"
-  }
-
-  ttl {
-    attribute_name = "expiresAt"
-    enabled        = true
-  }
-
-  point_in_time_recovery {
-    enabled = true
-  }
-
-  tags = { Service = "code-interpreter" }
-}
-
 module "code_interpreter" {
   count  = var.enable_backend_lambdas ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/lambda_function"
 
   name             = "get1agent-prod-code-interpreter"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
@@ -489,31 +282,28 @@ module "code_interpreter" {
   memory_size = 1024
   timeout     = var.code_interpreter_timeout_seconds
 
-  # Intentionally outside the VPC: the AgentCore Code Interpreter endpoint and
-  # DynamoDB are reachable over the public internet, so no VPC/NAT is needed.
-  # The managed built-in interpreter lives in the service account ("aws"), not
-  # the caller's account, so the resource ARN's account segment is `aws`.
   bedrock_agentcore_arns = [
     "arn:aws:bedrock-agentcore:${var.aws_region}:aws:code-interpreter/*",
   ]
-  dynamodb_table_arns = [aws_dynamodb_table.code_interpreter_sessions[0].arn]
+  dynamodb_table_arns = [module.database[0].table_arn]
 
   environment = {
     CODE_INTERPRETER_IDENTIFIER              = "aws.codeinterpreter.v1"
     CODE_INTERPRETER_MODE                    = "agentcore"
     CODE_INTERPRETER_REGION                  = var.aws_region
-    CODE_INTERPRETER_SESSIONS_TABLE          = aws_dynamodb_table.code_interpreter_sessions[0].name
+    CODE_INTERPRETER_SESSIONS_TABLE          = module.database[0].table_name
+    DYNAMODB_TABLE                           = module.database[0].table_name
     CODE_INTERPRETER_SESSION_TIMEOUT_SECONDS = tostring(var.code_interpreter_session_timeout_seconds)
     CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS    = tostring(var.code_interpreter_exec_timeout_seconds)
     CODE_INTERPRETER_MAX_SESSIONS_PER_USER   = tostring(var.code_interpreter_max_sessions_per_user)
   }
 
-  depends_on = [aws_dynamodb_table.code_interpreter_sessions, module.layer_ai]
+  depends_on = [module.database, module.layer_ai]
 }
 
 module "web_search" {
   count  = var.enable_backend_lambdas ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/lambda_function"
 
   name             = "get1agent-prod-web-search"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
@@ -526,7 +316,6 @@ module "web_search" {
   memory_size = 512
   timeout     = var.web_search_timeout_seconds
 
-  # Intentionally outside the VPC: api.exa.ai is a public HTTPS endpoint.
   environment = {
     EXA_API_KEY                = var.exa_api_key
     EXA_API_BASE_URL           = var.exa_api_base_url
@@ -539,7 +328,7 @@ module "web_search" {
 
 module "ingestion_extract" {
   count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/lambda_function"
 
   name             = "get1agent-prod-ingestion-extract"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
@@ -552,29 +341,21 @@ module "ingestion_extract" {
   memory_size = 1024
   timeout     = 600
 
-  vpc_id                     = module.network[0].vpc_id
-  subnet_ids                 = module.network[0].private_subnet_ids
-  postgres_security_group_id = module.network[0].postgres_security_group_id
-  aws_region                 = var.aws_region
-  rds_resource_id            = module.rds[0].postgres_resource_id
-  db_iam_username            = module.rds[0].db_iam_username
-  s3_bucket_arns             = [module.knowledge_storage[0].bucket_arn]
+  s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
+  dynamodb_table_arns = [module.database[0].table_arn]
 
   environment = {
-    DB_HOST     = module.rds[0].postgres_endpoint
-    DB_PORT     = tostring(module.rds[0].postgres_port)
-    DB_NAME     = module.rds[0].postgres_db_name
-    DB_IAM_USER = module.rds[0].db_iam_username
-    S3_BUCKET   = module.knowledge_storage[0].bucket_name
-    S3_REGION   = var.aws_region
+    DYNAMODB_TABLE = module.database[0].table_name
+    S3_BUCKET      = module.knowledge_storage[0].bucket_name
+    S3_REGION      = var.aws_region
   }
 
-  depends_on = [module.layer_data, module.knowledge_storage]
+  depends_on = [module.layer_data, module.knowledge_storage, module.database]
 }
 
 module "ingestion_embed" {
   count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/lambda_function"
 
   name             = "get1agent-prod-ingestion-embed"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
@@ -587,10 +368,8 @@ module "ingestion_embed" {
   memory_size = 1024
   timeout     = 600
 
-  # Intentionally outside the VPC: this worker only needs S3 + Bedrock, which
-  # are reachable over the public internet. Keeping it out avoids a Bedrock
-  # interface endpoint (PrivateLink) charge and the NAT/endpoint setup.
-  s3_bucket_arns = [module.knowledge_storage[0].bucket_arn]
+  s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
+  dynamodb_table_arns = [module.database[0].table_arn]
 
   bedrock_model_arns = [
     "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0",
@@ -598,6 +377,7 @@ module "ingestion_embed" {
   ]
 
   environment = {
+    DYNAMODB_TABLE    = module.database[0].table_name
     S3_BUCKET         = module.knowledge_storage[0].bucket_name
     S3_REGION         = var.aws_region
     EMBED_MODE        = "bedrock"
@@ -606,12 +386,12 @@ module "ingestion_embed" {
     IMAGE_EMBED_MODEL = "amazon.titan-embed-image-v1"
   }
 
-  depends_on = [module.layer_data, module.knowledge_storage]
+  depends_on = [module.layer_data, module.knowledge_storage, module.database]
 }
 
 module "ingestion_index" {
   count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/lambda_function"
 
   name             = "get1agent-prod-ingestion-index"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
@@ -624,33 +404,33 @@ module "ingestion_index" {
   memory_size = 1024
   timeout     = 600
 
-  vpc_id                     = module.network[0].vpc_id
-  subnet_ids                 = module.network[0].private_subnet_ids
-  postgres_security_group_id = module.network[0].postgres_security_group_id
-  aws_region                 = var.aws_region
-  rds_resource_id            = module.rds[0].postgres_resource_id
-  db_iam_username            = module.rds[0].db_iam_username
-  s3_bucket_arns             = [module.knowledge_storage[0].bucket_arn]
+  s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
+  s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
+  dynamodb_table_arns   = [module.database[0].table_arn]
 
   environment = {
-    DB_HOST           = module.rds[0].postgres_endpoint
-    DB_PORT           = tostring(module.rds[0].postgres_port)
-    DB_NAME           = module.rds[0].postgres_db_name
-    DB_IAM_USER       = module.rds[0].db_iam_username
+    DYNAMODB_TABLE    = module.database[0].table_name
     S3_BUCKET         = module.knowledge_storage[0].bucket_name
     S3_REGION         = var.aws_region
+    VECTOR_STORE      = "s3vectors"
+    S3_VECTOR_BUCKET  = module.vectors[0].vector_bucket_name
     EMBED_MODE        = "bedrock"
     BEDROCK_REGION    = var.aws_region
     TEXT_EMBED_MODEL  = "amazon.titan-embed-text-v2:0"
     IMAGE_EMBED_MODEL = "amazon.titan-embed-image-v1"
   }
 
-  depends_on = [module.layer_data, module.knowledge_storage]
+  depends_on = [
+    module.layer_data,
+    module.knowledge_storage,
+    module.database,
+    module.vectors,
+  ]
 }
 
 module "ingestion_mark_failed" {
   count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/lambda_function"
 
   name             = "get1agent-prod-ingestion-mark-failed"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
@@ -663,26 +443,18 @@ module "ingestion_mark_failed" {
   memory_size = 256
   timeout     = 30
 
-  vpc_id                     = module.network[0].vpc_id
-  subnet_ids                 = module.network[0].private_subnet_ids
-  postgres_security_group_id = module.network[0].postgres_security_group_id
-  aws_region                 = var.aws_region
-  rds_resource_id            = module.rds[0].postgres_resource_id
-  db_iam_username            = module.rds[0].db_iam_username
+  dynamodb_table_arns = [module.database[0].table_arn]
 
   environment = {
-    DB_HOST     = module.rds[0].postgres_endpoint
-    DB_PORT     = tostring(module.rds[0].postgres_port)
-    DB_NAME     = module.rds[0].postgres_db_name
-    DB_IAM_USER = module.rds[0].db_iam_username
+    DYNAMODB_TABLE = module.database[0].table_name
   }
 
-  depends_on = [module.layer_data]
+  depends_on = [module.layer_data, module.database]
 }
 
 module "ingestion_watchdog" {
   count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/lambda_function"
 
   name             = "get1agent-prod-ingestion-watchdog"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
@@ -695,22 +467,14 @@ module "ingestion_watchdog" {
   memory_size = 256
   timeout     = 120
 
-  vpc_id                     = module.network[0].vpc_id
-  subnet_ids                 = module.network[0].private_subnet_ids
-  postgres_security_group_id = module.network[0].postgres_security_group_id
-  aws_region                 = var.aws_region
-  rds_resource_id            = module.rds[0].postgres_resource_id
-  db_iam_username            = module.rds[0].db_iam_username
+  dynamodb_table_arns = [module.database[0].table_arn]
 
   environment = {
-    DB_HOST                 = module.rds[0].postgres_endpoint
-    DB_PORT                 = tostring(module.rds[0].postgres_port)
-    DB_NAME                 = module.rds[0].postgres_db_name
-    DB_IAM_USER             = module.rds[0].db_iam_username
+    DYNAMODB_TABLE          = module.database[0].table_name
     STALL_THRESHOLD_MINUTES = "75"
   }
 
-  depends_on = [module.layer_data]
+  depends_on = [module.layer_data, module.database]
 }
 
 module "ingestion" {
@@ -732,7 +496,7 @@ module "ingestion" {
 
 module "ingestion_dispatcher" {
   count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
-  source = "../../modules/lambda_rds"
+  source = "../../modules/lambda_function"
 
   name             = "get1agent-prod-ingestion-dispatcher"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"

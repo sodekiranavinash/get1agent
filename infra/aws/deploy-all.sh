@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full first-time deploy: infra (API Gateway + jumpbox/RDS + Lambdas).
+# Full first-time deploy: infra (API Gateway + DynamoDB + S3 Vectors + Lambdas).
 #
 # Usage:
 #   bash infra/aws/deploy-all.sh

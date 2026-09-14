@@ -16,15 +16,13 @@ export function Switch({ checked, onChange, disabled = false, id, label }: Switc
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:pointer-events-none disabled:opacity-50 ${
-        checked
-          ? 'border-accent/40 bg-accent shadow-[0_0_16px_var(--app-accent-glow)]'
-          : 'border-border-strong bg-raised'
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 ${
+        checked ? 'border-accent/40 bg-accent' : 'border-border-strong bg-raised'
       }`}
     >
       <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-control transition-transform duration-200 ${
-          checked ? 'translate-x-6' : 'translate-x-1'
+        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-control transition-transform duration-150 ${
+          checked ? 'translate-x-[18px]' : 'translate-x-[3px]'
         }`}
       />
     </button>

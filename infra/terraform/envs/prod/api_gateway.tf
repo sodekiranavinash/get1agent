@@ -13,103 +13,139 @@ module "api_gateway" {
     "http://localhost:5173",
   ]
 
-  lambda_routes = var.enable_backend_lambdas && var.enable_rds ? {
-    health_db = {
-      method               = "GET"
-      path                 = "/health/db"
-      lambda_invoke_arn    = module.health_check[0].invoke_arn
-      lambda_function_name = module.health_check[0].function_name
-      authorization_type   = "NONE"
-    }
+  # /health is a MOCK 200 integration inside the api_gateway module (no Lambda).
+  lambda_routes = var.enable_backend_lambdas ? {
     user_settings_get = {
       method               = "GET"
       path                 = "/v1/user/settings"
-      lambda_invoke_arn    = module.account_settings[0].invoke_arn
-      lambda_function_name = module.account_settings[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     user_settings_update = {
       method               = "POST"
       path                 = "/v1/user/settings"
-      lambda_invoke_arn    = module.account_settings[0].invoke_arn
-      lambda_function_name = module.account_settings[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     knowledge_bases_list = {
       method               = "GET"
       path                 = "/v1/knowledge-bases"
-      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
-      lambda_function_name = module.knowledge_bases[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     knowledge_bases_create = {
       method               = "POST"
       path                 = "/v1/knowledge-bases"
-      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
-      lambda_function_name = module.knowledge_bases[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     knowledge_bases_tags = {
       method               = "GET"
       path                 = "/v1/knowledge-bases/tags"
-      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
-      lambda_function_name = module.knowledge_bases[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     knowledge_bases_events = {
       method               = "GET"
       path                 = "/v1/knowledge-bases/events"
-      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
-      lambda_function_name = module.knowledge_bases[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     knowledge_bases_get = {
       method               = "GET"
       path                 = "/v1/knowledge-bases/{id}"
-      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
-      lambda_function_name = module.knowledge_bases[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     knowledge_bases_delete = {
       method               = "DELETE"
       path                 = "/v1/knowledge-bases/{id}"
-      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
-      lambda_function_name = module.knowledge_bases[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     knowledge_bases_presign = {
       method               = "POST"
       path                 = "/v1/knowledge-bases/{id}/documents/presign"
-      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
-      lambda_function_name = module.knowledge_bases[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     knowledge_bases_inline = {
       method               = "POST"
       path                 = "/v1/knowledge-bases/{id}/documents/inline"
-      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
-      lambda_function_name = module.knowledge_bases[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     knowledge_bases_complete = {
       method               = "POST"
       path                 = "/v1/knowledge-bases/{id}/documents/{docId}/complete"
-      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
-      lambda_function_name = module.knowledge_bases[0].function_name
-      authorization_type   = "JWT"
-    }
-    knowledge_bases_local_upload = {
-      method               = "POST"
-      path                 = "/v1/knowledge-bases/{id}/documents/{docId}/upload"
-      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
-      lambda_function_name = module.knowledge_bases[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     knowledge_bases_document_delete = {
       method               = "DELETE"
       path                 = "/v1/knowledge-bases/{id}/documents/{docId}"
-      lambda_invoke_arn    = module.knowledge_bases[0].invoke_arn
-      lambda_function_name = module.knowledge_bases[0].function_name
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_list = {
+      method               = "GET"
+      path                 = "/v1/agent-skills"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_create = {
+      method               = "POST"
+      path                 = "/v1/agent-skills"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_tools = {
+      method               = "GET"
+      path                 = "/v1/agent-skills/tools"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_parse = {
+      method               = "POST"
+      path                 = "/v1/agent-skills/parse"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_get = {
+      method               = "GET"
+      path                 = "/v1/agent-skills/{id}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_update = {
+      method               = "PUT"
+      path                 = "/v1/agent-skills/{id}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_delete = {
+      method               = "DELETE"
+      path                 = "/v1/agent-skills/{id}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
     knowledge_mcp = {

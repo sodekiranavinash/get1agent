@@ -87,7 +87,10 @@ def _config() -> dict[str, Any]:
             or os.environ.get("AWS_REGION")
             or "ap-south-1"
         ),
-        "table": os.environ.get("CODE_INTERPRETER_SESSIONS_TABLE", ""),
+        # Sessions live in the shared single table; the dedicated name is kept
+        # as a fallback for older deployments.
+        "table": os.environ.get("CODE_INTERPRETER_SESSIONS_TABLE")
+        or os.environ.get("DYNAMODB_TABLE", ""),
         "session_ttl": _env_int("CODE_INTERPRETER_SESSION_TIMEOUT_SECONDS", 900),
         "exec_timeout": _env_int("CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS", 120),
         "max_sessions": max(_env_int("CODE_INTERPRETER_MAX_SESSIONS_PER_USER", 1), 1),

@@ -1,10 +1,13 @@
 # Deploy get1agent on AWS
 
-**API Gateway HTTP API** handles `api.get1agent.com` with Auth0 JWT, CORS, and throttling. **EC2 jumpbox** (`t3.micro`, always running) has a public IPv4 for `db-access.sh`. **Lambdas** are added as API routes in Terraform.
+**API Gateway HTTP API** handles `api.get1agent.com` with Auth0 JWT, CORS, and
+throttling. The backend is serverless: **DynamoDB** (operational data), **S3**
+(documents + keyword index), **S3 Vectors** (embeddings) and **Bedrock**. There
+is no VPC and no RDS.
 
 | Stack | Region | Resources |
 |-------|--------|-----------|
-| **All AWS infra** | `ap-south-1` (Mumbai) | VPC, jumpbox, RDS, API Gateway, Lambdas, web S3, Terraform state |
+| **All AWS infra** | `ap-south-1` (Mumbai) | DynamoDB, S3, S3 Vectors, API Gateway, Lambdas, web S3, Terraform state |
 
 Future **AgentCore** agents can stay in `us-east-1` when you add them (separate from this repo).
 
@@ -56,11 +59,8 @@ terraform output api_gateway_cname_target # step B
 ### 3) Verify
 
 ```bash
-curl -s https://api.get1agent.com/health
-# {"status":"ok","service":"get1agent-api"}
-
-curl -s https://api.get1agent.com/health/db
-# {"status":"ok","database":"get1agent"}
+curl -s -o /dev/null -w "%{http_code}\n" https://api.get1agent.com/v1/knowledge-bases
+# 401 — the route exists and requires a bearer token
 ```
 
 ---
@@ -68,15 +68,20 @@ curl -s https://api.get1agent.com/health/db
 ## Architecture
 
 ```
-Browser → Cloudflare → API Gateway (JWT) → Lambda functions → RDS PostgreSQL (private VPC)
-EC2 jumpbox (on-demand, public IPv4 only while running) → RDS PostgreSQL
+Browser → Cloudflare → API Gateway (JWT) → Lambda functions
+                                          ├─ DynamoDB (single table + GSIs)
+                                          ├─ S3 (raw/derived/index artifacts)
+                                          ├─ S3 Vectors (per-user embedding index)
+                                          └─ Bedrock (embeddings + optional rerank)
 ```
 
 | Component | Role |
 |-----------|------|
 | **API Gateway** | Auth0 JWT, CORS, per-route + stage throttling, access logs |
-| **EC2 jumpbox** | Always-on `t3.micro`; SSM tunnel to RDS for `db-access.sh` |
-| **RDS** | `get1agent` database for app/Lambdas |
+| **DynamoDB** | Single table `get1agent` (users, KBs, documents, tags, skills, events, quotas, sessions) |
+| **S3** | Document uploads, derived artifacts, keyword index, parents, manifests |
+| **S3 Vectors** | One vector index per user (`idx-<sub>`) |
+| **Bedrock** | Titan Text V2 embeddings; opt-in `amazon.rerank-v1:0` rerank (us-west-2) |
 
 ---
 
@@ -89,40 +94,43 @@ EC2 jumpbox (on-demand, public IPv4 only while running) → RDS PostgreSQL
 | **Stage throttling** | 50 req/s, burst 100 (adjust in `api_gateway` module) |
 | **Per-route throttling** | Set on each `lambda_routes` entry |
 | **Access logs** | CloudWatch, 7-day retention |
-| **Health** | `GET /health` (no auth) |
-| **DB health** | `GET /health/db` (no auth, RDS IAM check) |
 
 ---
 
 ## Backend Lambdas (Python)
 
-Registry: `backend/services/registry.json` — lists **layers** and **lambdas** (with `layers: [...]`).
+Registry: `backend/services/registry.json` — lists **layers** and **lambdas**
+(with `layers: [...]`).
 
-| Lambda | Route | Layers | Purpose |
-|--------|-------|--------|---------|
-| `health-check` | `GET /health/db` | `data` | SQLAlchemy async + asyncpg RDS IAM `SELECT 1` |
+| Lambda | Route(s) | Layers | Purpose |
+|--------|----------|--------|---------|
+| `user-api` | `/v1/knowledge-bases*`, `/v1/agent-skills*`, `/v1/user/settings` | `data`, `ai` | All user CRUD |
+| `knowledge-mcp` | `POST /mcp` | `data`, `ai` | Knowledge MCP tools + hybrid retrieval |
+| `web-search` | `POST /mcp/web-search` | `ai` | Exa web search |
+| `code-interpreter` | `POST /mcp/code-interpreter` | `ai` | AgentCore code sandbox |
+| `mcp-tester` | `/v1/admin/mcp/*` | `ai` | Admin MCP client |
+| `ingestion-*` | (SQS / Step Functions) | `data` | extract → embed → index (+ mark-failed, watchdog, dispatcher) |
 
 | Layer | Contents |
 |-------|----------|
-| `data` | SQLAlchemy 2 async, asyncpg, `shared/db` |
+| `data` | `shared/` — DynamoDB repositories, S3 search/ingestion, skills, json utils |
+| `ai` | `ai/` — Auth0 role checks + MCP transport/client |
 
-Handler zips contain **only** `handler.py`. Dependencies ship in Lambda layers.
+Handler zips contain **only** `handler.py` (plus the MCP handler for
+`knowledge-mcp`). Dependencies ship in Lambda layers.
 
 ```bash
-# Build data layer + handler zip locally
-# Layer build: native on Linux arm64; otherwise Docker + public.ecr.aws/lambda/python:3.14 (QEMU on x86_64)
+# Build layers + handler zips locally
 bash infra/aws/build-backend-layers.sh
-make -C backend/services/health-check package
+make -C backend/services/user-api package
 
 # Package + upload handler code (after Infra created the function + layer)
-bash infra/aws/deploy-backend.sh health-check deploy
+bash infra/aws/deploy-backend.sh user-api deploy
 ```
 
 Layer updates require an **Infra** apply (Terraform publishes a new layer version).
 
-After a runtime/handler migration, also run **Backend** once to upload the Python handler zip (Terraform ignores function code after create).
-
-GitHub Actions: **Backend** workflow — check `health-check` to deploy handler code.
+GitHub Actions: **Backend** workflow — check a Lambda to deploy handler code.
 
 ---
 
@@ -148,26 +156,15 @@ Lambdas must handle **API Gateway HTTP API v2** events (not raw JSON).
 
 ---
 
-## Local DB access
+## Data access
 
-The jumpbox (`t3.micro`) runs continuously and is never stopped on exit. Public IPv4 costs ~$0.005/hr.
-
-```bash
-# Credentials
-bash infra/aws/db-access.sh --show-creds
-
-# Tunnel localhost:15432 → RDS (jumpbox keeps running)
-bash infra/aws/db-access.sh
-```
-
-**DBeaver:** host `localhost`, port `15432`, SSH tab **OFF**, SSL require.
+DynamoDB and S3 are public endpoints, so there is no jumpbox and no tunnel.
+Inspect data with the AWS CLI:
 
 ```bash
-# Stop jumpbox manually if needed (releases public IPv4)
-bash infra/aws/db-access.sh --stop
+aws dynamodb scan --table-name get1agent --max-items 20
+aws s3 ls s3://get1agent-prod-knowledge-bases/
 ```
-
-RDS is **private** — reachable from VPC Lambdas and the always-on jumpbox.
 
 ---
 
@@ -177,31 +174,29 @@ Three workflows — each has checkboxes to run only what you need:
 
 | Workflow | Components (checkboxes) |
 |----------|-------------------------|
-| **Infra** | Web, VPC, RDS, API Gateway, Lambdas (state S3 bucket is created automatically) — always apply |
+| **Infra** | Web, API Gateway, Lambdas (DynamoDB + S3 Vectors + state bucket created automatically) |
 | **Frontend** | Build + sync to S3 (separate from Infra) |
-| **Backend** | `health-check` — one checkbox = deploy Lambda **code** |
+| **Backend** | one checkbox per Lambda = deploy Lambda **code** |
 
 Push to `main` under `frontend/**` auto-runs **Frontend**.
 
-Terraform state lives in a dedicated S3 bucket (created automatically before any apply). **Web** is a separate bucket for the static site (`www.get1agent.com`).
+Terraform state lives in a dedicated S3 bucket (created automatically before any
+apply). **Web** is a separate bucket for the static site (`www.get1agent.com`).
 
 ---
 
 ## Cost notes (free tier friendly)
 
-| Service | Free tier |
-|---------|-----------|
+| Service | Cost |
+|---------|------|
 | API Gateway HTTP API | 1M requests/month (12 months) |
 | Lambda | 1M requests/month |
-| EC2 `t3.micro` (always on) | 750 hours/month |
-| RDS `db.t4g.micro` | 750 hours/month |
-| Public IPv4 | ~$0.005/hr (always-on jumpbox) |
+| DynamoDB (on-demand) | pay per request; no idle floor |
+| S3 | $0.023/GB-month |
+| S3 Vectors | $0.06/GB-month; no idle floor |
 | CloudWatch logs | 5 GB ingestion |
-| SSM Parameter Store (SecureString) | Standard parameters are free |
 
-No WAF by default (adds ~$5/month if needed later).
-
-DB credentials live in **SSM Parameter Store** (not Secrets Manager — saves ~$0.80/month).
+No WAF by default (adds ~$5/month if needed later). No always-on RDS instance.
 
 ---
 
@@ -213,7 +208,8 @@ Add validation CNAME from `terraform output acm_validation_records`, then re-run
 
 ### 401 on API routes
 
-Ensure Auth0 API identifier matches `https://api.get1agent.com` and frontend requests include `Authorization: Bearer <token>` with correct audience.
+Ensure Auth0 API identifier matches `https://api.get1agent.com` and frontend
+requests include `Authorization: Bearer <token>` with correct audience.
 
 ### Terraform state lock
 

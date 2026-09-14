@@ -2,21 +2,23 @@ from __future__ import annotations
 
 import hashlib
 import json
-import uuid
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
-from sqlalchemy import func, select, text
-
-from shared.db.session import get_session
+from shared.dynamo.repositories import documents as documents_repo
+from shared.dynamo.repositories import events as events_repo
+from shared.dynamo.repositories import knowledge_bases as kb_repo
 from shared.ingestion.chunking import chunk_parents
 from shared.ingestion.config import IngestionConfig, load_config
 from shared.ingestion.embeddings import embed_images, embed_texts
 from shared.ingestion.extractors import Extraction, extract
-from shared.models import Document, IngestionEvent, KnowledgeBase
+from shared.search import layout
+from shared.search.maintenance import delete_document_index
+from shared.search.s3_vectors import VectorRecord, vector_store
+from shared.search.term_index import add_postings, build_postings, update_catalog, update_stats
 from shared.storage import Storage
 
-DERIVED_DIR = ".derived"
 CHUNKS_FILENAME = "chunks.json"
 EMBEDDINGS_FILENAME = "embeddings.json"
 
@@ -29,49 +31,6 @@ _IMAGE_CONTENT_TYPES = {
     "tiff": "image/tiff",
     "webp": "image/webp",
 }
-
-_INSERT_PARENT = text(
-    """
-    INSERT INTO document_parents (
-        document_id, knowledge_base_id, user_id, ordinal, page, page_end,
-        content, token_count
-    )
-    VALUES (
-        :document_id, :knowledge_base_id, :user_id, :ordinal, :page, :page_end,
-        :content, :token_count
-    )
-    RETURNING id
-    """
-)
-
-_INSERT_CHUNK = text(
-    """
-    INSERT INTO chunks (
-        document_id, knowledge_base_id, user_id, ordinal, chunk_hash,
-        content, token_count, page, page_end, parent_id, embedding
-    )
-    VALUES (
-        :document_id, :knowledge_base_id, :user_id, :ordinal, :chunk_hash,
-        :content, :token_count, :page, :page_end, :parent_id,
-        CAST(CAST(:embedding AS text) AS vector)
-    )
-    ON CONFLICT (document_id, chunk_hash) DO NOTHING
-    """
-)
-
-_INSERT_IMAGE = text(
-    """
-    INSERT INTO document_images (
-        document_id, knowledge_base_id, user_id, s3_key, page, width,
-        height, content_hash, embedding
-    )
-    VALUES (
-        :document_id, :knowledge_base_id, :user_id, :s3_key, :page, :width,
-        :height, :content_hash, CAST(CAST(:embedding AS text) AS vector)
-    )
-    ON CONFLICT (document_id, content_hash) DO NOTHING
-    """
-)
 
 
 @dataclass
@@ -114,24 +73,8 @@ class IndexedDocument:
     parent_count: int = 0
 
 
-def _as_uuid(value: str | uuid.UUID) -> uuid.UUID:
-    return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
-
-
-def _vector_literal(values: list[float]) -> str:
-    return "[" + ",".join(repr(float(item)) for item in values) + "]"
-
-
-def _derived_prefix(user_id: str, kb_id: str, document_id: str) -> str:
-    return f"{user_id}/{kb_id}/{document_id}/{DERIVED_DIR}"
-
-
 def _chunk_records(payload: dict) -> list[dict]:
-    """Normalize a staged ``chunks.json`` payload into chunk records.
-
-    Newer payloads store ``{"text", "page", "pageEnd", "parentOrdinal"}``
-    objects; older in-flight executions stored bare strings, so accept both.
-    """
+    """Normalize a staged ``chunks.json`` payload into chunk records."""
     records: list[dict] = []
     for item in payload.get("chunks") or []:
         if isinstance(item, dict):
@@ -144,7 +87,6 @@ def _chunk_records(payload: dict) -> list[dict]:
 
 
 def _parent_records(payload: dict) -> list[dict]:
-    """Normalize a staged ``chunks.json`` payload into parent records."""
     return [
         item
         for item in payload.get("parents") or []
@@ -152,109 +94,102 @@ def _parent_records(payload: dict) -> list[dict]:
     ]
 
 
-async def load_config_for_knowledge_base(
-    knowledge_base_id: str | uuid.UUID,
-) -> IngestionConfig:
+def load_config_for_knowledge_base(knowledge_base_id: str) -> IngestionConfig:
     """Per-KB settings, falling back to the workspace/environment defaults."""
     base = load_config()
-    async with get_session() as session:
-        knowledge_base = await session.get(
-            KnowledgeBase, _as_uuid(knowledge_base_id)
+    knowledge_base = kb_repo.get_kb_by_id(knowledge_base_id)
+    if knowledge_base is None:
+        return base
+    # DynamoDB numbers come back as Decimal; the chunker needs ints.
+    overrides: dict[str, object] = {
+        "embedding_dim": int(knowledge_base.get("embeddingDim") or base.embedding_dim),
+        "chunk_size": int(knowledge_base.get("chunkSize") or base.chunk_size),
+        "chunk_overlap": (
+            int(knowledge_base["chunkOverlap"])
+            if knowledge_base.get("chunkOverlap") is not None
+            else base.chunk_overlap
+        ),
+    }
+    # Bedrock model ids come from the KB. Local (Ollama) embeddings use
+    # LOCAL_EMBED_MODEL instead, so keep the env-provided model name.
+    if base.embed_mode == "bedrock":
+        overrides["text_embed_model"] = (
+            knowledge_base.get("embedModel") or base.text_embed_model
         )
-        if knowledge_base is None:
-            return base
-        overrides: dict[str, object] = {
-            "embedding_dim": knowledge_base.embedding_dim or base.embedding_dim,
-            "chunk_size": knowledge_base.chunk_size or base.chunk_size,
-            "chunk_overlap": (
-                knowledge_base.chunk_overlap
-                if knowledge_base.chunk_overlap is not None
-                else base.chunk_overlap
-            ),
-        }
-        # Bedrock model ids come from the KB. Local (Ollama) embeddings use
-        # LOCAL_EMBED_MODEL instead, so keep the env-provided model name.
-        if base.embed_mode == "bedrock":
-            overrides["text_embed_model"] = (
-                knowledge_base.embed_model or base.text_embed_model
-            )
-            overrides["image_embed_model"] = (
-                knowledge_base.image_embed_model or base.image_embed_model
-            )
-        return replace(base, **overrides)
+        overrides["image_embed_model"] = (
+            knowledge_base.get("imageEmbedModel") or base.image_embed_model
+        )
+    return replace(base, **overrides)
 
 
-async def emit_event(
+def emit_event(
     *,
-    document_id: str | uuid.UUID,
-    knowledge_base_id: str | uuid.UUID,
-    user_id: str | uuid.UUID,
+    document_id: str,
+    knowledge_base_id: str,
+    user_id: str,
     stage: str,
     status: str,
     message: str | None = None,
     details: dict | None = None,
+    file_name: str | None = None,
+    file_key: str | None = None,
 ) -> None:
-    async with get_session() as session:
-        session.add(
-            IngestionEvent(
-                document_id=_as_uuid(document_id),
-                knowledge_base_id=_as_uuid(knowledge_base_id),
-                user_id=_as_uuid(user_id),
-                stage=stage,
-                status=status,
-                message=message,
-                details=details,
-            )
-        )
-        await session.commit()
+    # Every event must carry the document's fileName + fileKey so the events
+    # feed can associate it with a document (and its live status) without the
+    # caller having to thread them through the whole pipeline.
+    if file_name is None or file_key is None:
+        document = documents_repo.get_document_by_id(document_id)
+        if document:
+            file_name = file_name or document.get("fileName")
+            file_key = file_key or document.get("fileKey")
+    events_repo.emit_event(
+        document_id=document_id,
+        knowledge_base_id=knowledge_base_id,
+        user_id=user_id,
+        stage=stage,
+        status=status,
+        message=message,
+        details=details,
+        file_name=file_name,
+        file_key=file_key,
+    )
 
 
-async def get_document(document_id: str | uuid.UUID) -> dict | None:
+def get_document(document_id: str) -> dict | None:
     """Return the fields the worker needs to process a document."""
-    async with get_session() as session:
-        document = await session.get(Document, _as_uuid(document_id))
-        if document is None:
-            return None
-        return {
-            "id": str(document.id),
-            "status": document.status,
-            "s3_key": document.s3_key,
-            "file_name": document.file_name,
-            "content_type": document.content_type,
-            "knowledge_base_id": str(document.knowledge_base_id),
-            "user_id": str(document.user_id),
+    document = documents_repo.get_document_by_id(document_id)
+    if document is None:
+        return None
+    return {
+        "id": document["docId"],
+        "status": document["status"],
+        "s3_key": document["s3Key"],
+        "file_name": document["fileName"],
+        "content_type": document.get("contentType"),
+        "knowledge_base_id": document["kbId"],
+        "user_id": document["userId"],
+    }
+
+
+def find_stalled_documents(threshold_minutes: int) -> list[dict]:
+    """Documents left in ``processing`` with no update for ``threshold_minutes``."""
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+    ).isoformat()
+    documents = documents_repo.find_by_status_older_than("processing", cutoff)
+    return [
+        {
+            "id": document["docId"],
+            "knowledge_base_id": document["kbId"],
+            "user_id": document["userId"],
+            "file_name": document.get("fileName"),
         }
+        for document in documents
+    ]
 
 
-async def find_stalled_documents(threshold_minutes: int) -> list[dict]:
-    """Documents left in ``processing`` with no update for ``threshold_minutes``.
-
-    The watchdog uses this to fail documents whose execution was aborted (e.g.
-    the state machine hit its ``TimeoutSeconds``) before the failure handler
-    could run. The threshold must exceed the state machine timeout so the
-    watchdog never races a still-running execution.
-    """
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
-    async with get_session() as session:
-        result = await session.execute(
-            select(Document).where(
-                Document.status == "processing",
-                Document.updated_at < cutoff,
-            )
-        )
-        return [
-            {
-                "id": str(document.id),
-                "knowledge_base_id": str(document.knowledge_base_id),
-                "user_id": str(document.user_id),
-                "file_name": document.file_name,
-            }
-            for document in result.scalars()
-        ]
-
-
-async def set_document_status(
-    document_id: str | uuid.UUID,
+def set_document_status(
+    document_id: str,
     status: str,
     *,
     chunk_count: int | None = None,
@@ -262,33 +197,27 @@ async def set_document_status(
     embed_model: str | None = None,
     image_embed_model: str | None = None,
 ) -> None:
-    async with get_session() as session:
-        document = await session.get(Document, _as_uuid(document_id))
-        if document is None:
-            return
-        document.status = status
-        if chunk_count is not None:
-            document.chunk_count = chunk_count
-        if image_count is not None:
-            document.image_count = image_count
-        if embed_model is not None:
-            document.embed_model = embed_model
-        if image_embed_model is not None:
-            document.image_embed_model = image_embed_model
-        await session.flush()
+    document = documents_repo.get_document_by_id(document_id)
+    if document is None:
+        return
+    old_status = document.get("status")
+    fields: dict[str, Any] = {"status": status}
+    if chunk_count is not None:
+        fields["chunkCount"] = chunk_count
+    if image_count is not None:
+        fields["imageCount"] = image_count
+    if embed_model is not None:
+        fields["embedModel"] = embed_model
+    if image_embed_model is not None:
+        fields["imageEmbedModel"] = image_embed_model
+    documents_repo.update_document(document_id, **fields)
 
-        processing = await session.scalar(
-            select(func.count())
-            .select_from(Document)
-            .where(
-                Document.knowledge_base_id == document.knowledge_base_id,
-                Document.status == "processing",
-            )
+    if old_status != status:
+        delta = (1 if status == "processing" else 0) - (
+            1 if old_status == "processing" else 0
         )
-        knowledge_base = await session.get(KnowledgeBase, document.knowledge_base_id)
-        if knowledge_base is not None:
-            knowledge_base.status = "processing" if (processing or 0) > 0 else "ready"
-        await session.commit()
+        if delta:
+            kb_repo.adjust_processing(document["kbId"], delta)
 
 
 def _select_images(
@@ -318,11 +247,6 @@ def _select_images(
 def _extraction_stats(
     extraction: Extraction, selected_images: int, source_bytes: int
 ) -> dict:
-    """Shape of what was parsed, for the ingestion timeline.
-
-    Numeric only (the UI formats units) and None fields dropped so the event
-    payload stays small and format-specific.
-    """
     text = extraction.text
     stats: dict[str, int] = {
         "sourceBytes": source_bytes,
@@ -352,21 +276,13 @@ def extract_document(
     s3_key: str,
     file_name: str,
 ) -> ExtractedDocument:
-    """Download, extract text + images, and stage derived artifacts in storage."""
+    """Download, extract text + images, chunk, and stage derived artifacts."""
     raw = storage.get_bytes(s3_key)
     extraction = extract(raw, file_name)
 
-    prefix = _derived_prefix(user_id, knowledge_base_id, document_id)
-    text_key = f"{prefix}/text.md"
+    text_key = layout.text_key(user_id, knowledge_base_id, document_id)
     storage.put_bytes(text_key, extraction.text.encode("utf-8"), "text/markdown")
 
-    # Chunking is pure CPU: do it here (the extract worker is in the VPC and
-    # already loaded the per-KB chunk settings) so the embed worker can stay
-    # outside the VPC and just turn text into vectors.
-    # PDFs carry per-page text, so chunks are tagged with the source page range
-    # that retrieval citations can link back to. Other formats have no pages.
-    # Small-to-big: embed/search the small children, but return the page (PDF)
-    # or a fixed-size window (other formats) as context once a child matches.
     parents = chunk_parents(
         extraction.text,
         chunk_size=config.chunk_size,
@@ -394,7 +310,7 @@ def extract_document(
                     "parentOrdinal": ordinal,
                 }
             )
-    chunks_key = f"{prefix}/{CHUNKS_FILENAME}"
+    chunks_key = layout.chunks_key(user_id, knowledge_base_id, document_id)
     storage.put_bytes(
         chunks_key,
         json.dumps({"parents": parent_records, "chunks": chunk_records}).encode("utf-8"),
@@ -414,7 +330,7 @@ def extract_document(
         _select_images(extraction, config)
     ):
         digest = hashlib.sha256(data).hexdigest()
-        key = f"{prefix}/images/{page or 0}-{index}.{extension}"
+        key = layout.image_key(user_id, knowledge_base_id, document_id, page, index, extension)
         content_type = _IMAGE_CONTENT_TYPES.get(extension.lower(), "application/octet-stream")
         storage.put_bytes(key, data, content_type)
         images.append(
@@ -443,12 +359,7 @@ def embed_document(
     chunks_key: str,
     images: list[dict],
 ) -> EmbeddedDocument:
-    """Turn staged chunk text + images into vectors and stage the result.
-
-    Runs outside the VPC: it only needs S3 (public) and Bedrock (public), so it
-    never touches RDS. The vectors are written back to S3 for the in-VPC index
-    worker to persist.
-    """
+    """Turn staged chunk text + images into vectors and stage the result."""
     payload = json.loads(storage.get_bytes(chunks_key).decode("utf-8"))
     records = _chunk_records(payload)
     chunks = [record["text"] for record in records]
@@ -482,7 +393,15 @@ def embed_document(
     )
 
 
-async def index_document(
+def _chunk_id(document_id: str, ordinal: int) -> str:
+    return f"{document_id}#{ordinal}"
+
+
+def _parent_id(document_id: str, ordinal: int) -> str:
+    return f"{document_id}#{ordinal}"
+
+
+def index_document(
     storage: Storage,
     config: IngestionConfig,
     *,
@@ -492,8 +411,11 @@ async def index_document(
     chunks_key: str,
     embeddings_key: str,
     images: list[dict],
+    file_name: str | None = None,
+    kb_name: str | None = None,
+    content_type: str | None = None,
 ) -> IndexedDocument:
-    """Persist the embed stage's vectors (and chunk text) into pgvector."""
+    """Persist vectors (S3 Vectors/local), parents, postings, catalog + manifest."""
     payload = json.loads(storage.get_bytes(chunks_key).decode("utf-8"))
     records = _chunk_records(payload)
     parents = _parent_records(payload)
@@ -501,106 +423,131 @@ async def index_document(
     chunk_vectors = artifact.get("chunkVectors") or []
     image_vectors = artifact.get("imageVectors") or []
 
-    embedding_count = len(chunk_vectors) + len(image_vectors)
-    await emit_event(
-        document_id=document_id,
-        knowledge_base_id=knowledge_base_id,
-        user_id=user_id,
-        stage="embedding",
-        status="succeeded",
-        message=(
-            f"{embedding_count} embedding{'s' if embedding_count != 1 else ''} "
-            f"({len(chunk_vectors)} text"
-            + (f" · {len(image_vectors)} image" if image_vectors else "")
-            + ")"
-        ),
-        details={
-            "embeddings": embedding_count,
-            "textEmbeddings": len(chunk_vectors),
-            "imageEmbeddings": len(image_vectors),
-            "dimension": config.embedding_dim,
-            "model": config.text_embed_model,
+    if file_name is None or kb_name is None:
+        document = documents_repo.get_document_by_id(document_id)
+        knowledge_base = kb_repo.get_kb_by_id(knowledge_base_id)
+        file_name = file_name or (document or {}).get("fileName") or ""
+        content_type = content_type or (document or {}).get("contentType")
+        kb_name = kb_name or (knowledge_base or {}).get("name") or ""
+
+    store = vector_store(storage)
+    # Idempotent re-index: drop anything a previous run left behind.
+    delete_document_index(storage, store, user_id, document_id)
+
+    # Map each child chunk to its parent, preserving order.
+    parent_children: dict[int, list[dict]] = {}
+    chunk_to_parent: dict[int, int] = {}
+    for ordinal, record in enumerate(records):
+        parent_ordinal = record.get("parentOrdinal")
+        if parent_ordinal is None:
+            continue
+        chunk_to_parent[ordinal] = int(parent_ordinal)
+        parent_children.setdefault(int(parent_ordinal), []).append(
+            {
+                "chunkId": _chunk_id(document_id, ordinal),
+                "ordinal": ordinal,
+                "text": record["text"],
+                "page": record.get("page"),
+                "pageEnd": record.get("pageEnd"),
+                "tokenCount": max(1, len(record["text"]) // 4),
+            }
+        )
+
+    vectors: list[VectorRecord] = []
+    postings: dict[str, dict] = {}
+    chunk_ids: list[str] = []
+    total_tokens = 0
+
+    for ordinal, (record, vector) in enumerate(zip(records, chunk_vectors)):
+        text = record["text"]
+        chunk_id = _chunk_id(document_id, ordinal)
+        parent_id = (
+            _parent_id(document_id, chunk_to_parent[ordinal])
+            if ordinal in chunk_to_parent
+            else None
+        )
+        chunk_ids.append(chunk_id)
+        token_count = max(1, len(text) // 4)
+        filterable: dict[str, Any] = {
+            "kbId": knowledge_base_id,
+            "docId": document_id,
+            "status": "ready",
+            "tokenCount": token_count,
+        }
+        if record.get("page") is not None:
+            filterable["page"] = int(record["page"])
+        if parent_id:
+            filterable["parentId"] = parent_id
+        vectors.append(
+            VectorRecord(
+                key=chunk_id,
+                vector=[float(value) for value in vector],
+                filterable=filterable,
+                non_filterable={
+                    "text": text,
+                    "kbName": kb_name,
+                    "fileName": file_name,
+                },
+            )
+        )
+        chunk_postings = build_postings(
+            chunk_id=chunk_id,
+            doc_id=document_id,
+            kb_id=knowledge_base_id,
+            parent_id=parent_id or "",
+            text=text,
+        )
+        if chunk_postings:
+            total_tokens += next(iter(chunk_postings.values()))["dl"]
+        postings.update(chunk_postings)
+
+    store.upsert(user_id, vectors)
+
+    parent_ids: list[str] = []
+    for parent in parents:
+        ordinal = int(parent.get("ordinal", len(parent_ids)))
+        parent_id = _parent_id(document_id, ordinal)
+        parent_ids.append(parent_id)
+        storage.put_json(
+            layout.parent_key(user_id, parent_id),
+            {
+                "parentId": parent_id,
+                "docId": document_id,
+                "kbId": knowledge_base_id,
+                "userId": user_id,
+                "fileName": file_name,
+                "kbName": kb_name,
+                "contentType": content_type,
+                "ordinal": ordinal,
+                "page": parent.get("page"),
+                "pageEnd": parent.get("pageEnd"),
+                "content": parent["text"],
+                "tokenCount": max(1, len(parent["text"]) // 4),
+                "children": parent_children.get(ordinal, []),
+            },
+        )
+
+    if postings:
+        add_postings(storage, user_id, postings)
+        update_catalog(storage, user_id, list(postings.keys()))
+    update_stats(
+        storage,
+        user_id,
+        delta_chunks=len(chunk_ids),
+        delta_tokens=total_tokens,
+    )
+    storage.put_json(
+        layout.manifest_key(user_id, document_id),
+        {
+            "docId": document_id,
+            "kbId": knowledge_base_id,
+            "userId": user_id,
+            "chunkIds": chunk_ids,
+            "parentIds": parent_ids,
+            "tokens": list(postings.keys()),
+            "totalTokens": total_tokens,
         },
     )
-
-    document_uuid = _as_uuid(document_id)
-    kb_uuid = _as_uuid(knowledge_base_id)
-    user_uuid = _as_uuid(user_id)
-
-    async with get_session() as session:
-        # Children reference parents, so clear them first (parents also cascade).
-        await session.execute(
-            text("DELETE FROM chunks WHERE document_id = :id"), {"id": document_uuid}
-        )
-        await session.execute(
-            text("DELETE FROM document_parents WHERE document_id = :id"),
-            {"id": document_uuid},
-        )
-        await session.execute(
-            text("DELETE FROM document_images WHERE document_id = :id"),
-            {"id": document_uuid},
-        )
-
-        # Insert parents first and remember ordinal -> id for the children.
-        parent_ids: dict[int, int] = {}
-        for parent in parents:
-            ordinal = int(parent.get("ordinal", len(parent_ids)))
-            result = await session.execute(
-                _INSERT_PARENT,
-                {
-                    "document_id": document_uuid,
-                    "knowledge_base_id": kb_uuid,
-                    "user_id": user_uuid,
-                    "ordinal": ordinal,
-                    "page": parent.get("page"),
-                    "page_end": parent.get("pageEnd"),
-                    "content": parent["text"],
-                    "token_count": max(1, len(parent["text"]) // 4),
-                },
-            )
-            parent_ids[ordinal] = result.scalar_one()
-
-        for ordinal, (record, vector) in enumerate(zip(records, chunk_vectors)):
-            chunk = record["text"]
-            parent_ordinal = record.get("parentOrdinal")
-            await session.execute(
-                _INSERT_CHUNK,
-                {
-                    "document_id": document_uuid,
-                    "knowledge_base_id": kb_uuid,
-                    "user_id": user_uuid,
-                    "ordinal": ordinal,
-                    "chunk_hash": hashlib.sha256(chunk.encode("utf-8")).hexdigest(),
-                    "content": chunk,
-                    "token_count": max(1, len(chunk) // 4),
-                    "page": record.get("page"),
-                    "page_end": record.get("pageEnd"),
-                    "parent_id": (
-                        parent_ids.get(int(parent_ordinal))
-                        if parent_ordinal is not None
-                        else None
-                    ),
-                    "embedding": _vector_literal(vector),
-                },
-            )
-
-        for image, vector in zip(images, image_vectors):
-            await session.execute(
-                _INSERT_IMAGE,
-                {
-                    "document_id": document_uuid,
-                    "knowledge_base_id": kb_uuid,
-                    "user_id": user_uuid,
-                    "s3_key": image["key"],
-                    "page": image.get("page"),
-                    "width": image.get("width"),
-                    "height": image.get("height"),
-                    "content_hash": image["hash"],
-                    "embedding": _vector_literal(vector),
-                },
-            )
-
-        await session.commit()
 
     return IndexedDocument(
         chunk_count=len(records),

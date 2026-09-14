@@ -10,9 +10,10 @@ Edit this file freely — opencode loads it automatically as project context.
 ```
 frontend/          React + TypeScript + Tailwind (Vite)
 backend/
-  services/        Python Lambdas + shared layers (health-check, etc.)
-  migrations/      Alembic migrations
-infra/             Terraform, deploy scripts, local Floci stack + migrations
+  services/        Python Lambdas + shared layers (user-api, knowledge-mcp, ingestion-*)
+  tools/           MCP server Lambdas (web-search, code-interpreter)
+  migrations/      (removed — there is no SQL database)
+infra/             Terraform, deploy scripts, local Floci stack
 ```
 
 ## Current status
@@ -23,114 +24,139 @@ infra/             Terraform, deploy scripts, local Floci stack + migrations
 
 ## Architecture
 
-- Frontend talks to API Gateway only; never directly to RDS.
-- Lambdas share code via `backend/services/shared/` (bundled into the `data` layer).
-- Each lambda is one service; that service's logic lives in its `src/handler.py`.
+The backend is **serverless with no VPC and no RDS**:
+
+- **DynamoDB** (single table `get1agent`) holds all operational data.
+- **S3 Vectors** holds the semantic (embedding) index; **S3 objects** hold the
+  keyword (BM25) index, parents, manifests and staged artifacts.
+- **No Lambda joins a VPC.** Everything reaches DynamoDB, S3, S3 Vectors and
+  Bedrock over public endpoints.
+- The frontend talks to API Gateway only; never directly to DynamoDB or S3
+  (uploads use presigned URLs).
+
+### DynamoDB single table
+
+Keys `pk`/`sk` (adjacency list) plus three sparse overloaded GSIs. No vectors,
+chunks or postings in DynamoDB.
+
+| Entity | pk | sk | GSI |
+|---|---|---|---|
+| User | `USER#<sub>` | `#PROFILE` | — |
+| Settings | `USER#<sub>` | `#SETTINGS` | — |
+| Notification prefs | `USER#<sub>` | `#NOTIF` | — |
+| Quota counters | `USER#<sub>` | `#QUOTA` | — |
+| Knowledge base | `USER#<sub>` | `KB#<name>` | `byId`; `byUser` (`KB#<updatedAt>#<name>`) |
+| Document | `KB#<kbId>` | `DOC#<lowerFileName>` | `byId`; `byStatus` (`DOCSTATUS#<status>`) |
+| Tag | `DOC#<docId>` | `TAG#<lowerName>` | `byUser` (`TAG#<lowerName>#<docId>`) |
+| Ingestion event | `DOC#<docId>` | `EVENT#<ts>#<seq>` | `byStatus` (`USER#<sub>#EVENT`) |
+| Skill | `USER#<sub>` | `SKILL#<lowerName>` | `byId`; `byUser` |
+| Session (code-interp) | `USER#<sub>` | `CONV#<conversationId>` | — |
+
+- **GSI1 `byId`** resolves a KB/document/skill by UUID.
+- **GSI2 `byUser`** lists a user's KBs/skills/tags by prefix.
+- **GSI3 `byStatus`** serves the watchdog (`DOCSTATUS#processing`) and the recent
+  events feed (`USER#<sub>#EVENT`).
+- Table is on-demand (`PAY_PER_REQUEST`), TTL attribute `expiresAt`.
+- Repository code lives in `backend/services/shared/dynamo/` (`client.py`,
+  `keys.py`, `repositories/*`). The Auth0 `sub` is the user id everywhere
+  (DynamoDB keys, S3 prefixes, ownership).
+
+### S3 layout
+
+```
+raw/<sub>/<kbId>/<docId>/<fileName>            original upload; ONLY prefix that triggers ingestion
+derived/<sub>/<kbId>/<docId>/text.md           extracted text
+derived/<sub>/<kbId>/<docId>/images/<page>-<i>.<ext>
+derived/<sub>/<kbId>/<docId>/chunks.json       staged parents + children
+derived/<sub>/<kbId>/<docId>/embeddings.json   staged vectors
+index/<sub>/parents/<parentId>.json            parent + children text (hydration)
+index/<sub>/terms/<token>.json                 postings: {df, postings:[{chunkId,docId,kbId,parentId,tf,dl}]}
+index/<sub>/catalog/<c0>.json                  token strings per first char (prefix expansion)
+index/<sub>/docs/<docId>/manifest.json         chunkIds, parentIds, tokens (delete/rebuild)
+index/<sub>/stats.json                         chunkCount, totalTokens, avgdl
+index/<sub>/vectors.json                       local vector store (VECTOR_STORE=local)
+```
+
+- Deterministic IDs: `chunkId=<docId>#<ord>`, `parentId=<docId>#<parentOrd>`.
+- The EventBridge rule filters `detail.object.key` prefix `raw/`, so derived and
+  index writes never re-trigger ingestion.
 
 ### Document ingestion
 
 Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 `POST /v1/knowledge-bases/{id}/documents/{docId}/complete`.
 
-- **Production**: S3 `ObjectCreated` → EventBridge → SQS
+- **Production**: S3 `ObjectCreated` (raw/) → EventBridge → SQS
   (`ingestion-docs` + DLQ) → `ingestion-dispatcher` (batch 5, partial batch
   failures) → **Step Functions Standard** (`ingest-{docId}-{eventToken}`) →
   `ingestion-extract` → `ingestion-embed` → `ingestion-index` (any stage failure
-  → `ingestion-mark-failed`). Each stage is its own Lambda for per-stage
-  memory/timeout/IAM and clear failure visibility. There is no in-process
-  ingestion path.
-- **VPC split**: `ingestion-extract`, `ingestion-index` and
-  `ingestion-mark-failed` run in the VPC because they write RDS; `ingestion-embed`
-  and `ingestion-dispatcher` run **outside** the VPC. `ingestion-extract` chunks
-  text and stages `chunks.json` in S3 (it owns the per-KB config + timeline);
-  `ingestion-embed` reads it, calls Bedrock over the public internet, and writes
-  `embeddings.json` back to S3; `ingestion-index` reads that and persists to
-  pgvector. Keeping the Bedrock call out of the VPC removes the need for a
-  Bedrock interface endpoint (PrivateLink).
-- **Local**: the Floci stack runs this exact path; see "Local development".
-- Pipeline code is shared: `backend/services/shared/ingestion/` (chunking, extractors,
-  embeddings, pipeline). Heavy extractor deps (`pymupdf`, `python-docx`,
-  `openpyxl`) ship in the worker zip, **not** the shared layer.
-- Embeddings: **Titan Text V2** (`amazon.titan-embed-text-v2:0`) for text chunks
-  and **Titan Multimodal G1** (`amazon.titan-embed-image-v1`) for images. They
-  are different vector spaces → separate `chunks` and `document_images` tables.
-- pgvector runs on the existing RDS; enable via migration `0003_ingestion`.
+  → `ingestion-mark-failed`). Each stage is its own Lambda.
+- **3 stages**: `ingestion-extract` downloads + parses + **chunks** (writes
+  `derived/` + `chunks.json`); `ingestion-embed` reads `chunks.json`, calls
+  Bedrock (or Ollama locally), writes `embeddings.json`; `ingestion-index` writes
+  vectors (S3 Vectors / local), parent objects, term postings, catalog, stats and
+  the manifest, then sets `documents.status=ready`.
+- Pipeline code is shared in `backend/services/shared/ingestion/` (chunking,
+  extractors, embeddings, pipeline). Heavy extractor deps (`pymupdf`,
+  `python-docx`, `openpyxl`) ship in the worker zip, **not** the shared layer.
+- Embeddings: **Titan Text V2** (`amazon.titan-embed-text-v2:0`) in production,
+  Ollama `mxbai-embed-large` locally. Image embeddings are computed but not
+  searched.
 - Ingestion config (embedding model + chunk size/overlap) is **per knowledge
-  base**, set at creation (`knowledge_bases` columns); the page-level
-  "Workspace defaults" card only pre-fills the create dialog. Changing it after
-  documents exist means re-indexing.
-- `ingestion_events` is the append-only timeline the UI reads
-  (`GET /v1/knowledge-bases/events`). The worker updates `documents.status`
-  (`processing`/`ready`/`failed`) and `knowledge_bases.status` follows.
-- The VPC has no NAT: the in-VPC workers reach S3 through the free gateway
-  endpoint and RDS over the VPC network. The Bedrock call lives in
-  `ingestion-embed`, outside the VPC, so no Bedrock interface endpoint
-  (PrivateLink) is needed; the dispatcher is outside the VPC too (it only calls
-  Step Functions).
-
-### Ingestion observability
-
-- Workers emit one JSON log line per stage (`shared/observability.py`) with
-  `documentId` / `knowledgeBaseId` / `stage`, so CloudWatch Logs Insights can
-  query by document: `fields @timestamp, message | filter documentId = "…"`.
-- `ingestion_events` is the UI timeline; `documents.status` is the terminal
-  state. The UI shows a **Stalled** badge when a document stops advancing.
-- A scheduled `ingestion-watchdog` (EventBridge `rate(10 minutes)`, in the VPC)
-  fails any document left in `processing` past `STALL_THRESHOLD_MINUTES`
-  (default 75), so an aborted execution can never stay silently stuck. The
-  threshold exceeds the state machine `TimeoutSeconds` (3600s) so it never races
-  a still-running execution.
-- No CloudWatch alarms are provisioned (monitoring will live in an admin panel).
-- X-Ray (`enable_xray`, default true) traces the ingestion workers + state
-  machine. Lambda log retention is 7 days (`log_retention_days`).
+  base**, set at creation (`knowledge_bases` columns); the page-level "Workspace
+  defaults" card only pre-fills the create dialog.
+- `ingestion_events` (DynamoDB) is the append-only timeline the UI reads
+  (`GET /v1/knowledge-bases/events`). The index stage updates `documents.status`
+  (`processing`/`ready`/`failed`) and `knowledge_bases.status` follows via a
+  `processingCount` counter.
+- **Idempotent:** the index stage is delete-then-write per document
+  (manifest-driven), so a retry or re-upload re-indexes cleanly.
+- **Failure:** mark `failed`, emit a `failed` event, ack poison messages to the
+  DLQ.
+- A scheduled `ingestion-watchdog` (EventBridge `rate(10 minutes)`) fails any
+  document left in `processing` past `STALL_THRESHOLD_MINUTES` (default 75),
+  using GSI3. The threshold exceeds the state machine `TimeoutSeconds` (3600s).
+- No CloudWatch alarms are provisioned. X-Ray (`enable_xray`, default true)
+  traces the ingestion workers + state machine. Lambda log retention is 7 days.
 
 ### Retrieval & MCP tools
 
-- Two agent tools, plus an internal worker, share code in
-  `backend/services/shared/retrieval/` (bundled in the data layer):
-  - `get-user-knowledge-bases` (in VPC) — resolves the caller's knowledge bases
-    by name/id and returns KBs, documents, and tags. Metadata only, no search.
-  - `search-user-knowledge-bases` (**outside** VPC) — embeds the query (Titan V2
-    prod / Ollama local), invokes `retrieval-query`, optionally reranks, and
-    shapes chunks + sources.
-  - `retrieval-query` (in VPC) — internal only; resolves the user + KBs and runs
-    hybrid search. Never exposed to the agent.
-- **Hybrid search is always on**: a pgvector cosine leg (`chunks.embedding`,
-  HNSW) and a Postgres FTS leg (`chunks.content_tsv`, generated `tsvector` +
-  GIN) are fused with Reciprocal Rank Fusion, then hydrated with `ts_headline`
-  snippets. `documents.status = 'ready'` is always required. The lexical leg
-  builds an **OR/prefix** tsquery (`personal:* | project:*`); the default
-  `websearch_to_tsquery` ANDs every term and effectively disables the leg for
-  natural-language questions.
+- **Hybrid search is always on** and runs **inside `knowledge-mcp`** (there is no
+  separate retrieval Lambda):
+  - **Semantic leg**: one S3 Vectors `QueryVectors` on the caller's per-user
+    index (`idx-<sub>`), `topK=100`, filtered by `kbId` + `status=ready`.
+  - **Lexical leg**: tokenize the query, prefix-expand via the catalog shard,
+    `GetObject` each term, score BM25 in-Lambda (`k1=1.2, b=0.75`; `df` from the
+    term object, `dl` from the posting, `avgdl` from `stats.json`).
+  - Both legs run in parallel and fuse with Reciprocal Rank Fusion (`RRF_K=60`).
+  - The semantic store is selected by `VECTOR_STORE=s3vectors|local` (a
+    `dynamodb` value is reserved but not implemented).
 - **Small-to-big retrieval**: only the small child chunks are embedded and
-  searched. Each child points at a `document_parents` row — a PDF source page
-  (a huge page becomes several parents sharing the page number), or a
-  fixed-size window for non-paginated formats. Results return the parent's full
-  `content` for context, the precise `matchedContent` child, and the child's
-  highlighted `snippet`; parents are deduplicated per document/page. Default
-  child size is **384 tokens** with 64 overlap, so children always fit every
-  embedder window (`mxbai-embed-large` truncates past 512).
-- **Rerank is opt-in** (`rerank: true`) and uses Bedrock Rerank
-  (`amazon.rerank-v1:0`, `us-west-2` — not available in `ap-south-1`) from the
-  outside-VPC orchestrator. Locally `RERANK_MODE=local` calls a HuggingFace TEI
-  cross-encoder (`reranker` container, `POST /rerank`); if it is unreachable the
-  RRF order is returned instead of failing the search.
-- **Identity is passed in the event** (`auth0Sub`), not a JWT: the tools are
-  invoked directly via `lambda:InvokeFunction` (no API Gateway routes). Only the
-  caller's IAM role may invoke them.
-- **Each MCP server is its own Lambda** (`awslabs.mcp-lambda-handler`, stateless)
-  and exposes its tools over its own `POST /mcp…` route behind the Auth0 JWT
-  authorizer, plus the direct Lambda invoke transport. `knowledge-mcp` owns the
-  knowledge tools (`POST /mcp`), `web-search` owns `web-search`
+  searched. Each child points at a parent — a PDF source page (a huge page
+  becomes several parents sharing the page number), or a fixed-size window for
+  non-paginated formats. Hydration is **one `GetObject` per unique parent**; the
+  parent object carries its children's text, so results return the parent's full
+  `content`, the precise `matchedContent` child and a term-window `snippet`.
+  Parents are deduplicated per document/page.
+- Default child size is **512 tokens** with 64 overlap (config default in
+  `shared/ingestion/config.py`), so children fit every embedder window.
+- **Rerank is opt-in** (`rerank: true`): Bedrock Rerank
+  (`amazon.rerank-v1:0`, `us-west-2`) in production; locally `RERANK_MODE=local`
+  calls a HuggingFace TEI cross-encoder (`reranker` container, `POST /rerank`).
+  If it is unreachable the RRF order is returned instead of failing.
+- **Identity is passed in the event** (`auth0Sub`) for direct invokes, or comes
+  from JWT claims for HTTP.
+- **Each MCP server is its own Lambda** (`awslabs.mcp-lambda-handler`,
+  stateless) exposing its tools over its own `POST /mcp…` route behind the Auth0
+  JWT authorizer, plus the direct Lambda invoke transport. `knowledge-mcp` owns
+  the knowledge tools (`POST /mcp`), `web-search` owns `web-search`
   (`POST /mcp/web-search`) and `code-interpreter` owns `code-interpreter`
-  (`POST /mcp/code-interpreter`). The shared transport (`ai/mcp_server.py`)
-  stashes `auth0Sub` from the JWT claims (HTTP) or the event (direct invoke) for
-  the tool functions. There are no exceptions: every tool is its own server.
+  (`POST /mcp/code-interpreter`).
 - Knowledge base names follow **S3-bucket-style rules** (lowercase letters,
   digits and hyphens; 3–63 chars; must start/end alphanumeric) and are unique
   per user (`uq_knowledge_bases_user_name`); the create handler returns `409` on
   a duplicate. Per-user limits: **30 knowledge bases, 50 files each, 100 MB
-  storage** (`shared/models/user_quota.py`, migration `0007_quota_limits`).
+  storage** (`shared/dynamo/repositories/quotas.py`).
 
 ### Code interpreter tool
 
@@ -138,119 +164,84 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   Lambda (`POST /mcp/code-interpreter`) owning the `code-interpreter` tool. It
   runs LLM-generated Python in **Bedrock AgentCore Code Interpreter** sandboxes
   (`aws.codeinterpreter.v1`, available in `ap-south-1`). It is **outside the
-  VPC** (AgentCore + DynamoDB are public endpoints) and bundles `boto3` (the
-  runtime may predate the `bedrock-agentcore` service model). The admin tester
-  aggregates it with the other servers, so agents and the admin see one list.
+  VPC** (AgentCore + DynamoDB are public endpoints).
 - **Guard**: before any AWS call, `guard.py` runs an AST/literal pass blocking
-  OS/shell (`subprocess`, `pty`, `ctypes`, dangerous `os.*`), network/cloud SDKs
-  (`socket`, `requests`, `urllib`, `boto3`, …), dynamic code
-  (`exec`/`eval`/`__import__`/`importlib`) and heavy ML (`torch`, `tensorflow`,
-  `transformers`, …). Data libs (`numpy`, `pandas`, `matplotlib`, …) are
-  allowed. `BLOCKED_MODULES`/`ALLOWED_MODULES` extend/except the list. Every
-  execution is also prefixed with an idempotent `sys.addaudithook` prelude that
-  blocks denied imports and dangerous audit events inside the sandbox. The
-  microVM remains the real isolation boundary.
-- **Sessions**: one AgentCore session per `(auth0Sub, conversationId)` (default
-  thread), stored in the `code-interpreter-sessions` DynamoDB table with a TTL
-  (`expiresAt`) and capped at `CODE_INTERPRETER_MAX_SESSIONS_PER_USER` (1) with
-  LRU eviction. A deterministic `clientToken` (`uuid5` of user+thread+TTL
-  bucket) plus a conditional write dedupes concurrent invocations. Only
-  `executeCode`/python is ever called — never `executeCommand`.
+  OS/shell, network/cloud SDKs, dynamic code and heavy ML. `BLOCKED_MODULES`/
+  `ALLOWED_MODULES` extend/except the list. Every execution is also prefixed with
+  an idempotent `sys.addaudithook` prelude. The microVM remains the real
+  isolation boundary.
+- **Sessions**: one AgentCore session per `(auth0Sub, conversationId)` stored in
+  the **main `get1agent` DynamoDB table** (`USER#<sub>` / `CONV#<thread>`) with a
+  TTL (`expiresAt`) and capped at `CODE_INTERPRETER_MAX_SESSIONS_PER_USER` (1)
+  with LRU eviction. A deterministic `clientToken` (`uuid5`) plus a conditional
+  write dedupes concurrent invocations.
 - **Timeouts**: `CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS` (120) is enforced while
   streaming; on overrun the session is stopped. The code-interpreter Lambda
   timeout is 240s; `knowledge-mcp` (and `mcp-tester`) timeouts are 300s so the
-  synchronous call chain fits. API Gateway caps HTTP integrations at 30s, so
-  long runs must use direct invoke.
+  synchronous call chain fits. API Gateway caps HTTP integrations at 30s, so long
+  runs must use direct invoke.
 - **Local**: `CODE_INTERPRETER_MODE=local` runs the same guard + prelude in an
   isolated subprocess with `resource` limits (Floci does not emulate AgentCore).
-  Session reuse is tracked in-process so `sessionId`/`reused` are still
-  exercised locally.
 
 ### Web search tool
 
 - `web-search` (`backend/tools/web-search/`) is its own MCP server Lambda
   (`POST /mcp/web-search`) owning the `web-search` tool. It calls the **Exa
-  Search API** (`POST https://api.exa.ai/search`) for current web information.
-  It is **outside the VPC** (Exa is a public HTTPS endpoint) and ships no
-  third-party HTTP client — a stdlib `urllib` client, not the `exa-py` SDK (it
-  does bundle the shared MCP handler + `python-dateutil`). The admin tester
-  aggregates it with the other servers, so agents and the admin see one list.
-- **Primary arguments** are `query` (required), `numResults` (default 10, max
-  25), `type` (default `auto`), `maxAgeHours` (default 24) and
-  `includeDomains`/`excludeDomains`. The remaining arguments are advanced
-  pass-throughs with no defaults of our own (except the default content, below).
-- **Cost-aware defaults** (see https://exa.ai/pricing): `type=auto`, 10 results
-  (`numResults` is capped at 25), `maxAgeHours=24` (reuse cache under a day,
-  then live fallback), and **highlights + capped page text (4000 chars)**. Exa
-  bills `/search` per request, so text and highlights cost the same as
-  highlights alone; the cap bounds the agent's token budget. AI `summary` is
-  the   only content that costs extra (opt-in), and `deep-lite`/`deep` raise the
-  per-request price. Deep types can return zero results (and bill nothing), so
-  the tool retries once with `type=auto` when that happens.
-- **Full Exa surface** is exposed as flat tool arguments: `numResults`, `type`
-  (limited to `instant`/`fast`/`auto`/`deep-lite`/`deep`; `auto` is the
-  default), `category`, `includeDomains`/`excludeDomains`,
-  `startPublishedDate`/`endPublishedDate`, `includeText`/`excludeText`,
-  `userLocation`, `moderation`, `additionalQueries`, `systemPrompt`, plus
-  content controls `text`, `textMaxCharacters`, `highlights`, `highlightsQuery`,
-  `highlightsMaxCharacters`, `summary`, `summaryQuery`, `maxAgeHours`,
-  `livecrawlTimeout`, `subpages`, `subpageTarget`. `company`/`people`
-  categories silently drop the filters Exa rejects for them (with a warning in
-  `meta.warnings`).
+  Search API** (`POST https://api.exa.ai/search`). It is **outside the VPC** and
+  ships no third-party HTTP client — a stdlib `urllib` client.
+- Cost-aware defaults: `type=auto`, 10 results (cap 25), `maxAgeHours=24`, and
+  highlights + capped page text (4000 chars). Deep types can return zero results;
+  the tool retries once with `type=auto`.
 - Config: `EXA_API_KEY` (required), `EXA_API_BASE_URL`,
   `WEB_SEARCH_TIMEOUT_SECONDS`, `WEB_SEARCH_MAX_RESULTS`. There is **no local
   emulation branch** — Floci containers reach `api.exa.ai` directly using the
-  host `EXA_API_KEY`; set it in `.env` (see `infra/local/floci/env.example`).
-  Results carry `meta.costDollars`/`meta.requestId` so cost is visible per call.
+  host `EXA_API_KEY`; set it in `.env`.
+
+### Agent skills
+
+- `agent-skills` CRUD is part of **`user-api`** — a user's reusable skills in the
+  **strands format**: YAML frontmatter (`name`, `description`, `allowed-tools`)
+  plus a markdown body. Routes: `GET/POST /v1/agent-skills`,
+  `GET /v1/agent-skills/tools`, `POST /v1/agent-skills/parse`,
+  `GET/PUT/DELETE /v1/agent-skills/{id}`.
+- Frontmatter fields are stored in **separate DynamoDB attributes** (`name`,
+  `description`, `allowedTools`, `content`) so an agent can list cheap metadata
+  and only fetch the full body when a skill applies. No S3 object. Limits:
+  **50 skills/user, 100 KB per skill**; names are lowercase-hyphen (1–64) and
+  unique per user (the item key `SKILL#<name>`).
+- The parse/render/validation logic is shared in `shared/skills/` (data layer,
+  no PyYAML). `POST /parse` is what the editor calls when a user uploads a `.md`.
+- **allowed-tools** is a multi-select. Built-ins `code-interpreter` and
+  `web-search` are offered to everyone; knowledge-base tools are internal and
+  never shown.
 
 ### Admin console & strict role separation
 
 - **Admin** is an Auth0 role. The Login Action copies `event.authorization.roles`
-  onto namespaced custom claims on both tokens:
-  `https://get1agent.com/roles` and `https://get1agent.com/isAdmin`. Assign the
-  `admin` role to a user in Auth0; re-login refreshes the tokens.
+  onto namespaced custom claims: `https://get1agent.com/roles` and
+  `https://get1agent.com/isAdmin`. Assign the `admin` role in Auth0; re-login
+  refreshes the tokens.
 - Shared role logic lives in the **`ai` Lambda layer**
   (`backend/services/layers/ai/ai/auth.py`): `is_admin_claims`, `require_admin`
-  (admin Lambdas) and `require_user` (user Lambdas). The layer also holds the
-  thin MCP JSON-RPC client (`ai/mcp_client.py`).
+  and `require_user`. The layer also holds the thin MCP JSON-RPC client
+  (`ai/mcp_client.py`) and the shared MCP transport (`ai/mcp_server.py`).
 - **View-based access, enforced server-side** — the frontend is only a UX gate.
-  A user with several roles (e.g. `admin`) picks a **view** after login; the
-  SPA sends it on every request as `x-active-view` (`user` | `admin`), and the
-  backend validates it against the token's real roles:
-  - `require_user` (user view): `knowledge-bases`, `account-settings`, and the
-    `knowledge-mcp` **HTTP** path. An admin who chose the user view is allowed,
-    which is how they add data before testing it.
-  - `require_admin` (admin view): `mcp-tester`. A normal user can never set the
-    admin view.
+  The SPA sends `x-active-view` (`user` | `admin`); the backend validates it
+  against the token's real roles:
+  - `require_user` (user view): `user-api` and the `knowledge-mcp` **HTTP** path.
+    An admin who chose the user view is allowed.
+  - `require_admin` (admin view): `mcp-tester`.
   - No header → falls back to `admin` if the token has the admin role, else
-    `user` (keeps direct invokes/curl working).
+    `user`.
 - Admin code is kept separate: frontend UI under `frontend/src/admin/`, backend
-  Lambda under `backend/services/admin/mcp-tester/`. The shared role/view logic
-  lives in `frontend/src/auth/` and `backend/services/layers/ai/ai/auth.py`.
-- Frontend routing (`frontend/src/App.tsx`): `RequireAuth` → `SelectViewPage`
-  (`/select-view`, shown when more than one view is available) → `RequireUser`
-  (main app) or `RequireAdmin` (`/admin`). `RoleRedirect` sends `/` and
-  `/administration` to the selected view's home. A fresh Auth0 login clears the
-  stored view; reloads keep it. The account menu has **Switch view**.
+  Lambda under `backend/services/admin/mcp-tester/`.
 - **`mcp-tester`** (`GET /v1/admin/mcp/tools`, `POST /v1/admin/mcp/call`) is the
   MCP *client*: it reads the admin claim + `sub`, builds MCP JSON-RPC, and
   invokes every MCP server in `MCP_FUNCTIONS` over their direct-invoke
   transports, merging their tool lists and routing each call to the owning
-  server. The admin UI
-  (`frontend/src/admin/pages/AdminIntegrationsPage.tsx`) lists tools via
-  `tools/list`, renders an argument form from each tool's `inputSchema`, and
-  shows the raw request/response.
-- The `ai` layer has **no third-party dependencies** (stdlib + boto3 from the
-  runtime). It holds the role/view checks, the thin MCP JSON-RPC client
-  (`ai/mcp_client.py`) and the shared MCP transport (`ai/mcp_server.py`), so each
-  MCP server Lambda stays lightweight.
+  server.
 
 ## Conventions
-
-<!-- Coding style, naming, libraries. Example:
-- Python: ruff, type hints required.
-- TypeScript: strict mode, no default exports.
--->
 
 ### Page loading states
 
@@ -259,8 +250,7 @@ Loading is handled in one place per concern — never hand-roll timers per page.
 - **Route entry (all pages):** routes are lazy (`React.lazy` in `App.tsx`) and
   `RouteGate` in `layouts/MainLayout.tsx` shows a page-shaped skeleton only
   while the lazy route chunk loads. The shape comes from
-  `components/ui/RouteSkeleton.tsx`. There is no minimum display time — loading
-  is driven purely by how long the chunk and the page's data actually take.
+  `components/ui/RouteSkeleton.tsx`. There is no minimum display time.
 - **Page data:** fetch with `usePageQuery(key, fetcher)`
   (`frontend/src/hooks/usePageQuery.ts`). Render a **shaped skeleton** while
   `isPending`, inside a single `<PageShell>`:
@@ -287,8 +277,7 @@ The ingestion timeline refreshes through `useAdaptivePoll`
 - Polling only runs while the **Activity panel is open** and something is
   active (`pending`/`uploaded`/`processing`). A closed panel makes zero requests.
 - Backoff 2s → 15s, reset when a new event arrives; paused while the tab is hidden.
-- Stops after 10 minutes of active polling and shows a manual **Refresh** so a
-  stuck document cannot poll forever.
+- Stops after 10 minutes of active polling and shows a manual **Refresh**.
 - Tune it in exactly one spot: the `useAdaptivePoll` call in
   `frontend/src/pages/KnowledgeBasesPage.tsx`.
 
@@ -296,13 +285,13 @@ The ingestion timeline refreshes through `useAdaptivePoll`
 
 Everything runs locally on **Floci** — a free, LocalStack-compatible AWS
 emulator (no AWS account, no auth token). Lambda, API Gateway, S3, SQS,
-EventBridge and Step Functions run in Docker; Postgres + pgvector run alongside.
-There is no custom local emulation: the same Lambda code, the same state machine
-definition and the same API routes as production run against Floci, configured
-only by environment variables.
+EventBridge and Step Functions run in Docker; **DynamoDB Local** stores
+operational data. There is no custom local emulation: the same Lambda code, the
+same state machine definition and the same API routes as production run against
+Floci, configured only by environment variables.
 
 ```bash
-make floci            # build + start + provision + migrate; prints the API URL
+make floci            # build + start + provision; prints the API URL
 make ui               # React app -> http://localhost:5173
 make floci-logs       # follow Floci logs
 make floci-down       # stop and remove
@@ -311,51 +300,43 @@ make floci-down       # stop and remove
 - API base URL: `http://get1agent.execute-api.localhost.floci.io:4566`
   (`localhost.floci.io` resolves to 127.0.0.1 on the host, and Floci's embedded
   DNS resolves it inside Lambda containers, so presigned S3 URLs work from both).
-- Point the UI at it via the Vite dev proxy (Floci only sends CORS headers on
-  the preflight, not on proxied API Gateway responses):
+- Point the UI at it via the Vite dev proxy:
   `printf 'VITE_API_URL=/\nVITE_API_PROXY_TARGET=http://get1agent.execute-api.localhost.floci.io:4566\n' > frontend/.env.local`
-  (or just run `make floci`, which prints this). `VITE_API_URL=/` keeps the
-  browser same-origin; the dev server forwards `/v1` to Floci.
 - Auth: the HTTP API uses a JWT authorizer against the real Auth0 issuer, so the
-  Floci container needs network access to `https://get1agent.us.auth0.com/`
-  (OIDC discovery + JWKS). Configure via `AUTH0_ISSUER` / `AUTH0_AUDIENCE`.
-- Compose file: `infra/local/floci/docker-compose.yml`. Host env: the root `.env`
-  (from `infra/local/floci/env.example`).
-- `infra/local/floci/init/ready.d/10-provision.py` mirrors Terraform: bucket +
-  EventBridge notification → rule → SQS + DLQ → dispatcher → state machine →
-  workers, plus the HTTP API + JWT authorizer + routes from
-  `infra/terraform/envs/prod/api_gateway.tf`.
+  Floci container needs network access to `https://get1agent.us.auth0.com/`.
+- Compose file: `infra/local/floci/docker-compose.yml`. Host env: the root
+  `.env` (from `infra/local/floci/env.example`).
+- `infra/local/floci/init/ready.d/10-provision.py` mirrors Terraform: DynamoDB
+  table + GSIs, bucket + EventBridge notification (`raw/` prefix) → rule → SQS +
+  DLQ → dispatcher → state machine → workers, plus the HTTP API + JWT authorizer
+  + routes from `infra/terraform/envs/prod/api_gateway.tf`.
 - The state machine definition is the same file Terraform deploys:
   `infra/terraform/modules/ingestion/statemachine.asl.json`.
 - Ingestion runs with `EMBED_MODE=local`: real 1024-dim vectors from an Ollama
-  container (`mxbai-embed-large`), so no Bedrock is needed. `make floci` pulls
-  the model; `EMBED_MODE=bedrock` (production) uses Titan instead.
-- Rerank runs with `RERANK_MODE=local`: a HuggingFace TEI container
-  (`reranker`, `POST /rerank`) scores candidates with a cross-encoder
-  (`cross-encoder/ms-marco-MiniLM-L6-v2` by default, configurable via
-  `LOCAL_RERANK_MODEL`). `make floci` starts it and waits for `/health`.
-  `RERANK_MODE=bedrock` (production) uses Amazon Rerank instead.
+  container (`mxbai-embed-large`). `make floci` pulls the model.
+- Retrieval runs with `VECTOR_STORE=local` (brute-force cosine over
+  `index/<sub>/vectors.json`; S3 Vectors is not emulated) and `RERANK_MODE=local`
+  (HuggingFace TEI `reranker`, `POST /rerank`). `make floci` starts it and waits
+  for `/health`.
 - After changing Lambda code: `make floci-build` then `make floci-up`
-  (provisioning is re-run on every boot).
-- `infra/scripts/migrate.sh` still handles generic local migrations; `make
-  floci-migrate` / `make floci-migrate-down` point it at the Floci Postgres.
+  (provisioning is re-run on every boot), or `make floci-reload`.
 
 ### Migrations
 
-- **Local (Floci):** `make floci-migrate` (upgrade to head) and
-  `make floci-migrate-down` (downgrade one revision). The script is
-  `infra/local/floci/migrate.sh`; pass an explicit revision with
-  `bash infra/local/floci/migrate.sh upgrade <rev>`.
-- **Production:** run the **Migrate** GitHub Actions workflow
-  (`.github/workflows/migrate.yml`) — pick `upgrade`/`downgrade` and an optional
-  revision. It packages `backend/migrations` + `backend/services/shared`, uploads them to
-  S3, and runs Alembic on the jumpbox EC2 (inside the VPC) over SSM. There is no
-  migration Lambda.
+None. There is no SQL database and no migration tooling — DynamoDB schemas are
+created by Terraform (`infra/terraform/modules/dynamodb`) and by the Floci init
+hook locally. Adding an attribute or GSI is a code/Terraform change, not a
+migration.
 
 ## Commands
 
 - Frontend: `npm run dev`, `npm run lint`, `npm run build`
-- Local Lambdas / migrations: see "Local development" above.
+- Backend tests: `make test` — integration tests in `backend/tests/` using
+  `moto` (DynamoDB) + an in-memory S3 double. No Docker, no AWS. Run a single
+  file with `cd backend/tests && uv run pytest test_search.py`.
+- Local Lambdas / infra: see "Local development" above (`make floci-*`).
+- Backend Lambdas: `make -C backend/services/<name> package`;
+  `bash infra/aws/deploy-backend.sh <name> [package|deploy]`.
 
 ## Rules
 
@@ -373,6 +354,5 @@ make floci-down       # stop and remove
   empty states should point to the existing header action instead.
 
 ## Do not touch
-
 
 <!-- Paths agents must never modify. -->

@@ -1,5 +1,4 @@
 import { Navigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import { ShieldCheck, UserRound } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useTheme } from '../theme/ThemeProvider'
@@ -9,26 +8,13 @@ import type { AppView } from './view'
 type ViewOption = {
   id: AppView
   label: string
-  description: string
   icon: LucideIcon
   home: string
 }
 
 const OPTIONS: ViewOption[] = [
-  {
-    id: 'user',
-    label: 'User',
-    description: 'The workspace: knowledge bases, chat, agents and settings.',
-    icon: UserRound,
-    home: '/dashboard',
-  },
-  {
-    id: 'admin',
-    label: 'Admin',
-    description: 'The admin console: test MCP integrations and tools.',
-    icon: ShieldCheck,
-    home: '/admin/mcp-tools',
-  },
+  { id: 'user', label: 'User', icon: UserRound, home: '/dashboard' },
+  { id: 'admin', label: 'Admin', icon: ShieldCheck, home: '/admin/mcp-tools' },
 ]
 
 export function SelectViewPage() {
@@ -48,54 +34,45 @@ export function SelectViewPage() {
   const options = OPTIONS.filter((option) => available.includes(option.id))
 
   return (
-    <div className="app-mesh-bg relative flex min-h-screen items-center justify-center px-6 py-12">
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
-        className="w-full max-w-lg"
-      >
-        <div className="mb-8 flex justify-center">
+    <div className="flex min-h-screen items-center justify-center bg-canvas px-6 py-12">
+      <div className="w-full max-w-md">
+        <div className="mb-2 flex justify-center">
           <img
             src={logoSrc}
             alt="OneAgent"
-            className="h-14 w-auto object-contain"
+            className="h-40 w-auto max-w-full object-contain sm:h-52"
           />
         </div>
-        <h1 className="text-center text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-          Choose a view
+        <h1 className="text-center text-lg font-semibold tracking-tight text-foreground">
+          Choose a role
         </h1>
-        <p className="mx-auto mt-2 max-w-md text-center text-sm leading-relaxed text-muted">
-          You have access to more than one area. Pick where to go — you can
-          switch anytime from the account menu.
+        <p className="mx-auto mt-1.5 max-w-sm text-center text-[13px] leading-relaxed text-muted">
+          You can switch anytime from the account menu.
         </p>
 
-        <div className="mt-8 grid gap-3">
-          {options.map((option) => {
-            const Icon = option.icon
-            return (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => chooseView(option.id)}
-                className="group flex items-center gap-4 rounded-2xl border border-border bg-surface px-5 py-4 text-left shadow-panel transition-colors hover:border-accent/30 hover:bg-raised"
-              >
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
-                  <Icon className="h-5 w-5" strokeWidth={1.75} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-foreground">
-                    Continue as {option.label}
+        <div className="mt-6 overflow-hidden rounded-lg border border-border bg-surface">
+          <div className="divide-y divide-border">
+            {options.map((option) => {
+              const Icon = option.icon
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => chooseView(option.id)}
+                  className="flex w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors hover:bg-raised/50"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-raised text-accent">
+                    <Icon className="h-4 w-4" strokeWidth={1.75} />
                   </span>
-                  <span className="mt-0.5 block text-xs leading-relaxed text-muted">
-                    {option.description}
+                  <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
+                    {option.label}
                   </span>
-                </span>
-              </button>
-            )
-          })}
+                </button>
+              )
+            })}
+          </div>
         </div>
-      </motion.div>
+      </div>
     </div>
   )
 }

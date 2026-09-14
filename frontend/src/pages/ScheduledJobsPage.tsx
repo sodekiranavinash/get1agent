@@ -1,9 +1,26 @@
-import { CalendarClock, Clock, Pause, Play, Plus } from 'lucide-react'
+import { motion } from 'framer-motion'
+import {
+  CalendarClock,
+  Clock,
+  MoreHorizontal,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Trash2,
+} from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
-import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu'
+import { fadeUp } from '../lib/motion'
 
 const jobs = [
   {
@@ -35,78 +52,100 @@ export function ScheduledJobsPage() {
       <PageHeader
         title="Schedules"
         description="Automate saved agents and workflows on a schedule — set it and let them run on their own."
-        badge="Workspace"
-        action={{ label: 'New Schedule', icon: <Plus className="h-4 w-4" /> }}
+        action={{ label: 'New schedule', icon: <Plus className="size-3.5" /> }}
       />
 
-      <Card padding="none" className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-border bg-raised/50">
-                <th className="px-5 py-3 text-xs font-semibold tracking-wide text-muted uppercase">
-                  Workflow
-                </th>
-                <th className="px-5 py-3 text-xs font-semibold tracking-wide text-muted uppercase">
-                  Schedule
-                </th>
-                <th className="px-5 py-3 text-xs font-semibold tracking-wide text-muted uppercase">
-                  Next Run
-                </th>
-                <th className="px-5 py-3 text-xs font-semibold tracking-wide text-muted uppercase">
-                  Last Run
-                </th>
-                <th className="px-5 py-3 text-xs font-semibold tracking-wide text-muted uppercase">
-                  Status
-                </th>
-                <th className="px-5 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((job) => (
-                <tr
-                  key={job.name}
-                  className="border-b border-border last:border-0 transition-colors hover:bg-raised/30"
-                >
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent-soft text-accent">
-                        <CalendarClock className="h-4 w-4" strokeWidth={1.75} />
-                      </div>
-                      <span className="font-medium text-foreground">{job.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-4 text-muted">
-                    <span className="flex items-center gap-1.5">
-                      <Clock className="h-3.5 w-3.5" />
-                      {job.schedule}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4 text-muted">{job.nextRun}</td>
-                  <td className="px-5 py-4 text-muted">{job.lastRun}</td>
-                  <td className="px-5 py-4">
-                    <Badge
-                      variant={job.status === 'active' ? 'success' : 'warning'}
-                      dot={job.status === 'active'}
-                    >
-                      {job.status}
-                    </Badge>
-                  </td>
-                  <td className="px-5 py-4">
-                    <Button variant="ghost" size="sm">
-                      {job.status === 'active' ? (
-                        <Pause className="h-4 w-4" />
-                      ) : (
-                        <Play className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </td>
+      <motion.div variants={fadeUp} initial="hidden" animate="show">
+        <Card padding="none" className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left">
+              <thead>
+                <tr className="border-b border-border bg-raised/40">
+                  {['Workflow', 'Schedule', 'Next run', 'Last run', 'Status', ''].map(
+                    (header) => (
+                      <th
+                        key={header}
+                        className="px-4 py-2.5 text-[11px] font-semibold text-muted"
+                      >
+                        {header}
+                      </th>
+                    ),
+                  )}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {jobs.map((job) => (
+                  <tr key={job.name} className="transition-colors hover:bg-raised/40">
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex size-7 items-center justify-center rounded-md border border-border bg-raised text-accent">
+                          <CalendarClock className="size-3.5" strokeWidth={1.75} />
+                        </span>
+                        <span className="text-[13px] font-medium text-foreground">
+                          {job.name}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-muted">
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="size-3.5" />
+                        {job.schedule}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-muted">{job.nextRun}</td>
+                    <td className="px-4 py-2.5 text-xs text-muted">{job.lastRun}</td>
+                    <td className="px-4 py-2.5">
+                      <Badge
+                        variant={job.status === 'active' ? 'success' : 'warning'}
+                        dot={job.status === 'active'}
+                      >
+                        {job.status}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={`Actions for ${job.name}`}
+                            className="rounded-md p-1.5 text-subtle transition-colors hover:bg-raised hover:text-foreground"
+                          >
+                            <MoreHorizontal className="size-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                          <DropdownMenuItem>
+                            {job.status === 'active' ? (
+                              <>
+                                <Pause className="size-3.5" />
+                                Pause
+                              </>
+                            ) : (
+                              <>
+                                <Play className="size-3.5" />
+                                Resume
+                              </>
+                            )}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem>
+                            <Pencil className="size-3.5" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem variant="destructive">
+                            <Trash2 className="size-3.5" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </motion.div>
     </PageShell>
   )
 }

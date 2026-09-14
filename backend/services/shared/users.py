@@ -1,80 +1,34 @@
+"""User resolution against DynamoDB.
+
+The caller's Auth0 subject (``sub``) is the user id everywhere: DynamoDB keys,
+S3 prefixes and document ownership. There is no surrogate UUID any more.
+"""
+
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
+from shared.dynamo.repositories import quotas, settings, users
+from shared.dynamo.repositories.users import CLAIM_NAMESPACE, claim
 
-from shared.models import User, UserQuota
-
-# Auth0 requires namespaced custom claims on access tokens.
-CLAIM_NAMESPACE = "https://get1agent.com/"
-
-
-def claim(claims: dict[str, Any], name: str) -> Any:
-    return claims.get(f"{CLAIM_NAMESPACE}{name}", claims.get(name))
+__all__ = [
+    "CLAIM_NAMESPACE",
+    "claim",
+    "get_or_create_user",
+    "get_user_by_sub",
+]
 
 
-async def get_or_create_user(session: AsyncSession, claims: dict[str, Any]) -> User:
-    """Resolve the Auth0 subject to a `users` row, creating it on first use.
-
-    Also seeds the per-user quota row with defaults so cap lookups are a plain
-    SELECT afterwards.
-    """
-    sub = str(claims.get("sub") or "").strip()
-    email = str(claim(claims, "email") or "").strip().lower()
-    if not sub or not email:
-        raise ValueError("Token is missing required claims (sub, email)")
-
-    name = claim(claims, "name")
-    full_name = name.strip()[:255] if isinstance(name, str) and name.strip() else None
-    picture = claim(claims, "picture")
-    picture_url = picture if isinstance(picture, str) else None
-    email_verified = bool(claim(claims, "email_verified") or False)
-
-    await session.execute(
-        pg_insert(User)
-        .values(
-            auth0_sub=sub,
-            email=email,
-            email_verified=email_verified,
-            full_name=full_name,
-            picture_url=picture_url,
-            last_login_at=func.now(),
-        )
-        .on_conflict_do_update(
-            index_elements=[User.auth0_sub],
-            set_={
-                "email": email,
-                "email_verified": email_verified,
-                "picture_url": picture_url,
-                "last_login_at": func.now(),
-                "updated_at": func.now(),
-            },
-        )
-    )
-
-    user = (await session.execute(select(User).where(User.auth0_sub == sub))).scalar_one()
-
-    await session.execute(
-        pg_insert(UserQuota)
-        .values(user_id=user.id)
-        .on_conflict_do_nothing(index_elements=[UserQuota.user_id])
-    )
-
-    return user
+def get_or_create_user(claims: dict[str, Any]) -> dict[str, Any]:
+    """Upsert the profile and seed settings/preferences/quota on first use."""
+    profile = users.upsert_user(claims)
+    sub = str(profile["userId"])
+    settings.ensure_settings(sub)
+    settings.ensure_notification_preferences(sub)
+    quotas.ensure_quota(sub)
+    return profile
 
 
-async def get_user_by_sub(session: AsyncSession, sub: str | None) -> User | None:
-    """Look up a user by Auth0 subject without creating one.
-
-    The retrieval tools run on behalf of an already-onboarded user; a missing
-    row is a caller error, not a reason to provision an account.
-    """
-    normalized = str(sub or "").strip()
-    if not normalized:
-        return None
-    return (
-        await session.execute(select(User).where(User.auth0_sub == normalized))
-    ).scalar_one_or_none()
+def get_user_by_sub(sub: str | None) -> dict[str, Any] | None:
+    """Look up a user by Auth0 subject without provisioning an account."""
+    return users.get_user_by_sub(sub)

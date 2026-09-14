@@ -466,7 +466,7 @@ export function CreateKnowledgeBaseDialog({
       }
       banner={
         error ? (
-          <div className="flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning-soft/50 px-3.5 py-2.5">
+          <div className="flex items-start gap-2.5 rounded-md border border-warning/30 bg-warning-soft/50 px-3.5 py-2.5">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
             <p className="text-sm text-foreground">{error}</p>
           </div>
@@ -519,7 +519,7 @@ export function CreateKnowledgeBaseDialog({
               placeholder="e.g. product-documentation"
               maxLength={MAX_NAME_LENGTH}
               disabled={Boolean(kbId)}
-              className={`h-10 w-full rounded-xl border bg-canvas px-3 text-sm text-foreground outline-none transition-colors placeholder:text-subtle focus:border-accent/50 disabled:opacity-60 ${
+              className={`h-10 w-full rounded-md border bg-canvas px-3 text-sm text-foreground outline-none transition-colors placeholder:text-subtle focus:border-accent/50 disabled:opacity-60 ${
                 nameInvalid ? 'border-warning' : 'border-border'
               }`}
             />
@@ -544,14 +544,14 @@ export function CreateKnowledgeBaseDialog({
               rows={2}
               maxLength={MAX_DESCRIPTION_LENGTH}
               disabled={Boolean(kbId)}
-              className="h-[3.75rem] w-full resize-none rounded-xl border border-border bg-canvas px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-subtle focus:border-accent/50 disabled:opacity-60 scrollbar-thin"
+              className="h-[3.75rem] w-full resize-none rounded-md border border-border bg-canvas px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-subtle focus:border-accent/50 disabled:opacity-60 scrollbar-thin"
             />
           </label>
         </div>
         ) : null}
 
         {!addingToExisting ? (
-        <details className="rounded-xl border border-border bg-raised/30 px-3 py-2">
+        <details className="rounded-md border border-border bg-raised/30 px-3 py-2">
           <summary className="cursor-pointer text-[11px] font-medium text-subtle transition-colors select-none hover:text-muted">
             Advanced · chunking ({chunkSize} / {chunkOverlap})
           </summary>
@@ -600,7 +600,7 @@ export function CreateKnowledgeBaseDialog({
         </details>
         ) : null}
 
-        <div className="inline-flex rounded-xl border border-border bg-raised/40 p-1">
+        <div className="inline-flex rounded-md border border-border bg-raised/40 p-1">
           {(
             [
               { id: 'write', label: 'Write files', icon: PenLine },
@@ -653,8 +653,8 @@ export function CreateKnowledgeBaseDialog({
             />
 
             {notes.length === 0 ? (
-              <div className="flex flex-col items-center rounded-2xl border border-dashed border-border-strong bg-raised/20 px-6 py-10 text-center">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent">
+              <div className="flex flex-col items-center rounded-lg border border-dashed border-border-strong bg-raised/20 px-6 py-10 text-center">
+                <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent-soft text-accent">
                   <PenLine className="h-5 w-5" strokeWidth={1.5} />
                 </div>
                 <p className="mt-3 text-sm font-medium text-foreground">
@@ -683,7 +683,7 @@ export function CreateKnowledgeBaseDialog({
                 </div>
               </div>
             ) : (
-              <div className="overflow-hidden rounded-2xl border border-border">
+              <div className="overflow-hidden rounded-lg border border-border">
                 <div className="flex items-center gap-1 overflow-x-auto border-b border-border bg-raised/40 px-2 py-1.5 scrollbar-thin">
                   {notes.map((note) => {
                     const active = activeNote?.id === note.id
@@ -777,7 +777,7 @@ export function CreateKnowledgeBaseDialog({
                     </div>
 
                     {notePreview ? (
-                      <div className="md-preview h-96 w-full overflow-y-auto rounded-xl border border-border bg-canvas px-4 py-3 scrollbar-thin">
+                      <div className="md-preview h-96 w-full overflow-y-auto rounded-md border border-border bg-canvas px-4 py-3 scrollbar-thin">
                         {activeNote.content.trim() ? (
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {activeNote.content}
@@ -799,11 +799,11 @@ export function CreateKnowledgeBaseDialog({
                         rows={16}
                         disabled={activeNote.status === 'done'}
                         placeholder={'# Heading\n\nWrite the knowledge here. Markdown is supported.'}
-                        className="h-96 w-full resize-y rounded-xl border border-border bg-canvas px-3 py-2.5 font-mono text-[13px] leading-relaxed text-foreground outline-none transition-colors placeholder:text-subtle focus:border-accent/50 disabled:opacity-60 scrollbar-thin"
+                        className="h-96 w-full resize-y rounded-md border border-border bg-canvas px-3 py-2.5 font-mono text-[13px] leading-relaxed text-foreground outline-none transition-colors placeholder:text-subtle focus:border-accent/50 disabled:opacity-60 scrollbar-thin"
                       />
                     )}
 
-                    <div className="rounded-xl border border-border bg-raised/30 p-3">
+                    <div className="rounded-md border border-border bg-raised/30 p-3">
                       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
                         Tags{' '}
                         <span className="normal-case text-subtle">
@@ -836,7 +836,7 @@ export function CreateKnowledgeBaseDialog({
                 {staged.map((item) => (
                   <li
                     key={item.id}
-                    className="rounded-xl border border-border bg-raised/40 p-3.5"
+                    className="rounded-md border border-border bg-raised/40 p-3.5"
                   >
                     <div className="flex items-center gap-3">
                       <FileText className="h-4 w-4 shrink-0 text-accent" />
@@ -899,7 +899,7 @@ export function CreateKnowledgeBaseDialog({
           </div>
         )}
 
-        <div className="rounded-xl border border-border bg-raised/30 p-3">
+        <div className="rounded-md border border-border bg-raised/30 p-3">
           <div className="flex flex-wrap items-center gap-2">
             <Badge
               variant={totalCount >= maxFiles ? 'warning' : 'default'}

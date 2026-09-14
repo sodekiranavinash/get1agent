@@ -1,22 +1,22 @@
 import type { ReactNode } from 'react'
-import { motion } from 'framer-motion'
 
 type PageShellProps = {
   children: ReactNode
   className?: string
 }
 
+/**
+ * Standard page container: a flat, edge-to-edge column with a comfortable
+ * max width. No background effects — the surface itself carries the page.
+ */
 export function PageShell({ children, className = '' }: PageShellProps) {
   return (
-    <div className="relative flex flex-1 flex-col app-mesh-bg">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.3 }}
-        className={`relative mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-8 lg:py-10 ${className}`}
+    <div className="relative flex flex-1 flex-col">
+      <div
+        className={`mx-auto w-full max-w-[1440px] px-6 py-6 lg:px-8 ${className}`}
       >
         {children}
-      </motion.div>
+      </div>
     </div>
   )
 }
