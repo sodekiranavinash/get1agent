@@ -2,7 +2,7 @@
 
 Layout (see design/design-b-dynamodb-s3.md Part 6):
 
-    Identity      SUB#<sub>        #PROFILE      (sub -> internal userId)
+    Identity      SUB#<sub>        #IDENTITY     (sub -> internal userId)
     User          USER#<userId>    #PROFILE      (userId is a short base32 id)
     Settings      USER#<userId>    #SETTINGS
     Notifications USER#<userId>    #NOTIF
@@ -33,6 +33,7 @@ GSI3 = ("gsi3pk", "gsi3sk")
 META = "#META"
 
 PROFILE_SK = "#PROFILE"
+IDENTITY_SK = "#IDENTITY"
 SETTINGS_SK = "#SETTINGS"
 NOTIF_SK = "#NOTIF"
 QUOTA_SK = "#QUOTA"
@@ -54,7 +55,6 @@ def user_pk(user_id: str) -> str:
 def sub_pk(sub: str) -> str:
     """Partition of the identity item that maps an Auth0 ``sub`` to a userId."""
     return f"{SUB_PREFIX}{sub}"
-
 
 
 def kb_sk(name: str) -> str:

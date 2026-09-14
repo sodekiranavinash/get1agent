@@ -4,7 +4,7 @@ import secrets
 from typing import Any
 
 from shared.dynamo.client import now_iso, table
-from shared.dynamo.keys import PROFILE_SK, sub_pk, user_pk
+from shared.dynamo.keys import IDENTITY_SK, PROFILE_SK, sub_pk, user_pk
 
 # Auth0 requires namespaced custom claims on access tokens.
 CLAIM_NAMESPACE = "https://get1agent.com/"
@@ -78,7 +78,7 @@ def _profile_item(
 def _get_identity(sub: str) -> dict[str, Any] | None:
     """The ``SUB#<sub>`` item that maps an Auth0 sub to the internal userId."""
     response = table().get_item(
-        Key={"pk": sub_pk(sub), "sk": PROFILE_SK}, ConsistentRead=True
+        Key={"pk": sub_pk(sub), "sk": IDENTITY_SK}, ConsistentRead=True
     )
     return response.get("Item")
 
@@ -89,7 +89,7 @@ def _claim_identity(sub: str, user_id: str) -> bool:
         table().put_item(
             Item={
                 "pk": sub_pk(sub),
-                "sk": PROFILE_SK,
+                "sk": IDENTITY_SK,
                 "entity": "user_identity",
                 "userId": user_id,
                 "createdAt": now_iso(),

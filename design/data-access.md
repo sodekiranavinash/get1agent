@@ -48,7 +48,7 @@ The canonical model and rationale live in
 
 | Entity | pk | sk |
 |---|---|---|
-| Identity (sub→userId) | `SUB#<sub>` | `#PROFILE` |
+| Identity (sub→userId) | `SUB#<sub>` | `#IDENTITY` |
 | User | `USER#<userId>` | `#PROFILE` |
 | Settings | `USER#<userId>` | `#SETTINGS` |
 | Notification prefs | `USER#<userId>` | `#NOTIF` |

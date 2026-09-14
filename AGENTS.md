@@ -41,7 +41,7 @@ chunks or postings in DynamoDB.
 
 | Entity | pk | sk | GSI |
 |---|---|---|---|
-| Identity (sub→userId) | `SUB#<sub>` | `#PROFILE` | — |
+| Identity (sub→userId) | `SUB#<sub>` | `#IDENTITY` | — |
 | User | `USER#<userId>` | `#PROFILE` | — |
 | Settings | `USER#<userId>` | `#SETTINGS` | — |
 | Notification prefs | `USER#<userId>` | `#NOTIF` | — |

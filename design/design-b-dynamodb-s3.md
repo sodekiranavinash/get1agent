@@ -174,7 +174,7 @@ sparse GSIs. **No vectors, chunks, or postings in DynamoDB.**
 
 | Entity | pk | sk | GSI | Key attributes |
 |---|---|---|---|---|
-| Identity (sub→userId) | `SUB#<sub>` | `#PROFILE` | — | userId, createdAt |
+| Identity (sub→userId) | `SUB#<sub>` | `#IDENTITY` | — | userId, createdAt |
 | User | `USER#<userId>` | `#PROFILE` | — | userId, sub, email, emailVerified, fullName, pictureUrl, createdAt, updatedAt, lastLoginAt |
 | Settings | `USER#<userId>` | `#SETTINGS` | — | preferredTheme, timezone |
 | Notification prefs | `USER#<userId>` | `#NOTIF` | — | emailOnWorkflowFailure, creditThresholdAlerts |
