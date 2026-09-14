@@ -184,8 +184,9 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   then live fallback), and **highlights + capped page text (4000 chars)**. Exa
   bills `/search` per request, so text and highlights cost the same as
   highlights alone; the cap bounds the agent's token budget. AI `summary` is
-  the only content that costs extra (opt-in), and `deep-lite`/`deep` raise the
-  per-request price.
+  the   only content that costs extra (opt-in), and `deep-lite`/`deep` raise the
+  per-request price. Deep types can return zero results (and bill nothing), so
+  the tool retries once with `type=auto` when that happens.
 - **Full Exa surface** is exposed as flat tool arguments: `numResults`, `type`
   (limited to `instant`/`fast`/`auto`/`deep-lite`/`deep`; `auto` is the
   default), `category`, `includeDomains`/`excludeDomains`,

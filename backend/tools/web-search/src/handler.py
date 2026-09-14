@@ -70,7 +70,9 @@ _WEB_SEARCH_SCHEMA: dict[str, Any] = {
                     "'instant' is lowest latency but shallower (chat/autocomplete). "
                     "'deep-lite' runs lightweight research with a synthesized "
                     "answer at a consistent ~4s latency. "
-                    "'deep' runs comprehensive multi-step research and costs more."
+                    "'deep' runs comprehensive multi-step research and costs more. "
+                    "If a deep type returns nothing, the tool retries once with "
+                    "'auto'."
                 ),
             },
             "maxAgeHours": {

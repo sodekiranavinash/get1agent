@@ -68,6 +68,18 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result["error"]["status"], 401)
         self.assertEqual(result["error"]["tag"], "INVALID_API_KEY")
 
+    def test_deep_type_falls_back_to_auto_when_empty(self) -> None:
+        empty = {"requestId": "r0", "results": [], "costDollars": {"total": 0}}
+        with mock.patch.dict("os.environ", _ENV, clear=True), mock.patch.object(
+            service.exa, "search", side_effect=[empty, _RESPONSE]
+        ) as search:
+            result = service.search({"auth0Sub": "u", "query": "x", "type": "deep-lite"})
+
+        self.assertEqual(search.call_count, 2)
+        self.assertEqual(search.call_args.args[0]["type"], "auto")
+        self.assertEqual(result["meta"]["resultCount"], 1)
+        self.assertTrue(any("fell back" in w for w in result["meta"]["warnings"]))
+
 
 if __name__ == "__main__":
     unittest.main()

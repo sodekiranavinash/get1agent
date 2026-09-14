@@ -15,7 +15,9 @@ import hashlib
 import json
 import os
 import re
+import sys
 import time
+import traceback
 from typing import Any
 
 from awslabs.mcp_lambda_handler import MCPLambdaHandler
@@ -198,11 +200,17 @@ def _execute_agentcore(
     store = sessions.SessionStore(cfg["table"], cfg["region"])
     pk, sk = sessions.partition_key(sub), sessions.sort_key(thread)
 
-    entry = store.get(pk, sk)
-    if entry and int(entry.get("expiresAt", 0)) > now + cfg["safety_margin"]:
-        ref = sessions.SessionRef(str(entry["sessionId"]), reused=True)
-    else:
-        ref = _create_session(client, store, sub, thread, cfg, now)
+    def _resolve_ref() -> sessions.SessionRef:
+        entry = store.get(pk, sk)
+        if entry and int(entry.get("expiresAt", 0)) > now + cfg["safety_margin"]:
+            return sessions.SessionRef(str(entry["sessionId"]), reused=True)
+        return _create_session(client, store, sub, thread, cfg, now)
+
+    try:
+        ref = _resolve_ref()
+    except agentcore.AgentCoreError as exc:
+        _log("code-interpreter session failed", error=exc.message, code=exc.code)
+        return _error("session_failed", exc.message, detail=exc.code)
 
     script = f"{prelude}\n{code}\n"
 
@@ -222,7 +230,11 @@ def _execute_agentcore(
     except agentcore.SessionGone:
         # Stale mapping: recreate once and retry.
         store.delete(pk, sk)
-        ref = _create_session(client, store, sub, thread, cfg, now)
+        try:
+            ref = _resolve_ref()
+        except agentcore.AgentCoreError as exc:
+            _log("code-interpreter session failed", error=exc.message, code=exc.code)
+            return _error("session_failed", exc.message, detail=exc.code)
         try:
             result = _run_once(ref.session_id)
         except agentcore.SessionGone as exc:
@@ -311,8 +323,9 @@ def code_interpreter(
     try:
         result = execute(require_sub(), code, language, conversationId)
     except Exception as exc:  # noqa: BLE001
-        print(f"code-interpreter error: {exc!r}")
-        result = _error("internal_error", "Request failed")
+        print(f"code-interpreter error: {exc!r}", file=sys.stderr)
+        traceback.print_exc()
+        result = _error("internal_error", "Request failed", detail=repr(exc)[:300])
     return json.dumps(result, default=str)
 
 

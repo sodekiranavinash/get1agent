@@ -15,6 +15,10 @@ import exa
 
 DEFAULT_MAX_RESULTS = 25
 
+# Deep search types can return zero results (and bill nothing); fall back to
+# ``auto`` so the caller still gets an answer.
+DEEP_TYPES = {"deep-lite", "deep", "deep-reasoning"}
+
 
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
@@ -79,6 +83,31 @@ def search(params: dict[str, Any]) -> dict[str, Any]:
         return _error("search_failed", exc.message, status=exc.status, tag=exc.tag)
 
     results = exa.shape_results(response)
+
+    # Deep types sometimes return nothing (and bill nothing). Fall back to the
+    # standard search so the caller still gets results.
+    if not results and body.get("type") in DEEP_TYPES:
+        fallback_body = {**body, "type": "auto"}
+        try:
+            fallback_response = exa.search(
+                fallback_body,
+                api_key=cfg["api_key"],
+                base_url=cfg["base_url"],
+                timeout=cfg["timeout"],
+            )
+        except exa.ExaError:
+            fallback_response = None
+        if fallback_response is not None:
+            fallback_results = exa.shape_results(fallback_response)
+            if fallback_results:
+                warnings.append(
+                    f"type={body.get('type')!r} returned no results; "
+                    "fell back to type='auto'."
+                )
+                body = fallback_body
+                response = fallback_response
+                results = fallback_results
+
     duration_ms = int((time.perf_counter() - started) * 1000)
     cost = response.get("costDollars")
     _log(

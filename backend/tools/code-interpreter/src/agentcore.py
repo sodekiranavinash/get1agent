@@ -24,7 +24,6 @@ _SESSION_GONE_CODES = frozenset(
     {
         "ResourceNotFoundException",
         "ValidationException",
-        "AccessDeniedException",
         "ServiceQuotaExceededException",
     }
 )

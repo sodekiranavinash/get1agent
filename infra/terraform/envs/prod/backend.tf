@@ -1,5 +1,3 @@
-data "aws_caller_identity" "current" {}
-
 locals {
   backend_python_runtime   = "python3.14"
   layer_data_zip           = abspath("${path.module}/../../../../backend/services/layers/data/dist/layer.zip")
@@ -493,8 +491,10 @@ module "code_interpreter" {
 
   # Intentionally outside the VPC: the AgentCore Code Interpreter endpoint and
   # DynamoDB are reachable over the public internet, so no VPC/NAT is needed.
+  # The managed built-in interpreter lives in the service account ("aws"), not
+  # the caller's account, so the resource ARN's account segment is `aws`.
   bedrock_agentcore_arns = [
-    "arn:aws:bedrock-agentcore:${var.aws_region}:${data.aws_caller_identity.current.account_id}:code-interpreter/*",
+    "arn:aws:bedrock-agentcore:${var.aws_region}:aws:code-interpreter/*",
   ]
   dynamodb_table_arns = [aws_dynamodb_table.code_interpreter_sessions[0].arn]
 
