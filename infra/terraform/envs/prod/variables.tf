@@ -92,3 +92,52 @@ variable "rerank_model" {
   default     = "amazon.rerank-v1:0"
   description = "Bedrock rerank model id"
 }
+
+variable "code_interpreter_timeout_seconds" {
+  type        = number
+  default     = 240
+  description = "Lambda timeout for the code-interpreter MCP server (must exceed the internal exec timeout)"
+}
+
+variable "code_interpreter_exec_timeout_seconds" {
+  type        = number
+  default     = 120
+  description = "Internal wall-clock limit for one code execution; the sandbox is stopped when exceeded"
+}
+
+variable "code_interpreter_session_timeout_seconds" {
+  type        = number
+  default     = 900
+  description = "AgentCore Code Interpreter session TTL (seconds); reused until it expires"
+}
+
+variable "code_interpreter_max_sessions_per_user" {
+  type        = number
+  default     = 1
+  description = "Maximum active AgentCore Code Interpreter sessions per user"
+}
+
+variable "exa_api_key" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Exa Search API key for the web-search tool (set via TF_VAR_exa_api_key)"
+}
+
+variable "exa_api_base_url" {
+  type        = string
+  default     = "https://api.exa.ai"
+  description = "Exa API base URL (override for testing)"
+}
+
+variable "web_search_timeout_seconds" {
+  type        = number
+  default     = 60
+  description = "Lambda timeout for the web-search MCP tool (deep search can take ~40s)"
+}
+
+variable "web_search_max_results" {
+  type        = number
+  default     = 25
+  description = "Hard cap on Exa results per web-search call (cost guard)"
+}

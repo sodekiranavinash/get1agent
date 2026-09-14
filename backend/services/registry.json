@@ -95,6 +95,26 @@
       ]
     },
     {
+      "name": "code-interpreter",
+      "dir": "backend/tools/code-interpreter",
+      "function_name": "get1agent-prod-code-interpreter",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": [
+        "ai"
+      ]
+    },
+    {
+      "name": "web-search",
+      "dir": "backend/tools/web-search",
+      "function_name": "get1agent-prod-web-search",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "layers": [
+        "ai"
+      ]
+    },
+    {
       "name": "ingestion-dispatcher",
       "dir": "backend/services/ingestion-dispatcher",
       "function_name": "get1agent-prod-ingestion-dispatcher",

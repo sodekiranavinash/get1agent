@@ -1,3 +1,5 @@
+data "aws_caller_identity" "current" {}
+
 locals {
   backend_python_runtime   = "python3.14"
   layer_data_zip           = abspath("${path.module}/../../../../backend/services/layers/data/dist/layer.zip")
@@ -16,6 +18,8 @@ locals {
   search_user_kb_zip       = abspath("${path.module}/../../../../backend/services/search-user-knowledge-bases/dist/function.zip")
   knowledge_mcp_zip        = abspath("${path.module}/../../../../backend/services/knowledge-mcp/dist/function.zip")
   mcp_tester_zip           = abspath("${path.module}/../../../../backend/services/admin/mcp-tester/dist/function.zip")
+  code_interpreter_zip     = abspath("${path.module}/../../../../backend/tools/code-interpreter/dist/function.zip")
+  web_search_zip           = abspath("${path.module}/../../../../backend/tools/web-search/dist/function.zip")
 }
 
 check "layer_data_zip_exists" {
@@ -127,6 +131,20 @@ check "mcp_tester_zip_exists" {
   assert {
     condition     = !var.enable_backend_lambdas || fileexists(local.mcp_tester_zip)
     error_message = "mcp-tester zip not found at ${local.mcp_tester_zip}. Run: make -C backend/services/admin/mcp-tester package"
+  }
+}
+
+check "code_interpreter_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.code_interpreter_zip)
+    error_message = "code-interpreter zip not found at ${local.code_interpreter_zip}. Run: make -C backend/tools/code-interpreter package"
+  }
+}
+
+check "web_search_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.web_search_zip)
+    error_message = "web-search zip not found at ${local.web_search_zip}. Run: make -C backend/tools/web-search package"
   }
 }
 
@@ -372,7 +390,7 @@ module "knowledge_mcp" {
   layer_arns       = [module.layer_ai[0].arn]
 
   memory_size = 512
-  timeout     = 60
+  timeout     = 300
 
   lambda_invoke_arns = [
     module.get_user_knowledge_bases[0].function_arn,
@@ -404,15 +422,120 @@ module "mcp_tester" {
   layer_arns       = [module.layer_ai[0].arn]
 
   memory_size = 512
-  timeout     = 60
+  timeout     = 300
 
-  lambda_invoke_arns = [module.knowledge_mcp[0].function_arn]
+  lambda_invoke_arns = [
+    module.knowledge_mcp[0].function_arn,
+    module.web_search[0].function_arn,
+    module.code_interpreter[0].function_arn,
+  ]
 
   environment = {
-    MCP_FUNCTION = module.knowledge_mcp[0].function_name
+    MCP_FUNCTIONS = join(",", [
+      module.knowledge_mcp[0].function_name,
+      module.web_search[0].function_name,
+      module.code_interpreter[0].function_name,
+    ])
   }
 
-  depends_on = [module.layer_ai, module.knowledge_mcp]
+  depends_on = [
+    module.layer_ai,
+    module.knowledge_mcp,
+    module.web_search,
+    module.code_interpreter,
+  ]
+}
+
+resource "aws_dynamodb_table" "code_interpreter_sessions" {
+  count = var.enable_backend_lambdas ? 1 : 0
+
+  name         = "get1agent-prod-code-interpreter-sessions"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "pk"
+  range_key    = "sk"
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "expiresAt"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  tags = { Service = "code-interpreter" }
+}
+
+module "code_interpreter" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-code-interpreter"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.code_interpreter_zip
+  source_code_hash = filebase64sha256(local.code_interpreter_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_ai[0].arn]
+
+  memory_size = 1024
+  timeout     = var.code_interpreter_timeout_seconds
+
+  # Intentionally outside the VPC: the AgentCore Code Interpreter endpoint and
+  # DynamoDB are reachable over the public internet, so no VPC/NAT is needed.
+  bedrock_agentcore_arns = [
+    "arn:aws:bedrock-agentcore:${var.aws_region}:${data.aws_caller_identity.current.account_id}:code-interpreter/*",
+  ]
+  dynamodb_table_arns = [aws_dynamodb_table.code_interpreter_sessions[0].arn]
+
+  environment = {
+    CODE_INTERPRETER_IDENTIFIER              = "aws.codeinterpreter.v1"
+    CODE_INTERPRETER_MODE                    = "agentcore"
+    CODE_INTERPRETER_REGION                  = var.aws_region
+    CODE_INTERPRETER_SESSIONS_TABLE          = aws_dynamodb_table.code_interpreter_sessions[0].name
+    CODE_INTERPRETER_SESSION_TIMEOUT_SECONDS = tostring(var.code_interpreter_session_timeout_seconds)
+    CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS    = tostring(var.code_interpreter_exec_timeout_seconds)
+    CODE_INTERPRETER_MAX_SESSIONS_PER_USER   = tostring(var.code_interpreter_max_sessions_per_user)
+    AWS_REGION                               = var.aws_region
+  }
+
+  depends_on = [aws_dynamodb_table.code_interpreter_sessions, module.layer_ai]
+}
+
+module "web_search" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_rds"
+
+  name             = "get1agent-prod-web-search"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.web_search_zip
+  source_code_hash = filebase64sha256(local.web_search_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_ai[0].arn]
+
+  memory_size = 512
+  timeout     = var.web_search_timeout_seconds
+
+  # Intentionally outside the VPC: api.exa.ai is a public HTTPS endpoint.
+  environment = {
+    EXA_API_KEY                = var.exa_api_key
+    EXA_API_BASE_URL           = var.exa_api_base_url
+    WEB_SEARCH_TIMEOUT_SECONDS = tostring(max(var.web_search_timeout_seconds - 5, 5))
+    WEB_SEARCH_MAX_RESULTS     = tostring(var.web_search_max_results)
+  }
+
+  depends_on = [module.layer_ai]
 }
 
 module "ingestion_extract" {

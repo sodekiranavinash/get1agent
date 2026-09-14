@@ -148,7 +148,11 @@ export function McpResultPanel({ result, error, running }: McpResultPanelProps) 
           <div className="min-w-0 space-y-3">
             <div className="min-w-0">
               <p className="mb-1 text-[11px] font-semibold text-muted">
-                → request (admin → knowledge-mcp)
+                → request (admin →{' '}
+                {result.server
+                  ? result.server.replace(/^get1agent-(prod|local)-/, '')
+                  : 'MCP server'}
+                )
               </p>
               <JsonBlock value={result.request} />
             </div>

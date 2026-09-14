@@ -40,6 +40,7 @@ jobs:
   infra:
     name: Infra deploy
     runs-on: ubuntu-latest
+    environment: prod
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -125,6 +126,16 @@ jobs:
         run: make package
         working-directory: backend/services/admin/mcp-tester
 
+      - name: Package backend code-interpreter zip
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/tools/code-interpreter
+
+      - name: Package backend web-search zip
+        if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/tools/web-search
+
       - name: Package backend ingestion-dispatcher zip
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
         run: make package
@@ -190,6 +201,10 @@ jobs:
           unzip -l backend/services/ingestion-watchdog/dist/function.zip | grep handler.py
           test -s backend/services/admin/mcp-tester/dist/function.zip
           unzip -l backend/services/admin/mcp-tester/dist/function.zip | grep handler.py
+          test -s backend/tools/code-interpreter/dist/function.zip
+          unzip -l backend/tools/code-interpreter/dist/function.zip | grep handler.py
+          test -s backend/tools/web-search/dist/function.zip
+          unzip -l backend/tools/web-search/dist/function.zip | grep handler.py
 
       - name: Terraform validate
         if: inputs.vpc || inputs.rds || inputs.api_gateway || inputs.lambdas
@@ -222,6 +237,7 @@ jobs:
           APPLY_RDS: ${{ inputs.rds }}
           APPLY_API_GATEWAY: ${{ inputs.api_gateway }}
           APPLY_BACKEND_LAMBDAS: ${{ inputs.lambdas }}
+          TF_VAR_exa_api_key: ${{ secrets.EXA_API_KEY }}
         run: bash infra/aws/apply-prod.sh
 
       - name: Print prod outputs

@@ -1,14 +1,15 @@
 """Admin MCP tester Lambda.
 
-A thin, admin-only proxy that lets the admin UI exercise the MCP tools exposed
-by ``knowledge-mcp``. It is the MCP *client*: it reads the caller's admin claim
-and ``sub`` from the JWT, builds standard MCP JSON-RPC messages, and invokes
-``knowledge-mcp`` over its direct-invoke transport.
+A thin, admin-only proxy that lets the admin UI exercise the tools exposed by
+the get1agent MCP servers (``knowledge-mcp``, ``web-search``,
+``code-interpreter``). It is the MCP *client*: it reads the caller's admin claim
+and ``sub`` from the JWT, builds standard MCP JSON-RPC messages, and invokes the
+servers over their direct-invoke transport.
 
 Routes (JWT-protected, admin-only):
 
-* ``GET  /v1/admin/mcp/tools`` — MCP ``tools/list``.
-* ``POST /v1/admin/mcp/call``  — MCP ``tools/call`` with ``{name, arguments}``.
+* ``GET  /v1/admin/mcp/tools`` — MCP ``tools/list`` across every server.
+* ``POST /v1/admin/mcp/call``  — MCP ``tools/call`` routed to the owning server.
 
 Every response includes the exact JSON-RPC ``request``/``response`` and the
 duration so the admin can inspect exactly what happened.
@@ -24,7 +25,12 @@ import traceback
 from typing import Any
 
 from ai.auth import AuthError, require_admin
-from ai.mcp_client import McpClientError, call_tool, list_tools
+from ai.mcp_client import (
+    McpClientError,
+    call_tool,
+    find_tool_server,
+    list_tools_multi,
+)
 
 
 def _json(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
@@ -33,6 +39,11 @@ def _json(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
         "headers": {"content-type": "application/json", "cache-control": "no-store"},
         "body": json.dumps(body, default=str),
     }
+
+
+def _mcp_functions() -> list[str]:
+    raw = os.environ.get("MCP_FUNCTIONS") or os.environ.get("MCP_FUNCTION") or ""
+    return [name.strip() for name in raw.split(",") if name.strip()]
 
 
 def _claims(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -91,36 +102,28 @@ def _text_payload(response: dict[str, Any]) -> Any:
     return None
 
 
-def _handle_list_tools(function_name: str, sub: str, region: str | None) -> dict[str, Any]:
+def _handle_list_tools(
+    functions: list[str], sub: str, region: str | None
+) -> dict[str, Any]:
     started = time.perf_counter()
-    request, response = list_tools(function_name, sub, region)
+    tools, per_server = list_tools_multi(functions, sub, region)
     duration = _elapsed_ms(started)
-    if "error" in response:
-        return _json(
-            200,
-            {
-                "ok": False,
-                "error": response["error"],
-                "request": request,
-                "response": response,
-                "durationMs": duration,
-            },
-        )
-    tools = response.get("result", {}).get("tools", [])
     return _json(
         200,
         {
             "ok": True,
             "tools": tools,
-            "request": request,
-            "response": response,
+            "servers": per_server,
             "durationMs": duration,
         },
     )
 
 
 def _handle_call_tool(
-    function_name: str, sub: str, region: str | None, body: dict[str, Any]
+    functions: list[str],
+    sub: str,
+    region: str | None,
+    body: dict[str, Any],
 ) -> dict[str, Any]:
     name = str(body.get("name") or "").strip()
     if not name:
@@ -132,7 +135,23 @@ def _handle_call_tool(
         return _json(400, {"error": "arguments must be a JSON object"})
 
     started = time.perf_counter()
-    request, response = call_tool(function_name, sub, name, arguments, region)
+    server = find_tool_server(functions, sub, name, region)
+    if not server:
+        return _json(
+            200,
+            {
+                "ok": False,
+                "tool": name,
+                "auth0Sub": sub,
+                "arguments": arguments,
+                "error": {"code": -32601, "message": f"Tool '{name}' not found"},
+                "request": None,
+                "response": None,
+                "durationMs": _elapsed_ms(started),
+            },
+        )
+
+    request, response = call_tool(server, sub, name, arguments, region)
     duration = _elapsed_ms(started)
 
     if "error" in response:
@@ -141,6 +160,7 @@ def _handle_call_tool(
             {
                 "ok": False,
                 "tool": name,
+                "server": server,
                 "auth0Sub": sub,
                 "arguments": arguments,
                 "error": response["error"],
@@ -155,6 +175,7 @@ def _handle_call_tool(
         {
             "ok": True,
             "tool": name,
+            "server": server,
             "auth0Sub": sub,
             "arguments": arguments,
             "result": response.get("result"),
@@ -177,9 +198,9 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
     except AuthError as exc:
         return _json(exc.status, {"error": exc.message})
 
-    function_name = os.environ.get("MCP_FUNCTION")
-    if not function_name:
-        return _json(500, {"error": "MCP_FUNCTION is not configured"})
+    functions = _mcp_functions()
+    if not functions:
+        return _json(500, {"error": "MCP_FUNCTIONS is not configured"})
     region = os.environ.get("AWS_REGION")
     sub = str(claims.get("sub") or "").strip()
 
@@ -188,9 +209,9 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
 
     try:
         if method == "GET" and path.endswith("/mcp/tools"):
-            return _handle_list_tools(function_name, sub, region)
+            return _handle_list_tools(functions, sub, region)
         if method == "POST" and path.endswith("/mcp/call"):
-            return _handle_call_tool(function_name, sub, region, _body(event))
+            return _handle_call_tool(functions, sub, region, _body(event))
         return _json(404, {"error": "Not found"})
     except (McpClientError, ValueError) as exc:
         return _json(502, {"error": str(exc)})

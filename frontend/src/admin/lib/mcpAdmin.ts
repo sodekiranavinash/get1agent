@@ -20,20 +20,24 @@ export type McpTool = {
   name: string
   description?: string
   inputSchema?: McpInputSchema
+  /** The MCP server function that exposes this tool. */
+  server?: string
 }
 
 export type McpToolsResponse = {
   ok: boolean
   tools: McpTool[]
+  servers?: unknown[]
   error?: { code?: number; message?: string }
-  request: unknown
-  response: unknown
+  request?: unknown
+  response?: unknown
   durationMs: number
 }
 
 export type McpCallResponse = {
   ok: boolean
   tool: string
+  server?: string
   auth0Sub?: string
   arguments: Record<string, unknown>
   result?: unknown

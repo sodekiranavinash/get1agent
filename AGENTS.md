@@ -118,15 +118,89 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - **Identity is passed in the event** (`auth0Sub`), not a JWT: the tools are
   invoked directly via `lambda:InvokeFunction` (no API Gateway routes). Only the
   caller's IAM role may invoke them.
-- `knowledge-mcp` is the MCP server (`awslabs.mcp-lambda-handler`, stateless)
-  exposing both tools over `POST /mcp` behind the Auth0 JWT authorizer, and via
-  the direct Lambda invoke transport. It reads `auth0Sub` from the JWT claims
-  and forwards it to the tool Lambdas.
+- **Each MCP server is its own Lambda** (`awslabs.mcp-lambda-handler`, stateless)
+  and exposes its tools over its own `POST /mcp…` route behind the Auth0 JWT
+  authorizer, plus the direct Lambda invoke transport. `knowledge-mcp` owns the
+  knowledge tools (`POST /mcp`), `web-search` owns `web-search`
+  (`POST /mcp/web-search`) and `code-interpreter` owns `code-interpreter`
+  (`POST /mcp/code-interpreter`). The shared transport (`ai/mcp_server.py`)
+  stashes `auth0Sub` from the JWT claims (HTTP) or the event (direct invoke) for
+  the tool functions. There are no exceptions: every tool is its own server.
 - Knowledge base names follow **S3-bucket-style rules** (lowercase letters,
   digits and hyphens; 3–63 chars; must start/end alphanumeric) and are unique
   per user (`uq_knowledge_bases_user_name`); the create handler returns `409` on
   a duplicate. Per-user limits: **30 knowledge bases, 50 files each, 100 MB
   storage** (`shared/models/user_quota.py`, migration `0007_quota_limits`).
+
+### Code interpreter tool
+
+- `code-interpreter` (`backend/tools/code-interpreter/`) is its own MCP server
+  Lambda (`POST /mcp/code-interpreter`) owning the `code-interpreter` tool. It
+  runs LLM-generated Python in **Bedrock AgentCore Code Interpreter** sandboxes
+  (`aws.codeinterpreter.v1`, available in `ap-south-1`). It is **outside the
+  VPC** (AgentCore + DynamoDB are public endpoints) and bundles `boto3` (the
+  runtime may predate the `bedrock-agentcore` service model). The admin tester
+  aggregates it with the other servers, so agents and the admin see one list.
+- **Guard**: before any AWS call, `guard.py` runs an AST/literal pass blocking
+  OS/shell (`subprocess`, `pty`, `ctypes`, dangerous `os.*`), network/cloud SDKs
+  (`socket`, `requests`, `urllib`, `boto3`, …), dynamic code
+  (`exec`/`eval`/`__import__`/`importlib`) and heavy ML (`torch`, `tensorflow`,
+  `transformers`, …). Data libs (`numpy`, `pandas`, `matplotlib`, …) are
+  allowed. `BLOCKED_MODULES`/`ALLOWED_MODULES` extend/except the list. Every
+  execution is also prefixed with an idempotent `sys.addaudithook` prelude that
+  blocks denied imports and dangerous audit events inside the sandbox. The
+  microVM remains the real isolation boundary.
+- **Sessions**: one AgentCore session per `(auth0Sub, conversationId)` (default
+  thread), stored in the `code-interpreter-sessions` DynamoDB table with a TTL
+  (`expiresAt`) and capped at `CODE_INTERPRETER_MAX_SESSIONS_PER_USER` (1) with
+  LRU eviction. A deterministic `clientToken` (`uuid5` of user+thread+TTL
+  bucket) plus a conditional write dedupes concurrent invocations. Only
+  `executeCode`/python is ever called — never `executeCommand`.
+- **Timeouts**: `CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS` (120) is enforced while
+  streaming; on overrun the session is stopped. The code-interpreter Lambda
+  timeout is 240s; `knowledge-mcp` (and `mcp-tester`) timeouts are 300s so the
+  synchronous call chain fits. API Gateway caps HTTP integrations at 30s, so
+  long runs must use direct invoke.
+- **Local**: `CODE_INTERPRETER_MODE=local` runs the same guard + prelude in an
+  isolated subprocess with `resource` limits (Floci does not emulate AgentCore).
+  Session reuse is tracked in-process so `sessionId`/`reused` are still
+  exercised locally.
+
+### Web search tool
+
+- `web-search` (`backend/tools/web-search/`) is its own MCP server Lambda
+  (`POST /mcp/web-search`) owning the `web-search` tool. It calls the **Exa
+  Search API** (`POST https://api.exa.ai/search`) for current web information.
+  It is **outside the VPC** (Exa is a public HTTPS endpoint) and ships no
+  third-party HTTP client — a stdlib `urllib` client, not the `exa-py` SDK (it
+  does bundle the shared MCP handler + `python-dateutil`). The admin tester
+  aggregates it with the other servers, so agents and the admin see one list.
+- **Primary arguments** are `query` (required), `numResults` (default 10, max
+  25), `type` (default `auto`), `maxAgeHours` (default 24) and
+  `includeDomains`/`excludeDomains`. The remaining arguments are advanced
+  pass-throughs with no defaults of our own (except the default content, below).
+- **Cost-aware defaults** (see https://exa.ai/pricing): `type=auto`, 10 results
+  (`numResults` is capped at 25), `maxAgeHours=24` (reuse cache under a day,
+  then live fallback), and **highlights + capped page text (4000 chars)**. Exa
+  bills `/search` per request, so text and highlights cost the same as
+  highlights alone; the cap bounds the agent's token budget. AI `summary` is
+  the only content that costs extra (opt-in), and `deep-lite`/`deep` raise the
+  per-request price.
+- **Full Exa surface** is exposed as flat tool arguments: `numResults`, `type`
+  (limited to `instant`/`fast`/`auto`/`deep-lite`/`deep`; `auto` is the
+  default), `category`, `includeDomains`/`excludeDomains`,
+  `startPublishedDate`/`endPublishedDate`, `includeText`/`excludeText`,
+  `userLocation`, `moderation`, `additionalQueries`, `systemPrompt`, plus
+  content controls `text`, `textMaxCharacters`, `highlights`, `highlightsQuery`,
+  `highlightsMaxCharacters`, `summary`, `summaryQuery`, `maxAgeHours`,
+  `livecrawlTimeout`, `subpages`, `subpageTarget`. `company`/`people`
+  categories silently drop the filters Exa rejects for them (with a warning in
+  `meta.warnings`).
+- Config: `EXA_API_KEY` (required), `EXA_API_BASE_URL`,
+  `WEB_SEARCH_TIMEOUT_SECONDS`, `WEB_SEARCH_MAX_RESULTS`. There is **no local
+  emulation branch** — Floci containers reach `api.exa.ai` directly using the
+  host `EXA_API_KEY`; set it in `.env` (see `infra/local/floci/env.example`).
+  Results carry `meta.costDollars`/`meta.requestId` so cost is visible per call.
 
 ### Admin console & strict role separation
 
@@ -159,12 +233,16 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   stored view; reloads keep it. The account menu has **Switch view**.
 - **`mcp-tester`** (`GET /v1/admin/mcp/tools`, `POST /v1/admin/mcp/call`) is the
   MCP *client*: it reads the admin claim + `sub`, builds MCP JSON-RPC, and
-  invokes `knowledge-mcp` over its direct-invoke transport. The admin UI
+  invokes every MCP server in `MCP_FUNCTIONS` over their direct-invoke
+  transports, merging their tool lists and routing each call to the owning
+  server. The admin UI
   (`frontend/src/admin/pages/AdminIntegrationsPage.tsx`) lists tools via
   `tools/list`, renders an argument form from each tool's `inputSchema`, and
   shows the raw request/response.
 - The `ai` layer has **no third-party dependencies** (stdlib + boto3 from the
-  runtime), so `knowledge-mcp` stays lightweight while gaining role checks.
+  runtime). It holds the role/view checks, the thin MCP JSON-RPC client
+  (`ai/mcp_client.py`) and the shared MCP transport (`ai/mcp_server.py`), so each
+  MCP server Lambda stays lightweight.
 
 ## Conventions
 

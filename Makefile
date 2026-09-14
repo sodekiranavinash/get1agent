@@ -70,6 +70,8 @@ floci-build:
 	$(MAKE) -C backend/services/search-user-knowledge-bases package
 	$(MAKE) -C backend/services/knowledge-mcp package
 	$(MAKE) -C backend/services/admin/mcp-tester package
+	$(MAKE) -C backend/tools/code-interpreter package
+	$(MAKE) -C backend/tools/web-search package
 
 # Build only if any artifact is missing (fast first run).
 floci-artifacts:
@@ -88,7 +90,9 @@ floci-artifacts:
 		backend/services/retrieval-query/dist/function.zip \
 		backend/services/search-user-knowledge-bases/dist/function.zip \
 		backend/services/knowledge-mcp/dist/function.zip \
-		backend/services/admin/mcp-tester/dist/function.zip; do \
+		backend/services/admin/mcp-tester/dist/function.zip \
+		backend/tools/code-interpreter/dist/function.zip \
+		backend/tools/web-search/dist/function.zip; do \
 		[ -f "$$f" ] || missing=1; \
 	done; \
 	if [ "$$missing" = "1" ]; then \

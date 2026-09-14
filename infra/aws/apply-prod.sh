@@ -35,6 +35,9 @@ TARGETS=()
   TARGETS+=(-target='module.ingestion[0]')
   TARGETS+=(-target='module.ingestion_dispatcher[0]')
   TARGETS+=(-target='module.mcp_tester[0]')
+  TARGETS+=(-target='aws_dynamodb_table.code_interpreter_sessions[0]')
+  TARGETS+=(-target='module.code_interpreter[0]')
+  TARGETS+=(-target='module.web_search[0]')
 }
 
 need_backend_artifacts=false
@@ -92,6 +95,12 @@ if [[ "$need_backend_artifacts" == true ]]; then
   fi
   if [[ ! -s "$ROOT/backend/services/admin/mcp-tester/dist/function.zip" ]]; then
     make -C "$ROOT/backend/services/admin/mcp-tester" package
+  fi
+  if [[ ! -s "$ROOT/backend/tools/code-interpreter/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/tools/code-interpreter" package
+  fi
+  if [[ ! -s "$ROOT/backend/tools/web-search/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/tools/web-search" package
   fi
 fi
 

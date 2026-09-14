@@ -2,20 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-import traceback
-from contextvars import ContextVar
 from typing import Any
 
 from awslabs.mcp_lambda_handler import MCPLambdaHandler
 
-from ai.auth import AuthError, require_user
+from ai.mcp_server import build_handler, require_sub
 
 mcp = MCPLambdaHandler(name="get1agent-knowledge", version="1.0.0")
-
-# The MCP handler does not hand the raw event to tool functions, so identity is
-# stashed here for the duration of the request (Lambda serves one at a time).
-_current_sub: ContextVar[str | None] = ContextVar("current_sub", default=None)
 
 GET_TOOL = "get-user-knowledge-bases"
 SEARCH_TOOL = "search-user-knowledge-bases"
@@ -94,13 +87,6 @@ def _as_list(value: Any) -> list[str]:
     return [str(value)]
 
 
-def _require_sub() -> str:
-    sub = _current_sub.get()
-    if not sub:
-        raise RuntimeError("No authenticated user in request context")
-    return sub
-
-
 def _invoke(function_env: str, payload: dict[str, Any]) -> dict[str, Any]:
     function_name = os.environ.get(function_env)
     if not function_name:
@@ -131,7 +117,7 @@ def get_user_knowledge_bases(
     result = _invoke(
         "GET_USER_KB_FUNCTION",
         {
-            "auth0Sub": _require_sub(),
+            "auth0Sub": require_sub(),
             "knowledgeBaseNames": _as_list(knowledgeBaseNames),
         },
     )
@@ -146,7 +132,7 @@ def search_user_knowledge_bases(
 ) -> str:
     """Run hybrid search across the user's knowledge bases."""
     payload: dict[str, Any] = {
-        "auth0Sub": _require_sub(),
+        "auth0Sub": require_sub(),
         "query": query,
         "knowledgeBaseNames": _as_list(knowledgeBaseNames),
         "tags": _as_list(tags),
@@ -163,94 +149,4 @@ mcp.tool_implementations[GET_TOOL] = get_user_knowledge_bases
 mcp.tools[SEARCH_TOOL] = _SEARCH_SCHEMA
 mcp.tool_implementations[SEARCH_TOOL] = search_user_knowledge_bases
 
-
-def _claims_sub(event: dict[str, Any]) -> str | None:
-    try:
-        claims = event["requestContext"]["authorizer"]["jwt"]["claims"]
-        return str(claims.get("sub") or "").strip() or None
-    except (KeyError, TypeError, AttributeError):
-        return None
-
-
-def _claims(event: dict[str, Any]) -> dict[str, Any] | None:
-    try:
-        return event["requestContext"]["authorizer"]["jwt"]["claims"]
-    except (KeyError, TypeError, AttributeError):
-        return None
-
-
-def _is_http_event(event: dict[str, Any]) -> bool:
-    return "body" in event and ("requestContext" in event or "httpMethod" in event)
-
-
-def _json_http_error(status_code: int, message: str) -> dict[str, Any]:
-    return {
-        "statusCode": status_code,
-        "headers": {"content-type": "application/json"},
-        "body": json.dumps({"error": message}),
-    }
-
-
-def _error_response(code: int, message: str, request_id: Any = None) -> dict[str, Any]:
-    return {
-        "statusCode": 200,
-        "headers": {"content-type": "application/json"},
-        "body": json.dumps(
-            {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
-        ),
-    }
-
-
-def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    event = event if isinstance(event, dict) else {}
-
-    if _is_http_event(event):
-        # Strict separation: admin accounts must use the admin tester, not the
-        # user-facing MCP endpoint. The direct-invoke transport (used by
-        # mcp-tester) is admin-only and checked by the caller.
-        try:
-            require_user(_claims(event), event)
-        except AuthError as exc:
-            return _json_http_error(exc.status, exc.message)
-        _current_sub.set(_claims_sub(event))
-        try:
-            return mcp.handle_request(event, context)
-        except Exception as exc:  # noqa: BLE001
-            print(f"knowledge-mcp error: {exc!r}", file=sys.stderr)
-            traceback.print_exc()
-            return _error_response(-32603, "Internal error")
-
-    # Direct Lambda invoke transport: a JSON-RPC message plus caller identity.
-    sub = event.get("auth0Sub") or event.get("sub")
-    _current_sub.set(str(sub).strip() if sub else None)
-    message = {
-        key: event[key]
-        for key in ("jsonrpc", "id", "method", "params")
-        if key in event
-    }
-    message.setdefault("jsonrpc", "2.0")
-    if "method" not in message:
-        return {
-            "jsonrpc": "2.0",
-            "id": message.get("id"),
-            "error": {"code": -32600, "message": "Invalid Request"},
-        }
-
-    try:
-        response = mcp.handle_request(
-            {
-                "headers": {"content-type": "application/json"},
-                "body": json.dumps(message),
-                "httpMethod": "POST",
-            },
-            context,
-        )
-        return json.loads(response.get("body") or "{}")
-    except Exception as exc:  # noqa: BLE001
-        print(f"knowledge-mcp direct error: {exc!r}", file=sys.stderr)
-        traceback.print_exc()
-        return {
-            "jsonrpc": "2.0",
-            "id": message.get("id"),
-            "error": {"code": -32603, "message": "Internal error"},
-        }
+lambda_handler = build_handler(mcp)

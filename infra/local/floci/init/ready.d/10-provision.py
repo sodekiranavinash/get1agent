@@ -67,6 +67,8 @@ FUNCTIONS = {
     "search_user_kb": "get1agent-local-search-user-knowledge-bases",
     "knowledge_mcp": "get1agent-local-knowledge-mcp",
     "mcp_tester": "get1agent-local-mcp-tester",
+    "code_interpreter": "get1agent-local-code-interpreter",
+    "web_search": "get1agent-local-web-search",
 }
 
 # Mirrors infra/terraform/envs/prod/api_gateway.tf.
@@ -90,6 +92,12 @@ ROUTES = {
     ],
     "knowledge_mcp": [
         ("POST", "/mcp"),
+    ],
+    "web_search": [
+        ("POST", "/mcp/web-search"),
+    ],
+    "code_interpreter": [
+        ("POST", "/mcp/code-interpreter"),
     ],
     "mcp_tester": [
         ("GET", "/v1/admin/mcp/tools"),
@@ -420,6 +428,8 @@ def main() -> int:
         f"{ROOT}/backend/services/search-user-knowledge-bases/dist/function.zip",
         f"{ROOT}/backend/services/knowledge-mcp/dist/function.zip",
         f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
+        f"{ROOT}/backend/tools/code-interpreter/dist/function.zip",
+        f"{ROOT}/backend/tools/web-search/dist/function.zip",
     ]
     for path in required:
         if not os.path.exists(path):
@@ -596,6 +606,40 @@ def main() -> int:
             "AWS_REGION": REGION,
             "AWS_DEFAULT_REGION": REGION,
         },
+        timeout=300,
+        memory=512,
+    )
+    # AgentCore Code Interpreter is not emulated by Floci, so locally the tool
+    # runs the guarded code in a subprocess of the Lambda container.
+    code_interpreter_arn = ensure_function(
+        lm,
+        FUNCTIONS["code_interpreter"],
+        f"{ROOT}/backend/tools/code-interpreter/dist/function.zip",
+        layers=[ai_layer_arn],
+        environment={
+            "CODE_INTERPRETER_MODE": "local",
+            "CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS": "120",
+            "AWS_REGION": REGION,
+            "AWS_DEFAULT_REGION": REGION,
+        },
+        timeout=240,
+        memory=1024,
+    )
+    # Exa is a public HTTPS API, so the local tool calls it directly with the
+    # host EXA_API_KEY (no emulation branch).
+    web_search_arn = ensure_function(
+        lm,
+        FUNCTIONS["web_search"],
+        f"{ROOT}/backend/tools/web-search/dist/function.zip",
+        layers=[ai_layer_arn],
+        environment={
+            "EXA_API_KEY": os.environ.get("EXA_API_KEY", ""),
+            "EXA_API_BASE_URL": os.environ.get("EXA_API_BASE_URL", "https://api.exa.ai"),
+            "WEB_SEARCH_TIMEOUT_SECONDS": "45",
+            "WEB_SEARCH_MAX_RESULTS": "25",
+            "AWS_REGION": REGION,
+            "AWS_DEFAULT_REGION": REGION,
+        },
         timeout=60,
         memory=512,
     )
@@ -605,11 +649,17 @@ def main() -> int:
         f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
         layers=[ai_layer_arn],
         environment={
-            "MCP_FUNCTION": FUNCTIONS["knowledge_mcp"],
+            "MCP_FUNCTIONS": ",".join(
+                [
+                    FUNCTIONS["knowledge_mcp"],
+                    FUNCTIONS["web_search"],
+                    FUNCTIONS["code_interpreter"],
+                ]
+            ),
             "AWS_REGION": REGION,
             "AWS_DEFAULT_REGION": REGION,
         },
-        timeout=60,
+        timeout=300,
         memory=512,
     )
 
@@ -619,6 +669,8 @@ def main() -> int:
             "knowledge_bases": kb_arn,
             "account_settings": account_arn,
             "knowledge_mcp": mcp_arn,
+            "web_search": web_search_arn,
+            "code_interpreter": code_interpreter_arn,
             "mcp_tester": mcp_tester_arn,
         },
     )

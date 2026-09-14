@@ -63,3 +63,37 @@ def call_tool(
     message = _message("tools/call", {"name": name, "arguments": arguments}, 2)
     response = _invoke(function_name, {**message, "auth0Sub": sub}, region)
     return message, response
+
+
+def list_tools_multi(
+    function_names: list[str], sub: str, region: str | None = None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """List tools across several MCP servers.
+
+    Returns ``(tools, per_server)``: the merged tool list (each tool tagged with
+    the ``server`` function name) and one entry per server with its raw
+    ``request``/``response`` for inspection.
+    """
+    tools: list[dict[str, Any]] = []
+    per_server: list[dict[str, Any]] = []
+    for function_name in function_names:
+        request, response = list_tools(function_name, sub, region)
+        per_server.append(
+            {"function": function_name, "request": request, "response": response}
+        )
+        for tool in response.get("result", {}).get("tools", []) or []:
+            if isinstance(tool, dict):
+                tools.append({**tool, "server": function_name})
+    return tools, per_server
+
+
+def find_tool_server(
+    function_names: list[str], sub: str, tool_name: str, region: str | None = None
+) -> str | None:
+    """Return the MCP server that exposes ``tool_name``, if any."""
+    for function_name in function_names:
+        _, response = list_tools(function_name, sub, region)
+        tools = response.get("result", {}).get("tools", []) or []
+        if any(isinstance(tool, dict) and tool.get("name") == tool_name for tool in tools):
+            return function_name
+    return None

@@ -1,0 +1,12 @@
+[project]
+name = "get1agent-code-interpreter"
+version = "0.1.0"
+description = "MCP server exposing the code-interpreter tool (Bedrock AgentCore)"
+requires-python = ">=3.14"
+dependencies = [
+    # The runtime boto3 may predate the bedrock-agentcore service model.
+    "boto3>=1.43.31",
+    # MCP server support (its own boto3 dep is satisfied above).
+    "awslabs.mcp-lambda-handler==0.1.15",
+    "python-dateutil>=2.8.2",
+]

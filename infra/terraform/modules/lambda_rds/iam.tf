@@ -177,6 +177,53 @@ resource "aws_iam_role_policy" "lambda_invoke" {
   })
 }
 
+resource "aws_iam_role_policy" "bedrock_agentcore" {
+  count = length(var.bedrock_agentcore_arns) > 0 ? 1 : 0
+  name  = "${var.name}-bedrock-agentcore"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "CodeInterpreterSessions"
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:StartCodeInterpreterSession",
+        "bedrock-agentcore:InvokeCodeInterpreter",
+        "bedrock-agentcore:StopCodeInterpreterSession",
+        "bedrock-agentcore:GetCodeInterpreterSession",
+      ]
+      Resource = var.bedrock_agentcore_arns
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  count = length(var.dynamodb_table_arns) > 0 ? 1 : 0
+  name  = "${var.name}-dynamodb-access"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "SessionTable"
+      Effect = "Allow"
+      Action = [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:DescribeTable",
+      ]
+      Resource = concat(
+        var.dynamodb_table_arns,
+        [for arn in var.dynamodb_table_arns : "${arn}/index/*"],
+      )
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "xray" {
   count = var.tracing_mode == "Active" ? 1 : 0
   name  = "${var.name}-xray"

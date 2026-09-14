@@ -58,6 +58,9 @@ services:
       OLLAMA_URL: http://ollama:11434
       LOCAL_EMBED_MODEL: ${LOCAL_EMBED_MODEL:-mxbai-embed-large}
       LOCAL_RERANK_URL: http://reranker:80/rerank
+      # Exa web-search tool (public HTTPS API, no emulation).
+      EXA_API_KEY: ${EXA_API_KEY:-}
+      EXA_API_BASE_URL: ${EXA_API_BASE_URL:-https://api.exa.ai}
     ports:
       - "${FLOCI_PORT:-4566}:4566"
     volumes:

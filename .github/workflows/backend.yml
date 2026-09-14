@@ -35,6 +35,14 @@ on:
         description: Deploy mcp-tester (admin MCP client)
         type: boolean
         default: false
+      code_interpreter:
+        description: Deploy code-interpreter (MCP code sandbox)
+        type: boolean
+        default: false
+      web_search:
+        description: Deploy web-search (MCP Exa web search)
+        type: boolean
+        default: false
       ingestion_dispatcher:
         description: Deploy ingestion-dispatcher
         type: boolean
@@ -91,6 +99,8 @@ jobs:
           SELECT_SEARCH_USER_KNOWLEDGE_BASES: ${{ inputs.search_user_knowledge_bases }}
           SELECT_KNOWLEDGE_MCP: ${{ inputs.knowledge_mcp }}
           SELECT_MCP_TESTER: ${{ inputs.mcp_tester }}
+          SELECT_CODE_INTERPRETER: ${{ inputs.code_interpreter }}
+          SELECT_WEB_SEARCH: ${{ inputs.web_search }}
           SELECT_INGESTION_DISPATCHER: ${{ inputs.ingestion_dispatcher }}
           SELECT_INGESTION_EXTRACT: ${{ inputs.ingestion_extract }}
           SELECT_INGESTION_EMBED: ${{ inputs.ingestion_embed }}

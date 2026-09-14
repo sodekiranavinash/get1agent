@@ -47,6 +47,8 @@ resource "aws_lambda_function" "this" {
     aws_iam_role_policy.step_functions_access,
     aws_iam_role_policy.bedrock_access,
     aws_iam_role_policy.bedrock_rerank,
+    aws_iam_role_policy.bedrock_agentcore,
+    aws_iam_role_policy.dynamodb_access,
     aws_iam_role_policy.lambda_invoke,
     aws_iam_role_policy.xray,
     aws_security_group_rule.postgres_from_lambda,

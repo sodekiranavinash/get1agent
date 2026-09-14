@@ -140,6 +140,18 @@ variable "lambda_invoke_arns" {
   description = "Lambda function ARNs this Lambda may invoke"
 }
 
+variable "bedrock_agentcore_arns" {
+  type        = list(string)
+  default     = []
+  description = "Bedrock AgentCore code-interpreter ARNs this Lambda may start/invoke/stop sessions on"
+}
+
+variable "dynamodb_table_arns" {
+  type        = list(string)
+  default     = []
+  description = "DynamoDB table ARNs this Lambda may read/write"
+}
+
 variable "event_source_queue_arn" {
   type        = string
   default     = ""

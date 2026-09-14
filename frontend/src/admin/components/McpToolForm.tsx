@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Info, Play } from 'lucide-react'
+import { Play, Server } from 'lucide-react'
 import { Button } from '../../components/ui/Button'
 import { Switch } from '../../components/ui/Switch'
 import type { McpProperty, McpTool } from '../lib/mcpAdmin'
@@ -13,6 +13,11 @@ type McpToolFormProps = {
   tool: McpTool
   running: boolean
   onRun: (name: string, args: Record<string, unknown>) => void
+}
+
+function serverLabel(server?: string): string | null {
+  if (!server) return null
+  return server.replace(/^get1agent-(prod|local)-/, '')
 }
 
 function initialFields(tool: McpTool): Record<string, FieldState> {
@@ -150,16 +155,17 @@ function FieldControl({
     )
   }
 
-  if (name === 'query') {
+  if (name === 'query' || name === 'code') {
     return (
       <textarea
         value={String(state.value)}
         onChange={(event) =>
           onChange({ value: event.target.value, touched: true })
         }
-        rows={3}
+        rows={name === 'code' ? 8 : 3}
         placeholder={prop.description ?? 'Enter a value'}
-        className={`${inputStyles} resize-y`}
+        spellCheck={name !== 'code'}
+        className={`${inputStyles} resize-y ${name === 'code' ? 'font-mono' : ''}`}
       />
     )
   }
@@ -179,7 +185,6 @@ export function McpToolForm({ tool, running, onRun }: McpToolFormProps) {
   const [fields, setFields] = useState<Record<string, FieldState>>(() =>
     initialFields(tool),
   )
-  const [showDetails, setShowDetails] = useState(false)
 
   const required = useMemo(
     () => new Set(tool.inputSchema?.required ?? []),
@@ -189,30 +194,28 @@ export function McpToolForm({ tool, running, onRun }: McpToolFormProps) {
   const args = buildArguments(tool, fields)
   const missing = missingRequired(tool, fields)
   const canRun = !running && missing.length === 0
+  const server = serverLabel(tool.server)
 
   return (
     <div className="min-w-0 space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="min-w-0 text-sm font-semibold break-words text-foreground">
-          {tool.name}
-        </h3>
+      <div className="min-w-0 space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="min-w-0 text-sm font-semibold break-words text-foreground">
+            {tool.name}
+          </h3>
+          {server ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-border bg-raised px-2 py-0.5 text-[10px] font-medium text-subtle">
+              <Server className="h-3 w-3" strokeWidth={1.75} />
+              {server}
+            </span>
+          ) : null}
+        </div>
         {tool.description ? (
-          <button
-            type="button"
-            onClick={() => setShowDetails((value) => !value)}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-subtle transition-colors hover:bg-raised hover:text-foreground"
-          >
-            <Info className="h-3.5 w-3.5" strokeWidth={1.75} />
-            {showDetails ? 'Hide details' : 'Details'}
-          </button>
+          <p className="rounded-lg border border-border bg-raised/40 px-3 py-2 text-[11px] leading-relaxed break-words text-muted">
+            {tool.description}
+          </p>
         ) : null}
       </div>
-
-      {showDetails && tool.description ? (
-        <p className="rounded-lg border border-border bg-raised/40 px-3 py-2 text-[11px] leading-relaxed break-words text-muted">
-          {tool.description}
-        </p>
-      ) : null}
 
       {properties.length === 0 ? (
         <p className="text-xs text-muted">This tool takes no arguments.</p>
@@ -226,10 +229,7 @@ export function McpToolForm({ tool, running, onRun }: McpToolFormProps) {
             return (
               <div key={name} className="min-w-0">
                 <div className="mb-1.5 flex items-center gap-2">
-                  <label
-                    title={prop.description}
-                    className="flex min-w-0 items-center gap-2 text-xs font-semibold text-foreground"
-                  >
+                  <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-foreground">
                     <code className="rounded bg-raised px-1.5 py-0.5 text-[11px] text-accent">
                       {name}
                     </code>
@@ -245,6 +245,11 @@ export function McpToolForm({ tool, running, onRun }: McpToolFormProps) {
                     )}
                   </label>
                 </div>
+                {prop.description ? (
+                  <p className="mb-1.5 text-[11px] leading-relaxed break-words text-muted">
+                    {prop.description}
+                  </p>
+                ) : null}
                 <FieldControl
                   name={name}
                   prop={prop}

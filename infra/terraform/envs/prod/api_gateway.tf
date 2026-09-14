@@ -119,6 +119,20 @@ module "api_gateway" {
       lambda_function_name = module.knowledge_mcp[0].function_name
       authorization_type   = "JWT"
     }
+    web_search_mcp = {
+      method               = "POST"
+      path                 = "/mcp/web-search"
+      lambda_invoke_arn    = module.web_search[0].invoke_arn
+      lambda_function_name = module.web_search[0].function_name
+      authorization_type   = "JWT"
+    }
+    code_interpreter_mcp = {
+      method               = "POST"
+      path                 = "/mcp/code-interpreter"
+      lambda_invoke_arn    = module.code_interpreter[0].invoke_arn
+      lambda_function_name = module.code_interpreter[0].function_name
+      authorization_type   = "JWT"
+    }
     admin_mcp_tools = {
       method               = "GET"
       path                 = "/v1/admin/mcp/tools"
