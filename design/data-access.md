@@ -10,7 +10,8 @@ The canonical model and rationale live in
   adjacency-list keys (`pk`/`sk`) and three sparse overloaded GSIs (`byId`,
   `byUser`, `byStatus`).
 - Access goes through the repository functions in
-  `backend/services/shared/dynamo/repositories/`; do not hand-roll item access.
+  `backend/packages/data/` (import `data.repositories.*`), bundled
+  into every Lambda that uses it; do not hand-roll item access.
 - Embeddings live in **S3 Vectors**; the keyword (BM25) index, parents and
   manifests live in **S3 objects** (`index/<userId>/...`). There is no SQL database
   and no ORM.

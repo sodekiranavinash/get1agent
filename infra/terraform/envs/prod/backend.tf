@@ -1,12 +1,13 @@
 locals {
   backend_python_runtime   = "python3.14"
-  layer_data_zip           = abspath("${path.module}/../../../../backend/services/layers/data/dist/layer.zip")
-  layer_ai_zip             = abspath("${path.module}/../../../../backend/services/layers/ai/dist/layer.zip")
+  layer_base_zip           = abspath("${path.module}/../../../../backend/services/dependency-layers/base/dist/layer.zip")
+  layer_genai_zip          = abspath("${path.module}/../../../../backend/services/dependency-layers/genai/dist/layer.zip")
+  layer_extra_tools_zip    = abspath("${path.module}/../../../../backend/services/dependency-layers/extra-tools/dist/layer.zip")
   user_api_zip             = abspath("${path.module}/../../../../backend/services/user-api/dist/function.zip")
   knowledge_mcp_zip        = abspath("${path.module}/../../../../backend/services/knowledge-mcp/dist/function.zip")
-  mcp_tester_zip           = abspath("${path.module}/../../../../backend/services/admin/mcp-tester/dist/function.zip")
-  code_interpreter_zip     = abspath("${path.module}/../../../../backend/tools/code-interpreter/dist/function.zip")
-  web_search_zip           = abspath("${path.module}/../../../../backend/tools/web-search/dist/function.zip")
+  mcp_tester_zip           = abspath("${path.module}/../../../../backend/services/mcp-tester/dist/function.zip")
+  code_interpreter_zip     = abspath("${path.module}/../../../../backend/services/code-interpreter/dist/function.zip")
+  web_search_zip           = abspath("${path.module}/../../../../backend/services/web-search/dist/function.zip")
   ingestion_dispatcher_zip = abspath("${path.module}/../../../../backend/services/ingestion-dispatcher/dist/function.zip")
   ingestion_extract_zip    = abspath("${path.module}/../../../../backend/services/ingestion-extract/dist/function.zip")
   ingestion_embed_zip      = abspath("${path.module}/../../../../backend/services/ingestion-embed/dist/function.zip")
@@ -15,17 +16,24 @@ locals {
   ingestion_watchdog_zip   = abspath("${path.module}/../../../../backend/services/ingestion-watchdog/dist/function.zip")
 }
 
-check "layer_data_zip_exists" {
+check "layer_base_zip_exists" {
   assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.layer_data_zip)
-    error_message = "Backend data layer zip not found at ${local.layer_data_zip}. Run: bash infra/aws/build-backend-layers.sh"
+    condition     = !var.enable_backend_lambdas || fileexists(local.layer_base_zip)
+    error_message = "base layer zip not found at ${local.layer_base_zip}. Run: bash infra/aws/build-backend-layers.sh"
   }
 }
 
-check "layer_ai_zip_exists" {
+check "layer_genai_zip_exists" {
   assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.layer_ai_zip)
-    error_message = "Backend ai layer zip not found at ${local.layer_ai_zip}. Run: bash infra/aws/build-backend-layers.sh"
+    condition     = !var.enable_backend_lambdas || fileexists(local.layer_genai_zip)
+    error_message = "genai layer zip not found at ${local.layer_genai_zip}. Run: bash infra/aws/build-backend-layers.sh"
+  }
+}
+
+check "layer_extra_tools_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.layer_extra_tools_zip)
+    error_message = "extra-tools layer zip not found at ${local.layer_extra_tools_zip}. Run: bash infra/aws/build-backend-layers.sh"
   }
 }
 
@@ -46,21 +54,21 @@ check "knowledge_mcp_zip_exists" {
 check "mcp_tester_zip_exists" {
   assert {
     condition     = !var.enable_backend_lambdas || fileexists(local.mcp_tester_zip)
-    error_message = "mcp-tester zip not found at ${local.mcp_tester_zip}. Run: make -C backend/services/admin/mcp-tester package"
+    error_message = "mcp-tester zip not found at ${local.mcp_tester_zip}. Run: make -C backend/services/mcp-tester package"
   }
 }
 
 check "code_interpreter_zip_exists" {
   assert {
     condition     = !var.enable_backend_lambdas || fileexists(local.code_interpreter_zip)
-    error_message = "code-interpreter zip not found at ${local.code_interpreter_zip}. Run: make -C backend/tools/code-interpreter package"
+    error_message = "code-interpreter zip not found at ${local.code_interpreter_zip}. Run: make -C backend/services/code-interpreter package"
   }
 }
 
 check "web_search_zip_exists" {
   assert {
     condition     = !var.enable_backend_lambdas || fileexists(local.web_search_zip)
-    error_message = "web-search zip not found at ${local.web_search_zip}. Run: make -C backend/tools/web-search package"
+    error_message = "web-search zip not found at ${local.web_search_zip}. Run: make -C backend/services/web-search package"
   }
 }
 
@@ -106,26 +114,37 @@ check "ingestion_watchdog_zip_exists" {
   }
 }
 
-module "layer_data" {
+module "layer_base" {
   count  = var.enable_backend_lambdas ? 1 : 0
   source = "../../modules/lambda_layer"
 
-  name                = "get1agent-prod-layer-data"
-  filename            = local.layer_data_zip
-  source_code_hash    = filebase64sha256(local.layer_data_zip)
+  name                = "get1agent-prod-layer-base"
+  filename            = local.layer_base_zip
+  source_code_hash    = filebase64sha256(local.layer_base_zip)
   compatible_runtimes = [local.backend_python_runtime]
-  description         = "Shared layer: DynamoDB + S3 search/ingestion code"
+  description         = "Base dependency layer: lightweight Python libs"
 }
 
-module "layer_ai" {
+module "layer_genai" {
   count  = var.enable_backend_lambdas ? 1 : 0
   source = "../../modules/lambda_layer"
 
-  name                = "get1agent-prod-layer-ai"
-  filename            = local.layer_ai_zip
-  source_code_hash    = filebase64sha256(local.layer_ai_zip)
+  name                = "get1agent-prod-layer-genai"
+  filename            = local.layer_genai_zip
+  source_code_hash    = filebase64sha256(local.layer_genai_zip)
   compatible_runtimes = [local.backend_python_runtime]
-  description         = "AI/MCP shared helpers: admin/user role checks + MCP JSON-RPC client"
+  description         = "GenAI/MCP dependency layer: MCP handler, strands, AI SDKs"
+}
+
+module "layer_extra_tools" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_layer"
+
+  name                = "get1agent-prod-layer-extra-tools"
+  filename            = local.layer_extra_tools_zip
+  source_code_hash    = filebase64sha256(local.layer_extra_tools_zip)
+  compatible_runtimes = [local.backend_python_runtime]
+  description         = "Extra tooling dependency layer: document parsing libs"
 }
 
 module "database" {
@@ -152,7 +171,7 @@ module "user_api" {
   source_code_hash = filebase64sha256(local.user_api_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn, module.layer_ai[0].arn]
+  layer_arns       = [module.layer_base[0].arn]
 
   memory_size = 512
   timeout     = 30
@@ -173,8 +192,6 @@ module "user_api" {
   }
 
   depends_on = [
-    module.layer_data,
-    module.layer_ai,
     module.knowledge_storage,
     module.database,
     module.vectors,
@@ -191,7 +208,7 @@ module "knowledge_mcp" {
   source_code_hash = filebase64sha256(local.knowledge_mcp_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn, module.layer_ai[0].arn]
+  layer_arns       = [module.layer_base[0].arn, module.layer_genai[0].arn]
 
   memory_size = 1024
   timeout     = 300
@@ -222,8 +239,6 @@ module "knowledge_mcp" {
   }
 
   depends_on = [
-    module.layer_data,
-    module.layer_ai,
     module.knowledge_storage,
     module.database,
     module.vectors,
@@ -240,7 +255,7 @@ module "mcp_tester" {
   source_code_hash = filebase64sha256(local.mcp_tester_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn, module.layer_ai[0].arn]
+  layer_arns       = []
 
   memory_size = 512
   timeout     = 300
@@ -263,8 +278,6 @@ module "mcp_tester" {
   }
 
   depends_on = [
-    module.layer_data,
-    module.layer_ai,
     module.database,
     module.knowledge_mcp,
     module.web_search,
@@ -282,7 +295,7 @@ module "code_interpreter" {
   source_code_hash = filebase64sha256(local.code_interpreter_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn, module.layer_ai[0].arn]
+  layer_arns       = [module.layer_base[0].arn, module.layer_genai[0].arn]
 
   memory_size = 1024
   timeout     = var.code_interpreter_timeout_seconds
@@ -303,7 +316,7 @@ module "code_interpreter" {
     CODE_INTERPRETER_MAX_SESSIONS_PER_USER   = tostring(var.code_interpreter_max_sessions_per_user)
   }
 
-  depends_on = [module.database, module.layer_data, module.layer_ai]
+  depends_on = [module.database]
 }
 
 module "web_search" {
@@ -316,7 +329,7 @@ module "web_search" {
   source_code_hash = filebase64sha256(local.web_search_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_ai[0].arn]
+  layer_arns       = [module.layer_base[0].arn, module.layer_genai[0].arn]
 
   memory_size = 512
   timeout     = var.web_search_timeout_seconds
@@ -328,7 +341,6 @@ module "web_search" {
     WEB_SEARCH_MAX_RESULTS     = tostring(var.web_search_max_results)
   }
 
-  depends_on = [module.layer_ai]
 }
 
 module "ingestion_extract" {
@@ -341,7 +353,7 @@ module "ingestion_extract" {
   source_code_hash = try(filebase64sha256(local.ingestion_extract_zip), "")
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn]
+  layer_arns       = [module.layer_extra_tools[0].arn]
 
   memory_size = 1024
   timeout     = 600
@@ -355,7 +367,7 @@ module "ingestion_extract" {
     S3_REGION      = var.aws_region
   }
 
-  depends_on = [module.layer_data, module.knowledge_storage, module.database]
+  depends_on = [module.knowledge_storage, module.database]
 }
 
 module "ingestion_embed" {
@@ -368,7 +380,7 @@ module "ingestion_embed" {
   source_code_hash = try(filebase64sha256(local.ingestion_embed_zip), "")
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn]
+  layer_arns       = []
 
   memory_size = 1024
   timeout     = 600
@@ -391,7 +403,7 @@ module "ingestion_embed" {
     IMAGE_EMBED_MODEL = "amazon.titan-embed-image-v1"
   }
 
-  depends_on = [module.layer_data, module.knowledge_storage, module.database]
+  depends_on = [module.knowledge_storage, module.database]
 }
 
 module "ingestion_index" {
@@ -404,7 +416,7 @@ module "ingestion_index" {
   source_code_hash = try(filebase64sha256(local.ingestion_index_zip), "")
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn]
+  layer_arns       = []
 
   memory_size = 1024
   timeout     = 600
@@ -426,7 +438,6 @@ module "ingestion_index" {
   }
 
   depends_on = [
-    module.layer_data,
     module.knowledge_storage,
     module.database,
     module.vectors,
@@ -443,7 +454,7 @@ module "ingestion_mark_failed" {
   source_code_hash = try(filebase64sha256(local.ingestion_fail_zip), "")
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn]
+  layer_arns       = []
 
   memory_size = 256
   timeout     = 30
@@ -454,7 +465,7 @@ module "ingestion_mark_failed" {
     DYNAMODB_TABLE = module.database[0].table_name
   }
 
-  depends_on = [module.layer_data, module.database]
+  depends_on = [module.database]
 }
 
 module "ingestion_watchdog" {
@@ -467,7 +478,7 @@ module "ingestion_watchdog" {
   source_code_hash = try(filebase64sha256(local.ingestion_watchdog_zip), "")
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
-  layer_arns       = [module.layer_data[0].arn]
+  layer_arns       = []
 
   memory_size = 256
   timeout     = 120
@@ -479,7 +490,7 @@ module "ingestion_watchdog" {
     STALL_THRESHOLD_MINUTES = "75"
   }
 
-  depends_on = [module.layer_data, module.database]
+  depends_on = [module.database]
 }
 
 module "ingestion" {

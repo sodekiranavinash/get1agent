@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-REGISTRY="$ROOT/backend/services/registry.json"
+REGISTRY="$ROOT/backend/registry.json"
 
 python3 - "$REGISTRY" <<'PY'
 import json
@@ -17,7 +17,7 @@ import sys
 
 path = sys.argv[1]
 with open(path, encoding="utf-8") as f:
-    lambdas = json.load(f)["lambdas"]
+    lambdas = json.load(f)["apps"]
 
 
 def key_for(value: str) -> str:

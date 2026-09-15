@@ -1,0 +1,6 @@
+[project]
+name = "get1agent-layer-base"
+version = "0.1.0"
+description = "Base dependency layer: lightweight general-purpose Python libs."
+requires-python = ">=3.14"
+dependencies = ["tzdata>=2024.1", "python-dateutil>=2.8.2"]

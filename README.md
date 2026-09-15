@@ -8,11 +8,18 @@ Monorepo for get1agent.
 .
 ├── frontend/   # React + TypeScript + Tailwind (Vite)
 ├── backend/
-│   ├── services/   # Python Lambdas + shared layers (user-api, knowledge-mcp, ingestion-*)
-│   └── tools/      # MCP server Lambdas (web-search, code-interpreter)
+│   ├── services/   # Lambda apps (user-api, knowledge-mcp, mcp-tester, ingestion-*, web-search, code-interpreter)
+│   │   ├── dependency-layers/   # third-party Lambda layers: base, genai, extra-tools, ml
+│   │   └── integration-tests/   # integration tests (moto DynamoDB + in-memory S3)
+│   ├── agents/     # AgentCore runtime apps (host, worker)
+│   └── packages/   # shared modules: core, data, retrieval, ingestion
 ├── infra/      # Terraform, deploy scripts, local Floci stack
 └── README.md
 ```
+
+Each Lambda app bundles the shared modules (`core`, `data`, `retrieval`,
+`ingestion`) it uses and attaches the dependency layers it needs; layers never
+contain application code.
 
 ## Frontend
 

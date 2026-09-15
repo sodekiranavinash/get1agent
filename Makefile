@@ -21,7 +21,7 @@ RERANKER_IMAGE ?= ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
 RERANKER_PORT ?= 8080
 export RERANKER_IMAGE RERANKER_PORT
 
-.PHONY: help ui test floci floci-env floci-artifacts floci-build floci-up floci-wait \
+.PHONY: help ui test test-unit floci floci-env floci-artifacts floci-build floci-up floci-wait \
 	floci-embed floci-rerank floci-reload floci-down floci-logs
 
 help:
@@ -48,7 +48,15 @@ ui:
 
 # Backend integration tests: moto-backed DynamoDB + in-memory S3. No Docker/AWS.
 test:
-	cd backend/tests && uv run pytest
+	cd backend/services/integration-tests && uv run pytest
+
+# Per-lambda unit tests (stdlib unittest in each app's tests/ dir). No-op for
+# apps that don't have any yet.
+test-unit:
+	@for app in backend/services/*; do \
+		[ -f "$$app/Makefile" ] || continue; \
+		$(MAKE) -C "$$app" test || exit 1; \
+	done
 
 # --- Floci local stack -------------------------------------------------------
 
@@ -56,35 +64,36 @@ floci-env:
 	@test -f .env || cp infra/local/floci/env.example .env
 
 floci-build:
-	bash infra/aws/build-backend-layers.sh
+	bash infra/aws/build-backend-layers.sh base,genai,extra-tools
+	$(MAKE) -C backend/services/user-api package
+	$(MAKE) -C backend/services/knowledge-mcp package
+	$(MAKE) -C backend/services/mcp-tester package
+	$(MAKE) -C backend/services/web-search package
+	$(MAKE) -C backend/services/code-interpreter package
 	$(MAKE) -C backend/services/ingestion-dispatcher package
 	$(MAKE) -C backend/services/ingestion-extract package
 	$(MAKE) -C backend/services/ingestion-embed package
 	$(MAKE) -C backend/services/ingestion-index package
 	$(MAKE) -C backend/services/ingestion-mark-failed package
 	$(MAKE) -C backend/services/ingestion-watchdog package
-	$(MAKE) -C backend/services/user-api package
-	$(MAKE) -C backend/services/knowledge-mcp package
-	$(MAKE) -C backend/services/admin/mcp-tester package
-	$(MAKE) -C backend/tools/code-interpreter package
-	$(MAKE) -C backend/tools/web-search package
 
 # Build only if any artifact is missing (fast first run).
 floci-artifacts:
 	@missing=0; \
-	for f in backend/services/layers/data/dist/layer.zip \
-		backend/services/layers/ai/dist/layer.zip \
+	for f in backend/services/dependency-layers/base/dist/layer.zip \
+		backend/services/dependency-layers/genai/dist/layer.zip \
+		backend/services/dependency-layers/extra-tools/dist/layer.zip \
+		backend/services/user-api/dist/function.zip \
+		backend/services/knowledge-mcp/dist/function.zip \
+		backend/services/mcp-tester/dist/function.zip \
+		backend/services/web-search/dist/function.zip \
+		backend/services/code-interpreter/dist/function.zip \
 		backend/services/ingestion-dispatcher/dist/function.zip \
 		backend/services/ingestion-extract/dist/function.zip \
 		backend/services/ingestion-embed/dist/function.zip \
 		backend/services/ingestion-index/dist/function.zip \
 		backend/services/ingestion-mark-failed/dist/function.zip \
-		backend/services/ingestion-watchdog/dist/function.zip \
-		backend/services/user-api/dist/function.zip \
-		backend/services/knowledge-mcp/dist/function.zip \
-		backend/services/admin/mcp-tester/dist/function.zip \
-		backend/tools/code-interpreter/dist/function.zip \
-		backend/tools/web-search/dist/function.zip; do \
+		backend/services/ingestion-watchdog/dist/function.zip; do \
 		[ -f "$$f" ] || missing=1; \
 	done; \
 	if [ "$$missing" = "1" ]; then \

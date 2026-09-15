@@ -17,7 +17,7 @@ if [[ "$MODE" != "package" && "$MODE" != "deploy" ]]; then
   exit 2
 fi
 
-RESOLVED="$(python3 - "$ROOT/backend/services/registry.json" "$QUERY" <<'PY'
+RESOLVED="$(python3 - "$ROOT/backend/registry.json" "$QUERY" <<'PY'
 import json
 import sys
 
@@ -25,7 +25,7 @@ path, query = sys.argv[1], sys.argv[2].strip()
 with open(path, encoding="utf-8") as f:
     registry = json.load(f)
 
-lambdas = registry["lambdas"]
+lambdas = registry["apps"]
 if query.lower() == "all":
     selected = lambdas
 else:

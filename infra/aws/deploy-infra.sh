@@ -16,14 +16,9 @@ fi
 
 bash "$ROOT/infra/aws/write-prod-tfvars.sh"
 
-if [[ ! -s "$ROOT/backend/services/layers/data/dist/layer.zip" ]]; then
-  echo "Building backend data Lambda layer..."
+if [[ ! -s "$ROOT/backend/services/dependency-layers/base/dist/layer.zip" ]]; then
+  echo "Building backend layers..."
   bash "$ROOT/infra/aws/build-backend-layers.sh"
-fi
-
-if [[ ! -s "$ROOT/backend/services/layers/ai/dist/layer.zip" ]]; then
-  echo "Building backend ai Lambda layer..."
-  bash "$ROOT/infra/aws/build-backend-layers.sh" ai
 fi
 
 for service in user-api knowledge-mcp ingestion-dispatcher ingestion-extract \
@@ -34,19 +29,19 @@ for service in user-api knowledge-mcp ingestion-dispatcher ingestion-extract \
   fi
 done
 
-if [[ ! -s "$ROOT/backend/services/admin/mcp-tester/dist/function.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/mcp-tester/dist/function.zip" ]]; then
   echo "Packaging backend mcp-tester Lambda zip..."
-  make -C "$ROOT/backend/services/admin/mcp-tester" package
+  make -C "$ROOT/backend/services/mcp-tester" package
 fi
 
-if [[ ! -s "$ROOT/backend/tools/code-interpreter/dist/function.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/code-interpreter/dist/function.zip" ]]; then
   echo "Packaging code-interpreter Lambda zip..."
-  make -C "$ROOT/backend/tools/code-interpreter" package
+  make -C "$ROOT/backend/services/code-interpreter" package
 fi
 
-if [[ ! -s "$ROOT/backend/tools/web-search/dist/function.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/web-search/dist/function.zip" ]]; then
   echo "Packaging web-search Lambda zip..."
-  make -C "$ROOT/backend/tools/web-search" package
+  make -C "$ROOT/backend/services/web-search" package
 fi
 
 bash "$ROOT/infra/aws/run-terraform.sh" bootstrap "$MODE"

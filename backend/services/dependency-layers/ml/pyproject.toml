@@ -1,0 +1,6 @@
+[project]
+name = "get1agent-layer-ml"
+version = "0.1.0"
+description = "Future ML dependency layer: torch, transformers, etc."
+requires-python = ">=3.14"
+dependencies = []

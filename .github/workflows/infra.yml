@@ -61,6 +61,14 @@ jobs:
         if: inputs.api_gateway || inputs.lambdas
         uses: astral-sh/setup-uv@v5
 
+      - name: Run integration tests
+        if: inputs.api_gateway || inputs.lambdas
+        run: make test
+
+      - name: Run unit tests
+        if: inputs.api_gateway || inputs.lambdas
+        run: make test-unit
+
       - name: Terraform fmt
         run: terraform fmt -check -recursive infra/terraform
 
@@ -89,17 +97,17 @@ jobs:
       - name: Package mcp-tester zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/admin/mcp-tester
+        working-directory: backend/services/mcp-tester
 
       - name: Package code-interpreter zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/tools/code-interpreter
+        working-directory: backend/services/code-interpreter
 
       - name: Package web-search zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/tools/web-search
+        working-directory: backend/services/web-search
 
       - name: Package ingestion-dispatcher zip
         if: inputs.api_gateway || inputs.lambdas
@@ -134,10 +142,10 @@ jobs:
       - name: Verify Lambda zips
         if: inputs.api_gateway || inputs.lambdas
         run: |
-          test -s backend/services/layers/data/dist/layer.zip
-          unzip -l backend/services/layers/data/dist/layer.zip | grep 'python/shared/dynamo'
-          test -s backend/services/layers/ai/dist/layer.zip
-          unzip -l backend/services/layers/ai/dist/layer.zip | grep 'python/ai/auth.py'
+          test -s backend/services/dependency-layers/base/dist/layer.zip
+          unzip -l backend/services/dependency-layers/base/dist/layer.zip | grep 'python/tzdata'
+          test -s backend/services/dependency-layers/genai/dist/layer.zip
+          unzip -l backend/services/dependency-layers/genai/dist/layer.zip | grep 'python/awslabs'
           test -s backend/services/user-api/dist/function.zip
           unzip -l backend/services/user-api/dist/function.zip | grep handler.py
           test -s backend/services/knowledge-mcp/dist/function.zip
@@ -154,12 +162,12 @@ jobs:
           unzip -l backend/services/ingestion-mark-failed/dist/function.zip | grep handler.py
           test -s backend/services/ingestion-watchdog/dist/function.zip
           unzip -l backend/services/ingestion-watchdog/dist/function.zip | grep handler.py
-          test -s backend/services/admin/mcp-tester/dist/function.zip
-          unzip -l backend/services/admin/mcp-tester/dist/function.zip | grep handler.py
-          test -s backend/tools/code-interpreter/dist/function.zip
-          unzip -l backend/tools/code-interpreter/dist/function.zip | grep handler.py
-          test -s backend/tools/web-search/dist/function.zip
-          unzip -l backend/tools/web-search/dist/function.zip | grep handler.py
+          test -s backend/services/mcp-tester/dist/function.zip
+          unzip -l backend/services/mcp-tester/dist/function.zip | grep handler.py
+          test -s backend/services/code-interpreter/dist/function.zip
+          unzip -l backend/services/code-interpreter/dist/function.zip | grep handler.py
+          test -s backend/services/web-search/dist/function.zip
+          unzip -l backend/services/web-search/dist/function.zip | grep handler.py
 
       - name: Terraform validate
         if: inputs.api_gateway || inputs.lambdas

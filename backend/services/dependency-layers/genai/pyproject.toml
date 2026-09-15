@@ -1,0 +1,6 @@
+[project]
+name = "get1agent-layer-genai"
+version = "0.1.0"
+description = "GenAI/MCP dependency layer: MCP handler, strands, AI SDKs."
+requires-python = ">=3.14"
+dependencies = ["awslabs.mcp-lambda-handler==0.1.15"]

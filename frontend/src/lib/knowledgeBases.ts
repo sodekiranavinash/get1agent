@@ -6,7 +6,7 @@ export const KNOWLEDGE_BASES_QUERY_KEY = 'knowledge-bases'
 export const TAG_SUGGESTIONS_QUERY_KEY = 'knowledge-base-tags'
 export const INGESTION_EVENTS_QUERY_KEY = 'ingestion-events'
 
-// Keep these in sync with backend/services/shared/models/user_quota.py.
+// Keep these in sync with backend/packages/data/repositories/quotas.py.
 // Up to 10 knowledge bases x 25 files x 10 MB, capped at 100 MB storage/user.
 export const MAX_KNOWLEDGE_BASES = 10
 export const MAX_FILES_PER_KB = 25

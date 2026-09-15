@@ -8,12 +8,15 @@ Edit this file freely — opencode loads it automatically as project context.
 `get1agent` monorepo.
 
 ```
-frontend/          React + TypeScript + Tailwind (Vite)
+frontend/              React + TypeScript + Tailwind (Vite)
 backend/
-  services/        Python Lambdas + shared layers (user-api, knowledge-mcp, ingestion-*)
-  tools/           MCP server Lambdas (web-search, code-interpreter)
-  migrations/      (removed — there is no SQL database)
-infra/             Terraform, deploy scripts, local Floci stack
+  services/            Lambda apps (user-api, knowledge-mcp, mcp-tester, ingestion-*,
+                       web-search, code-interpreter)
+  services/dependency-layers/   third-party Lambda layers (base, genai, extra-tools, ml)
+  services/integration-tests/   moto + in-memory S3 integration tests
+  agents/              AgentCore runtime apps (host, worker)
+  packages/            shared modules: core, data, retrieval, ingestion
+infra/                 Terraform, deploy scripts, local Floci stack
 ```
 
 ## Current status
@@ -33,6 +36,39 @@ The backend is **serverless with no VPC and no RDS**:
   Bedrock over public endpoints.
 - The frontend talks to API Gateway only; never directly to DynamoDB or S3
   (uploads use presigned URLs).
+
+### Lambda code layout — package vs dependency layer
+
+Deployables live under `backend/services/` (all Lambda apps, including the
+`web-search`/`code-interpreter` MCP servers) and `backend/agents/`. Shared
+application code lives once in **`backend/packages/`** as four top-level modules
+(`core`, `data`, `retrieval`, `ingestion`) and is **bundled into each Lambda's
+zip** (never in a layer):
+
+```
+packages/core/       core       auth, mcp_server, mcp_client, storage, json_utils, logging
+packages/data/       data       client, keys, repositories/*
+packages/retrieval/  retrieval  layout, s3_vectors, term_index, maintenance, embedding/
+packages/ingestion/  ingestion  pipeline, chunking, extractors, actions
+```
+
+Each app keeps its Lambda entry point as `handler.py` at the app root and the
+rest of its code in `src/`; the `Makefile` copies `handler.py`, `src/` and the
+shared modules it uses to the zip root and zips it. **Dependency layers carry
+only third-party dependencies** — never `core`/`data`/`retrieval`/`ingestion`:
+
+| Layer | Contents | Attached to |
+|---|---|---|
+| `base` | `tzdata`, `python-dateutil` | user-api, knowledge-mcp, web-search, code-interpreter |
+| `genai` | `awslabs.mcp-lambda-handler` (future: strands, AI SDKs) | knowledge-mcp, web-search, code-interpreter |
+| `extra-tools` | `pymupdf`, `python-docx`, `openpyxl` | ingestion-extract |
+| `ml` | *(future)* torch/transformers/… | *(future)* |
+
+App-local code stays in the app's `src/` package: `src.skills`,
+`src.search` (hybrid-search orchestration), `src.service`/`src.exa`, and
+`src.guard`/`src.sessions`. Layer membership and per-app packages are
+declared in `backend/registry.json`; `agents/` is AgentCore runtime and is
+excluded from the Lambda build.
 
 ### DynamoDB single table
 
@@ -58,8 +94,10 @@ chunks or postings in DynamoDB.
 - **GSI3 `byStatus`** serves the watchdog (`DOCSTATUS#processing`) and the recent
   events feed (`USER#<userId>#EVENT`).
 - Table is on-demand (`PAY_PER_REQUEST`), TTL attribute `expiresAt`.
-- Repository code lives in `backend/services/shared/dynamo/` (`client.py`,
-  `keys.py`, `repositories/*`). The internal `userId` is a **short base32 id**
+- The DynamoDB client, key builders and repositories live in the `data`
+  package (`backend/packages/data/`, import `data.*`) and are bundled
+  into every Lambda that uses them. The internal
+  `userId` is a **short base32 id**
   (`u_` + 16 Crockford chars, e.g. `u_7k3f9qz2mpx8n4rq`) minted on first login and
   keys all user data (DynamoDB partitions, S3 prefixes, ownership). The Auth0
   `sub` is stored as an attribute and resolved to the `userId` through the
@@ -121,9 +159,11 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   Bedrock (or Ollama locally), writes `embeddings.json`; `ingestion-index` writes
   vectors (S3 Vectors / local), parent objects, term postings, catalog, stats and
   the manifest, then sets `documents.status=ready`.
-- Pipeline code is shared in `backend/services/shared/ingestion/` (chunking,
-  extractors, embeddings, pipeline). Heavy extractor deps (`pymupdf`,
-  `python-docx`, `openpyxl`) ship in the worker zip, **not** the shared layer.
+- The pipeline lives in the `ingestion` package
+  (`backend/packages/ingestion/`, import `ingestion.*`); each
+  `ingestion-*` Lambda is a thin handler that calls one stage action. Embedding
+  config/clients live in `retrieval.embedding`. Heavy extractor deps
+  (`pymupdf`, `python-docx`, `openpyxl`) ship in the `extra-tools` layer.
 - Embeddings: **Titan Text V2** (`amazon.titan-embed-text-v2:0`) in production,
   Ollama `mxbai-embed-large` locally. Image embeddings are computed but not
   searched.
@@ -164,7 +204,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   `content`, the precise `matchedContent` child and a term-window `snippet`.
   Parents are deduplicated per document/page.
 - Default child size is **512 tokens** with 64 overlap (config default in
-  `shared/ingestion/config.py`), so children fit every embedder window.
+  `packages/retrieval/.../embedding/config.py`), so children fit every embedder window.
 - **Rerank is opt-in** (`rerank: true`): Bedrock Rerank
   (`amazon.rerank-v1:0`, `us-west-2`) in production; locally `RERANK_MODE=local`
   calls a HuggingFace TEI cross-encoder (`reranker` container, `POST /rerank`).
@@ -181,11 +221,11 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   digits and hyphens; 3–63 chars; must start/end alphanumeric) and are unique
   per user (`uq_knowledge_bases_user_name`); the create handler returns `409` on
   a duplicate. Per-user limits: **30 knowledge bases, 50 files each, 100 MB
-  storage** (`shared/dynamo/repositories/quotas.py`).
+  storage** (`packages/data/.../repositories/quotas.py`).
 
 ### Code interpreter tool
 
-- `code-interpreter` (`backend/tools/code-interpreter/`) is its own MCP server
+- `code-interpreter` (`backend/services/code-interpreter/`) is its own MCP server
   Lambda (`POST /mcp/code-interpreter`) owning the `code-interpreter` tool. It
   runs LLM-generated Python in **Bedrock AgentCore Code Interpreter** sandboxes
   (`aws.codeinterpreter.v1`, available in `ap-south-1`). It is **outside the
@@ -210,7 +250,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 
 ### Web search tool
 
-- `web-search` (`backend/tools/web-search/`) is its own MCP server Lambda
+- `web-search` (`backend/services/web-search/`) is its own MCP server Lambda
   (`POST /mcp/web-search`) owning the `web-search` tool. It calls the **Exa
   Search API** (`POST https://api.exa.ai/search`). It is **outside the VPC** and
   ships no third-party HTTP client — a stdlib `urllib` client.
@@ -234,8 +274,8 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   and only fetch the full body when a skill applies. No S3 object. Limits:
   **50 skills/user, 100 KB per skill**; names are lowercase-hyphen (1–64) and
   unique per user (the item key `SKILL#<name>`).
-- The parse/render/validation logic is shared in `shared/skills/` (data layer,
-  no PyYAML). `POST /parse` is what the editor calls when a user uploads a `.md`.
+- The parse/render/validation logic lives in the user-api app's `src/skills/`
+  (no PyYAML). `POST /parse` is what the editor calls when a user uploads a `.md`.
 - **allowed-tools** is a multi-select. Built-ins `code-interpreter` and
   `web-search` are offered to everyone; knowledge-base tools are internal and
   never shown.
@@ -246,10 +286,10 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   onto namespaced custom claims: `https://get1agent.com/roles` and
   `https://get1agent.com/isAdmin`. Assign the `admin` role in Auth0; re-login
   refreshes the tokens.
-- Shared role logic lives in the **`ai` Lambda layer**
-  (`backend/services/layers/ai/ai/auth.py`): `is_admin_claims`, `require_admin`
-  and `require_user`. The layer also holds the thin MCP JSON-RPC client
-  (`ai/mcp_client.py`) and the shared MCP transport (`ai/mcp_server.py`).
+- Shared role logic lives in the `core` package (`core.auth`):
+  `is_admin_claims`, `require_admin` and `require_user`. The same package holds
+  the thin MCP JSON-RPC client (`core.mcp_client`) and the shared MCP
+  transport (`core.mcp_server`).
 - **View-based access, enforced server-side** — the frontend is only a UX gate.
   The SPA sends `x-active-view` (`user` | `admin`); the backend validates it
   against the token's real roles:
@@ -259,7 +299,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   - No header → falls back to `admin` if the token has the admin role, else
     `user`.
 - Admin code is kept separate: frontend UI under `frontend/src/admin/`, backend
-  Lambda under `backend/services/admin/mcp-tester/`.
+  Lambda under `backend/services/mcp-tester/`.
 - **`mcp-tester`** (`GET /v1/admin/mcp/tools`, `POST /v1/admin/mcp/call`) is the
   MCP *client*: it reads the admin claim + `sub`, resolves the caller's internal
   `userId`, builds MCP JSON-RPC, and invokes every MCP server in `MCP_FUNCTIONS`
@@ -356,15 +396,18 @@ migration.
 ## Commands
 
 - Frontend: `npm run dev`, `npm run lint`, `npm run build`
-- Backend tests: `make test` — integration tests in `backend/tests/` using
+- Backend tests: `make test` — integration tests in `backend/services/integration-tests/` using
   `moto` (DynamoDB) + an in-memory S3 double. No Docker, no AWS. Run a single
-  file with `cd backend/tests && uv run pytest test_search.py`.
+  file with `cd backend/services/integration-tests && uv run pytest test_search.py`.
+- Per-lambda unit tests: `make test-unit` (or `make -C backend/services/web-search test`)
+  — stdlib `unittest` in each app's `tests/` dir. The integration suite gates
+  every deploy; each Lambda's own unit tests run before it is packaged.
 - Local Lambdas / infra: see "Local development" above (`make floci-*`).
 - Backend Lambdas: `make -C backend/services/<name> package`;
   `bash infra/aws/deploy-backend.sh <name|group> [package|deploy]`. The
   `Backend` workflow deploys by group (`user-apis`, `knowledge-mcp`,
   `admin-apis`, `mcp-tools`, `ingestion-apis`), defined by the `group` field in
-  `backend/services/registry.json`.
+  `backend/registry.json`.
 
 ## Rules
 

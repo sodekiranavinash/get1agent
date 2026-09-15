@@ -479,8 +479,8 @@ Do not add `PATCH` aliases unless requested.
 - Delete those three services
 
 ## Phase 5 — Tools
-- `backend/tools/code-interpreter/src/sessions.py` → main table + TTL
-- `backend/tools/web-search` → unchanged
+- `backend/services/code-interpreter/src/sessions.py` → main table + TTL
+- `backend/services/web-search` → unchanged
 
 ## Phase 6 — Infra
 - Delete VPC/RDS/migrations (see Part 14)

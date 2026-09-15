@@ -186,7 +186,7 @@ role is simpler and keeps credentials out of the URL entirely.
   viewer is used, pass `page` as a prop instead.
 - Never render `documents.s3_key`, and do not add `downloadUrl` to any
   response. The existing `downloadUrl` field in the KB detail payload
-  (`knowledge-bases/src/handler.py:_presign_get`) is unused by the UI and
+  (`user-api/user_api/handler.py:_presign_get`) is unused by the UI and
   should be **removed** as part of this work — it is exactly the leak we are
   avoiding.
 
@@ -208,8 +208,9 @@ role is simpler and keeps credentials out of the URL entirely.
 ## 8. References
 
 - Ingestion rationale: `design/ingestion-logic.md`.
-- Pipeline stages: `backend/services/shared/ingestion/pipeline.py`.
-- Page-aware chunker: `backend/services/shared/ingestion/chunking.py`.
-- Page extraction: `backend/services/shared/ingestion/extractors.py`.
+- Pipeline stages: each `backend/services/ingestion-*` Lambda (`handler.py` + `src/`).
+- Page-aware chunker: `backend/packages/ingestion/chunking.py`.
+- Page extraction: `backend/packages/ingestion/extractors.py`.
+- Embedding config/clients: `backend/packages/retrieval/embedding/`.
 - Schema: `backend/migrations/versions/0003_ingestion.py`,
   `backend/migrations/versions/0005_chunk_pages.py`.

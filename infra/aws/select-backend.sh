@@ -4,7 +4,7 @@ set -euo pipefail
 
 QUERY="${1:-}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-REGISTRY="$ROOT/backend/services/registry.json"
+REGISTRY="$ROOT/backend/registry.json"
 
 if [[ -z "$QUERY" ]]; then
   echo "usage: $0 <lambda-name|function-name|all>" >&2
@@ -17,7 +17,7 @@ import sys
 
 path, query = sys.argv[1], sys.argv[2].strip()
 with open(path, encoding="utf-8") as f:
-    lambdas = json.load(f)["lambdas"]
+    lambdas = json.load(f)["apps"]
 
 if query.lower() == "all":
     selected = lambdas

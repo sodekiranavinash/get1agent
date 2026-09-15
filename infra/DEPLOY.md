@@ -99,25 +99,30 @@ Browser → Cloudflare → API Gateway (JWT) → Lambda functions
 
 ## Backend Lambdas (Python)
 
-Registry: `backend/services/registry.json` — lists **layers** and **lambdas**
-(with `layers: [...]`).
+Registry: `backend/registry.json` — lists **layers** and **apps**
+(each with `packages: [...]` and `layers: [...]`).
 
-| Lambda | Route(s) | Layers | Purpose |
+| App | Route(s) | Layers | Purpose |
 |--------|----------|--------|---------|
-| `user-api` | `/v1/knowledge-bases*`, `/v1/agent-skills*`, `/v1/user/settings` | `data`, `ai` | All user CRUD |
-| `knowledge-mcp` | `POST /mcp` | `data`, `ai` | Knowledge MCP tools + hybrid retrieval |
-| `web-search` | `POST /mcp/web-search` | `ai` | Exa web search |
-| `code-interpreter` | `POST /mcp/code-interpreter` | `data`, `ai` | AgentCore code sandbox |
-| `mcp-tester` | `/v1/admin/mcp/*` | `data`, `ai` | Admin MCP client |
-| `ingestion-*` | (SQS / Step Functions) | `data` | extract → embed → index (+ mark-failed, watchdog, dispatcher) |
+| `user-api` | `/v1/knowledge-bases*`, `/v1/agent-skills*`, `/v1/user/settings` | `base` | All user CRUD |
+| `knowledge-mcp` | `POST /mcp` | `base`, `genai` | Knowledge MCP tools + hybrid retrieval |
+| `web-search` | `POST /mcp/web-search` | `base`, `genai` | Exa web search |
+| `code-interpreter` | `POST /mcp/code-interpreter` | `base`, `genai` | AgentCore code sandbox |
+| `mcp-tester` | `/v1/admin/mcp/*` | — | Admin MCP client |
+| `ingestion-extract` | (Step Functions) | `extra-tools` | extract + chunk |
+| `ingestion-*` | (SQS / Step Functions) | — | embed → index (+ mark-failed, watchdog, dispatcher) |
 
-| Layer | Contents |
+| Layer | Contents (third-party only) |
 |-------|----------|
-| `data` | `shared/` — DynamoDB repositories, S3 search/ingestion, skills, json utils |
-| `ai` | `ai/` — Auth0 role checks + MCP transport/client |
+| `base` | `tzdata`, `python-dateutil` |
+| `genai` | `awslabs.mcp-lambda-handler` (future: strands, AI SDKs) |
+| `extra-tools` | `pymupdf`, `python-docx`, `openpyxl` |
+| `ml` | *(future)* torch/transformers/… |
 
-Handler zips contain **only** `handler.py` (plus the MCP handler for
-`knowledge-mcp`). Dependencies ship in Lambda layers.
+Shared application code lives once in `backend/packages/` (`core`,
+`.data`, `.retrieval`, `.ingestion`) and is **bundled into each app's zip**.
+App zips hold only app code + those packages; layers hold only third-party deps.
+`agents/` is AgentCore runtime and is excluded from the Lambda build.
 
 ```bash
 # Build layers + handler zips locally

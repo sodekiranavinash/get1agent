@@ -14,8 +14,10 @@ Full deployment guide: [`infra/DEPLOY.md`](../infra/DEPLOY.md).
   Vectors (`infra/terraform/modules/s3_vectors`) + S3 objects.
 - **No VPC, no RDS, no NAT.**
 - **Backend Lambdas:** `infra/terraform/modules/lambda_function` (Python in
-  `backend/services/`, layers in `backend/services/layers/`, canonical registry
-  `backend/services/registry.json`).
+  `backend/services/`, AgentCore runtime apps in `backend/agents/`, shared code
+  in `backend/packages/`, dependency layers in
+  `backend/services/dependency-layers/`, canonical registry
+  `backend/registry.json`).
 - **API routes:** `infra/terraform/envs/prod/api_gateway.tf`.
 - There is **no `/health` route** (API Gateway HTTP APIs only allow
   `AWS_PROXY`/`HTTP_PROXY` integrations, so a MOCK route is not possible).

@@ -317,6 +317,7 @@ def ensure_function(
     name: str,
     zip_path: str,
     *,
+    handler: str,
     layers: list[str],
     environment: dict[str, str],
     timeout: int,
@@ -326,7 +327,7 @@ def ensure_function(
         code = handle.read()
     config = {
         "Runtime": RUNTIME,
-        "Handler": "handler.lambda_handler",
+        "Handler": handler,
         "Timeout": timeout,
         "MemorySize": memory,
         "Environment": {"Variables": environment},
@@ -476,19 +477,20 @@ def ensure_http_api(apigw, function_arns: dict[str, str]) -> str:
 
 def main() -> int:
     required = [
-        f"{ROOT}/backend/services/layers/data/dist/layer.zip",
-        f"{ROOT}/backend/services/layers/ai/dist/layer.zip",
+        f"{ROOT}/backend/services/dependency-layers/base/dist/layer.zip",
+        f"{ROOT}/backend/services/dependency-layers/genai/dist/layer.zip",
+        f"{ROOT}/backend/services/dependency-layers/extra-tools/dist/layer.zip",
+        f"{ROOT}/backend/services/user-api/dist/function.zip",
+        f"{ROOT}/backend/services/knowledge-mcp/dist/function.zip",
+        f"{ROOT}/backend/services/mcp-tester/dist/function.zip",
+        f"{ROOT}/backend/services/web-search/dist/function.zip",
+        f"{ROOT}/backend/services/code-interpreter/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion-dispatcher/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-extract/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-embed/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-index/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-mark-failed/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-watchdog/dist/function.zip",
-        f"{ROOT}/backend/services/ingestion-dispatcher/dist/function.zip",
-        f"{ROOT}/backend/services/user-api/dist/function.zip",
-        f"{ROOT}/backend/services/knowledge-mcp/dist/function.zip",
-        f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
-        f"{ROOT}/backend/tools/code-interpreter/dist/function.zip",
-        f"{ROOT}/backend/tools/web-search/dist/function.zip",
     ]
     for path in required:
         if not os.path.exists(path):
@@ -508,15 +510,20 @@ def main() -> int:
     queue_url, queue_arn = ensure_queues(sqs)
     ensure_rule(events, queue_arn)
 
-    layer_arn = ensure_layer(
+    base_layer_arn = ensure_layer(
         lm,
-        "get1agent-local-layer-data",
-        f"{ROOT}/backend/services/layers/data/dist/layer.zip",
+        "get1agent-local-layer-base",
+        f"{ROOT}/backend/services/dependency-layers/base/dist/layer.zip",
     )
-    ai_layer_arn = ensure_layer(
+    genai_layer_arn = ensure_layer(
         lm,
-        "get1agent-local-layer-ai",
-        f"{ROOT}/backend/services/layers/ai/dist/layer.zip",
+        "get1agent-local-layer-genai",
+        f"{ROOT}/backend/services/dependency-layers/genai/dist/layer.zip",
+    )
+    extra_tools_layer_arn = ensure_layer(
+        lm,
+        "get1agent-local-layer-extra-tools",
+        f"{ROOT}/backend/services/dependency-layers/extra-tools/dist/layer.zip",
     )
 
     ddb_env = {
@@ -539,7 +546,8 @@ def main() -> int:
         lm,
         FUNCTIONS["extract"],
         f"{ROOT}/backend/services/ingestion-extract/dist/function.zip",
-        layers=[layer_arn],
+        handler="handler.lambda_handler",
+        layers=[extra_tools_layer_arn],
         environment=worker_env,
         timeout=300,
         memory=1024,
@@ -548,7 +556,8 @@ def main() -> int:
         lm,
         FUNCTIONS["embed"],
         f"{ROOT}/backend/services/ingestion-embed/dist/function.zip",
-        layers=[layer_arn],
+        handler="handler.lambda_handler",
+        layers=[],
         environment=worker_env,
         timeout=300,
         memory=1024,
@@ -557,7 +566,8 @@ def main() -> int:
         lm,
         FUNCTIONS["index"],
         f"{ROOT}/backend/services/ingestion-index/dist/function.zip",
-        layers=[layer_arn],
+        handler="handler.lambda_handler",
+        layers=[],
         environment=worker_env,
         timeout=300,
         memory=1024,
@@ -566,7 +576,8 @@ def main() -> int:
         lm,
         FUNCTIONS["mark_failed"],
         f"{ROOT}/backend/services/ingestion-mark-failed/dist/function.zip",
-        layers=[layer_arn],
+        handler="handler.lambda_handler",
+        layers=[],
         environment=worker_env,
         timeout=30,
         memory=256,
@@ -575,7 +586,8 @@ def main() -> int:
         lm,
         FUNCTIONS["watchdog"],
         f"{ROOT}/backend/services/ingestion-watchdog/dist/function.zip",
-        layers=[layer_arn],
+        handler="handler.lambda_handler",
+        layers=[],
         environment={**worker_env, "STALL_THRESHOLD_MINUTES": "75"},
         timeout=120,
         memory=256,
@@ -588,6 +600,7 @@ def main() -> int:
         lm,
         FUNCTIONS["dispatcher"],
         f"{ROOT}/backend/services/ingestion-dispatcher/dist/function.zip",
+        handler="handler.lambda_handler",
         layers=[],
         environment={
             "STATE_MACHINE_ARN": state_machine_arn,
@@ -611,7 +624,8 @@ def main() -> int:
         lm,
         FUNCTIONS["user_api"],
         f"{ROOT}/backend/services/user-api/dist/function.zip",
-        layers=[layer_arn, ai_layer_arn],
+        handler="handler.lambda_handler",
+        layers=[base_layer_arn],
         environment=api_env,
         timeout=30,
         memory=512,
@@ -620,7 +634,8 @@ def main() -> int:
         lm,
         FUNCTIONS["knowledge_mcp"],
         f"{ROOT}/backend/services/knowledge-mcp/dist/function.zip",
-        layers=[layer_arn, ai_layer_arn],
+        handler="handler.lambda_handler",
+        layers=[base_layer_arn, genai_layer_arn],
         environment={
             **worker_env,
             "RERANK_MODE": "local",
@@ -634,8 +649,9 @@ def main() -> int:
     code_interpreter_arn = ensure_function(
         lm,
         FUNCTIONS["code_interpreter"],
-        f"{ROOT}/backend/tools/code-interpreter/dist/function.zip",
-        layers=[layer_arn, ai_layer_arn],
+        f"{ROOT}/backend/services/code-interpreter/dist/function.zip",
+        handler="handler.lambda_handler",
+        layers=[base_layer_arn, genai_layer_arn],
         environment={
             "CODE_INTERPRETER_MODE": "local",
             "CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS": "120",
@@ -652,8 +668,9 @@ def main() -> int:
     web_search_arn = ensure_function(
         lm,
         FUNCTIONS["web_search"],
-        f"{ROOT}/backend/tools/web-search/dist/function.zip",
-        layers=[ai_layer_arn],
+        f"{ROOT}/backend/services/web-search/dist/function.zip",
+        handler="handler.lambda_handler",
+        layers=[base_layer_arn, genai_layer_arn],
         environment={
             "EXA_API_KEY": os.environ.get("EXA_API_KEY", ""),
             "EXA_API_BASE_URL": os.environ.get("EXA_API_BASE_URL", "https://api.exa.ai"),
@@ -668,8 +685,9 @@ def main() -> int:
     mcp_tester_arn = ensure_function(
         lm,
         FUNCTIONS["mcp_tester"],
-        f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
-        layers=[layer_arn, ai_layer_arn],
+        f"{ROOT}/backend/services/mcp-tester/dist/function.zip",
+        handler="handler.lambda_handler",
+        layers=[],
         environment={
             **ddb_env,
             "MCP_FUNCTIONS": ",".join(

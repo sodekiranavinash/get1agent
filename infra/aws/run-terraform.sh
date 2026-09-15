@@ -117,14 +117,15 @@ run_env() {
       need_backend=true
     else
       case "$PROD_TARGETS" in
-        *layer_data*|*layer_ai*|*user_api*|*knowledge_mcp*|*ingestion*|*mcp_tester*|*code_interpreter*|*web_search*)
+        *layer_base*|*layer_genai*|*layer_extra_tools*|*user_api*|*knowledge_mcp*|*ingestion*|*mcp_tester*|*code_interpreter*|*web_search*)
           need_backend=true
           ;;
       esac
     fi
 
-    check_zip "$ROOT/backend/services/layers/data/dist/layer.zip" "data layer" "bash infra/aws/build-backend-layers.sh"
-    check_zip "$ROOT/backend/services/layers/ai/dist/layer.zip" "ai layer" "bash infra/aws/build-backend-layers.sh ai"
+    check_zip "$ROOT/backend/services/dependency-layers/base/dist/layer.zip" "base layer" "bash infra/aws/build-backend-layers.sh"
+    check_zip "$ROOT/backend/services/dependency-layers/genai/dist/layer.zip" "genai layer" "bash infra/aws/build-backend-layers.sh"
+    check_zip "$ROOT/backend/services/dependency-layers/extra-tools/dist/layer.zip" "extra-tools layer" "bash infra/aws/build-backend-layers.sh"
     check_zip "$ROOT/backend/services/user-api/dist/function.zip" "user-api" "make -C backend/services/user-api package"
     check_zip "$ROOT/backend/services/knowledge-mcp/dist/function.zip" "knowledge-mcp" "make -C backend/services/knowledge-mcp package"
     check_zip "$ROOT/backend/services/ingestion-dispatcher/dist/function.zip" "ingestion-dispatcher" "make -C backend/services/ingestion-dispatcher package"
@@ -133,9 +134,9 @@ run_env() {
     check_zip "$ROOT/backend/services/ingestion-index/dist/function.zip" "ingestion-index" "make -C backend/services/ingestion-index package"
     check_zip "$ROOT/backend/services/ingestion-mark-failed/dist/function.zip" "ingestion-mark-failed" "make -C backend/services/ingestion-mark-failed package"
     check_zip "$ROOT/backend/services/ingestion-watchdog/dist/function.zip" "ingestion-watchdog" "make -C backend/services/ingestion-watchdog package"
-    check_zip "$ROOT/backend/services/admin/mcp-tester/dist/function.zip" "mcp-tester" "make -C backend/services/admin/mcp-tester package"
-    check_zip "$ROOT/backend/tools/code-interpreter/dist/function.zip" "code-interpreter" "make -C backend/tools/code-interpreter package"
-    check_zip "$ROOT/backend/tools/web-search/dist/function.zip" "web-search" "make -C backend/tools/web-search package"
+    check_zip "$ROOT/backend/services/mcp-tester/dist/function.zip" "mcp-tester" "make -C backend/services/mcp-tester package"
+    check_zip "$ROOT/backend/services/code-interpreter/dist/function.zip" "code-interpreter" "make -C backend/services/code-interpreter package"
+    check_zip "$ROOT/backend/services/web-search/dist/function.zip" "web-search" "make -C backend/services/web-search package"
   fi
 
   init_s3

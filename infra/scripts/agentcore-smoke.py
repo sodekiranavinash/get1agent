@@ -5,7 +5,7 @@ Mirrors what the code-interpreter Lambda does (start session -> invoke code ->
 stop session) so the real error is visible without CloudWatch.
 
 Run with the bundled boto3/botocore (matches the Lambda):
-    PYTHONPATH=backend/tools/code-interpreter/dist \
+    PYTHONPATH=backend/services/code-interpreter/dist \
       CODE_INTERPRETER_REGION=ap-south-1 \
       python3 infra/scripts/agentcore-smoke.py
 

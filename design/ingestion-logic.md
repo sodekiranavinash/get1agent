@@ -181,7 +181,7 @@ Alternative embeddings if cost-sensitive: `voyage-3-lite`, or self-hosted
 
 ## 7. Alignment with this repo
 
-- Lambdas live in `backend/services/<name>/src/handler.py`, registered in
+- Lambdas live in `backend/services/<name>/<module>/handler.py`, registered in
   `backend/services/registry.json`, runtime `python3.14`, shared `data` layer.
 - New schema changes go through `backend/migrations/versions/` and
   `bash infra/scripts/migrate.sh up`.

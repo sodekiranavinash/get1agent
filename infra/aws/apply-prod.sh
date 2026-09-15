@@ -11,8 +11,9 @@ bash "$ROOT/infra/aws/write-prod-tfvars.sh"
 TARGETS=()
 [[ "${APPLY_API_GATEWAY:-false}" == "true" ]] && TARGETS+=(-target=module.api_gateway)
 [[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && {
-  TARGETS+=(-target='module.layer_data[0]')
-  TARGETS+=(-target='module.layer_ai[0]')
+  TARGETS+=(-target='module.layer_base[0]')
+  TARGETS+=(-target='module.layer_genai[0]')
+  TARGETS+=(-target='module.layer_extra_tools[0]')
   TARGETS+=(-target='module.database[0]')
   TARGETS+=(-target='module.vectors[0]')
   TARGETS+=(-target='module.knowledge_storage[0]')
@@ -38,26 +39,26 @@ else
 fi
 
 if [[ "$need_backend_artifacts" == true ]]; then
-  if [[ ! -s "$ROOT/backend/services/layers/data/dist/layer.zip" ]]; then
-    bash "$ROOT/infra/aws/build-backend-layers.sh"
-  fi
-  if [[ ! -s "$ROOT/backend/services/layers/ai/dist/layer.zip" ]]; then
-    bash "$ROOT/infra/aws/build-backend-layers.sh" ai
-  fi
+  for layer in base genai extra-tools; do
+    if [[ ! -s "$ROOT/backend/services/dependency-layers/$layer/dist/layer.zip" ]]; then
+      bash "$ROOT/infra/aws/build-backend-layers.sh"
+      break
+    fi
+  done
   for service in user-api knowledge-mcp ingestion-dispatcher ingestion-extract \
     ingestion-embed ingestion-index ingestion-mark-failed ingestion-watchdog; do
     if [[ ! -s "$ROOT/backend/services/$service/dist/function.zip" ]]; then
       make -C "$ROOT/backend/services/$service" package
     fi
   done
-  if [[ ! -s "$ROOT/backend/services/admin/mcp-tester/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/services/admin/mcp-tester" package
+  if [[ ! -s "$ROOT/backend/services/mcp-tester/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/mcp-tester" package
   fi
-  if [[ ! -s "$ROOT/backend/tools/code-interpreter/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/tools/code-interpreter" package
+  if [[ ! -s "$ROOT/backend/services/code-interpreter/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/code-interpreter" package
   fi
-  if [[ ! -s "$ROOT/backend/tools/web-search/dist/function.zip" ]]; then
-    make -C "$ROOT/backend/tools/web-search" package
+  if [[ ! -s "$ROOT/backend/services/web-search/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/web-search" package
   fi
 fi
 

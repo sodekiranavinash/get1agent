@@ -1,23 +1,22 @@
-.PHONY: package clean
+.PHONY: package test clean
 
-PYTHON_VERSION := 3.14
-TARGET_PLATFORM := aarch64-unknown-linux-gnu
-MCP_HANDLER_VERSION := 0.1.15
+# Bundles the app's handler + src/ + the shared packages it uses.
+# Third-party deps ship in the attached layers, not in this zip.
+PACKAGES := core data retrieval
+PKG_ROOT := $(CURDIR)/../../packages
 
-# boto3/botocore come from the Lambda runtime; only the MCP handler and its one
-# non-AWS dependency are bundled.
 package:
 	rm -rf dist
 	mkdir -p dist
-	cp src/handler.py dist/handler.py
-	uv pip install \
-		--python-version $(PYTHON_VERSION) \
-		--python-platform $(TARGET_PLATFORM) \
-		--target dist \
-		--no-deps \
-		"awslabs.mcp-lambda-handler==$(MCP_HANDLER_VERSION)" \
-		"python-dateutil>=2.8.2"
+	cp handler.py dist/
+	@if [ -d src ]; then cp -R src dist/; fi
+	for p in $(PACKAGES); do cp -R "$(PKG_ROOT)/$$p" "dist/$$p"; done
+	find dist -type d -name __pycache__ -prune -exec rm -rf {} +
 	cd dist && zip -qXr function.zip .
+
+# Unit tests live in ./tests (stdlib unittest). No-op when the app has none.
+test:
+	@if [ -d tests ]; then uv run --no-project --python 3.14 python -m unittest discover -s tests -t tests -v; else echo "no unit tests for $(notdir $(CURDIR))"; fi
 
 clean:
 	rm -rf dist

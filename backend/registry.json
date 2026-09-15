@@ -1,0 +1,186 @@
+{
+  "layers": [
+    {
+      "name": "base",
+      "dir": "backend/services/dependency-layers/base"
+    },
+    {
+      "name": "genai",
+      "dir": "backend/services/dependency-layers/genai"
+    },
+    {
+      "name": "extra-tools",
+      "dir": "backend/services/dependency-layers/extra-tools"
+    },
+    {
+      "name": "ml",
+      "dir": "backend/services/dependency-layers/ml"
+    }
+  ],
+  "apps": [
+    {
+      "name": "user-api",
+      "group": "user-apis",
+      "dir": "backend/services/user-api",
+      "function_name": "get1agent-prod-user-api",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data",
+        "retrieval"
+      ],
+      "layers": [
+        "base"
+      ]
+    },
+    {
+      "name": "knowledge-mcp",
+      "group": "knowledge-mcp",
+      "dir": "backend/services/knowledge-mcp",
+      "function_name": "get1agent-prod-knowledge-mcp",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data",
+        "retrieval"
+      ],
+      "layers": [
+        "base",
+        "genai"
+      ]
+    },
+    {
+      "name": "mcp-tester",
+      "group": "admin-apis",
+      "dir": "backend/services/mcp-tester",
+      "function_name": "get1agent-prod-mcp-tester",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data"
+      ],
+      "layers": []
+    },
+    {
+      "name": "web-search",
+      "group": "mcp-tools",
+      "dir": "backend/services/web-search",
+      "function_name": "get1agent-prod-web-search",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core"
+      ],
+      "layers": [
+        "base",
+        "genai"
+      ]
+    },
+    {
+      "name": "code-interpreter",
+      "group": "mcp-tools",
+      "dir": "backend/services/code-interpreter",
+      "function_name": "get1agent-prod-code-interpreter",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data"
+      ],
+      "layers": [
+        "base",
+        "genai"
+      ]
+    },
+    {
+      "name": "ingestion-dispatcher",
+      "group": "ingestion-apis",
+      "dir": "backend/services/ingestion-dispatcher",
+      "function_name": "get1agent-prod-ingestion-dispatcher",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [],
+      "layers": []
+    },
+    {
+      "name": "ingestion-extract",
+      "group": "ingestion-apis",
+      "dir": "backend/services/ingestion-extract",
+      "function_name": "get1agent-prod-ingestion-extract",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data",
+        "retrieval",
+        "ingestion"
+      ],
+      "layers": [
+        "extra-tools"
+      ]
+    },
+    {
+      "name": "ingestion-embed",
+      "group": "ingestion-apis",
+      "dir": "backend/services/ingestion-embed",
+      "function_name": "get1agent-prod-ingestion-embed",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data",
+        "retrieval",
+        "ingestion"
+      ],
+      "layers": []
+    },
+    {
+      "name": "ingestion-index",
+      "group": "ingestion-apis",
+      "dir": "backend/services/ingestion-index",
+      "function_name": "get1agent-prod-ingestion-index",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data",
+        "retrieval",
+        "ingestion"
+      ],
+      "layers": []
+    },
+    {
+      "name": "ingestion-mark-failed",
+      "group": "ingestion-apis",
+      "dir": "backend/services/ingestion-mark-failed",
+      "function_name": "get1agent-prod-ingestion-mark-failed",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data",
+        "retrieval",
+        "ingestion"
+      ],
+      "layers": []
+    },
+    {
+      "name": "ingestion-watchdog",
+      "group": "ingestion-apis",
+      "dir": "backend/services/ingestion-watchdog",
+      "function_name": "get1agent-prod-ingestion-watchdog",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data",
+        "retrieval",
+        "ingestion"
+      ],
+      "layers": []
+    }
+  ]
+}
