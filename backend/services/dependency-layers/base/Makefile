@@ -30,11 +30,12 @@ endif
 install-deps-docker:
 	@command -v docker >/dev/null 2>&1 || { echo "Docker required to build arm64 layers." >&2; exit 1; }
 	docker run --rm --platform linux/arm64 \
+		--user "$$(id -u):$$(id -g)" \
 		--entrypoint /bin/bash \
 		-v "$(REQ):/tmp/requirements.txt:ro" \
 		-v "$(DIST):/out" \
 		$(LAMBDA_IMAGE) \
-		-c "/var/lang/bin/python$(PYTHON_VERSION) -m pip install --no-cache-dir -r /tmp/requirements.txt -t /out"
+		-c "/var/lang/bin/python$(PYTHON_VERSION) -m pip install --no-cache-dir --no-compile -r /tmp/requirements.txt -t /out"
 
 lock:
 	uv lock
