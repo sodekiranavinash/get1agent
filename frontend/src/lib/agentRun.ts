@@ -109,6 +109,8 @@ export function agentRunConfigured(): boolean {
   return USE_MICROVM || RUN_URL.length > 0
 }
 
+/** Wire shape from the control plane (`expiresAt` is an ISO timestamp). */
+type MicrovmSessionResponse = { endpoint: string; token: string; expiresAt: string }
 type MicrovmSession = { endpoint: string; token: string; expiresAt: number }
 let cachedSession: MicrovmSession | null = null
 
@@ -131,10 +133,11 @@ async function microvmSession(authToken: string): Promise<{ url: string; token: 
     body: '{}',
   })
   if (!response.ok) throw new Error(`Agent session failed (${response.status})`)
-  const data = (await response.json()) as MicrovmSession
+  const data = (await response.json()) as MicrovmSessionResponse
   const expiresAt = Date.parse(data.expiresAt)
   cachedSession = {
-    ...data,
+    endpoint: data.endpoint,
+    token: data.token,
     expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 20 * 60 * 1000,
   }
   return { url: `https://${data.endpoint}/invocations`, token: data.token }
