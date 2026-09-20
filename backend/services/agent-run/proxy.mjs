@@ -28,7 +28,11 @@ import {
   verify as cryptoVerify,
 } from 'node:crypto'
 
-const REGION = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || ''
+const REGION =
+  process.env.AGENT_REGION ||
+  process.env.AWS_REGION ||
+  process.env.AWS_DEFAULT_REGION ||
+  ''
 const RUNTIME_ARN = process.env.AGENT_RUNTIME_ARN || ''
 const QUALIFIER = process.env.AGENT_RUNTIME_QUALIFIER || 'DEFAULT'
 const TIMEOUT_MS = Number(process.env.AGENT_RUN_TIMEOUT_SECONDS || '1500') * 1000

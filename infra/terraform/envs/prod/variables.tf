@@ -211,5 +211,5 @@ variable "opencode_base_url" {
 variable "agent_run_allowed_origins" {
   type        = list(string)
   default     = ["https://www.get1agent.com", "http://localhost:5173"]
-  description = "Origins allowed to call the agent-run Function URL"
+  description = "Origins allowed to call the agent-run endpoints (control plane + MicroVM)"
 }

@@ -174,7 +174,10 @@ resource "aws_bedrockagentcore_agent_runtime" "worker" {
   tags = var.tags
 }
 
-# --- Streaming proxy Lambda (Function URL) -----------------------------------
+# --- Control-plane Lambda (API Gateway) --------------------------------------
+#
+# Thin, gateway-authenticated endpoint (`POST /v1/agent-run/session`) that
+# launches a Lambda MicroVM and mints its ingress token.
 
 resource "aws_iam_role" "proxy" {
   name = "${var.name}-proxy"
@@ -300,7 +303,6 @@ resource "aws_s3_object" "microvm_artifact" {
   key         = var.microvm_artifact_key
   source      = var.microvm_zip
   source_hash = filebase64sha256(var.microvm_zip)
-  etag        = filemd5(var.microvm_zip)
 }
 
 resource "aws_lambdamicrovms_image" "agent_run" {
@@ -325,8 +327,9 @@ resource "aws_lambdamicrovms_image" "agent_run" {
     AUTH0_DISCOVERY_URL       = var.jwt_discovery_url
     AUTH0_AUDIENCE            = join(",", var.jwt_allowed_audience)
     AGENT_RUN_ALLOWED_ORIGINS = join(",", var.allowed_origins)
-    AWS_REGION                = data.aws_region.current.region
-    AWS_DEFAULT_REGION        = data.aws_region.current.region
+    # AWS_REGION / AWS_DEFAULT_REGION are reserved (Lambda injects them), so the
+    # region is passed under our own key and read with a fallback.
+    AGENT_REGION = data.aws_region.current.region
   }
 
   tags = var.tags
