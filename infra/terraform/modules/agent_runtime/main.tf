@@ -214,8 +214,8 @@ resource "aws_lambda_function" "proxy" {
       # Invoked by API Gateway behind the Auth0 JWT authorizer; the Lambda only
       # launches a MicroVM from this image, mints its ingress token, and returns
       # the endpoint to the browser.
-      AGENT_MICROVM_IMAGE_ARN            = try(aws_lambdamicrovms_image.agent_run[0].arn, "")
-      AGENT_MICROVM_TOKEN_TTL_MINUTES    = "25"
+      AGENT_MICROVM_IMAGE_ARN         = try(aws_lambdamicrovms_image.agent_run[0].arn, "")
+      AGENT_MICROVM_TOKEN_TTL_MINUTES = "25"
       # The MicroVM outlives a single run (which is aborted at
       # `microvm_max_run_seconds`) so the stream is never cut by the platform.
       AGENT_MICROVM_MAX_DURATION_SECONDS = tostring(var.microvm_max_run_seconds + 300)

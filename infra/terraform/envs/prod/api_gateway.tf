@@ -463,7 +463,7 @@ module "api_gateway" {
       lambda_function_name = module.mcp_connections[0].function_name
       authorization_type   = "JWT"
     }
-  }, var.enable_agent_runtime ? {
+    }, var.enable_agent_runtime ? {
     # Auth is enforced at the gateway (JWT authorizer); the Lambda only launches
     # a Lambda MicroVM and returns its endpoint + ingress token.
     agent_run_session = {

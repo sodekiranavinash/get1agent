@@ -601,8 +601,8 @@ module "agent_runtime" {
   # AgentCore microVM lifecycle. `max_lifetime` is a hard cap that cannot be
   # reset, so a session is terminated 25 min after it starts; `idle_timeout`
   # reaps a session left idle for 15 min. `idle_timeout` must be <= `max_lifetime`.
-  idle_timeout_seconds  = 900
-  max_lifetime_seconds  = 1500
+  idle_timeout_seconds = 900
+  max_lifetime_seconds = 1500
   # Long-running streaming proxy (Lambda MicroVM, up to 8 hours). The run is
   # aborted at 25 min, matching the AgentCore `max_lifetime` above.
   microvm_zip             = local.agent_run_microvm_zip
