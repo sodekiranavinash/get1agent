@@ -14,12 +14,16 @@
  * Response: { "endpoint": "...", "token": "...", "expiresAt": "..." }
  */
 
-import {
+// `@aws-sdk/client-lambda-microvms` ships as CommonJS, so its named exports are
+// only reachable via the default import (named ESM imports fail at load time).
+import sdk from '@aws-sdk/client-lambda-microvms'
+
+const {
   CreateMicrovmAuthTokenCommand,
   GetMicrovmCommand,
-  LambdaMicroVMsClient,
+  LambdaMicrovmsClient,
   RunMicrovmCommand,
-} from '@aws-sdk/client-lambda-microvms'
+} = sdk
 
 const REGION = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || ''
 const IMAGE_ARN = process.env.AGENT_MICROVM_IMAGE_ARN || ''
@@ -28,7 +32,7 @@ const MAX_RUN_SECONDS = Number(process.env.AGENT_MICROVM_MAX_DURATION_SECONDS ||
 // API Gateway HTTP APIs cap the integration at 30s, so stay comfortably under it.
 const READY_TIMEOUT_MS = 20_000
 
-const client = new LambdaMicroVMsClient({ region: REGION })
+const client = new LambdaMicrovmsClient({ region: REGION })
 
 const INGRESS = [
   `arn:aws:lambda:${REGION}:aws:network-connector:aws-network-connector:ALL_INGRESS`,
