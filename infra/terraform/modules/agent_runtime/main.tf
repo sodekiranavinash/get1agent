@@ -234,17 +234,24 @@ resource "aws_iam_role_policy" "proxy_microvm" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid    = "MicrovmSession"
-      Effect = "Allow"
-      Action = [
-        # Lambda MicroVM IAM actions live in the `lambda:` namespace.
-        "lambda:RunMicrovm",
-        "lambda:GetMicrovm",
-        "lambda:CreateMicrovmAuthToken",
-      ]
-      Resource = "*"
-    }]
+    Statement = [
+      {
+        Sid    = "MicrovmSession"
+        Effect = "Allow"
+        Action = [
+          # Lambda MicroVM IAM actions live in the `lambda:` namespace.
+          "lambda:RunMicrovm",
+          "lambda:GetMicrovm",
+          "lambda:CreateMicrovmAuthToken",
+          # RunMicrovm depends on this to attach the ingress/egress network
+          # connectors (the platform passes the default connectors even when the
+          # caller specifies none). No execution role is passed, so iam:PassRole
+          # is not required.
+          "lambda:PassNetworkConnector",
+        ]
+        Resource = "*"
+      },
+    ]
   })
 }
 
