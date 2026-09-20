@@ -41,6 +41,7 @@ jobs:
           VITE_AUTH0_CLIENT_ID: ${{ vars.VITE_AUTH0_CLIENT_ID }}
           VITE_AUTH0_AUDIENCE: ${{ vars.VITE_AUTH0_AUDIENCE }}
           VITE_AGENT_RUN_URL: ${{ vars.VITE_AGENT_RUN_URL }}
+          VITE_AGENT_RUN_MICROVM: ${{ vars.VITE_AGENT_RUN_MICROVM }}
         run: |
           npm ci
           npm run build

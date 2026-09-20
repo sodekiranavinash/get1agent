@@ -13,7 +13,17 @@ output "ecr_repository_url" {
   description = "ECR repository URL for the worker image"
 }
 
-output "proxy_function_url" {
-  value       = try(aws_lambda_function_url.proxy[0].function_url, "")
-  description = "Public Function URL the browser streams agent runs through"
+output "control_plane_function_name" {
+  value       = try(aws_lambda_function.proxy[0].function_name, "")
+  description = "Control-plane Lambda invoked by API Gateway to start a MicroVM session"
+}
+
+output "control_plane_invoke_arn" {
+  value       = try(aws_lambda_function.proxy[0].invoke_arn, "")
+  description = "Invoke ARN of the control-plane Lambda (API Gateway integration)"
+}
+
+output "microvm_image_arn" {
+  value       = try(aws_lambdamicrovms_image.agent_run[0].arn, "")
+  description = "ARN of the agent-run Lambda MicroVM image (streaming proxy)"
 }

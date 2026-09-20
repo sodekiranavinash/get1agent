@@ -16,7 +16,7 @@ REGION="${AWS_REGION:-ap-south-1}"
 REPO_NAME="${AGENT_WORKER_REPO:-get1agent-prod-agent-worker}"
 TAG="${IMAGE_TAG:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo latest)}"
 
-if [[ ! -s "$ROOT/backend/services/agent-run/dist/function.zip" ]]; then
+if [[ ! -s "$ROOT/backend/services/agent-run/dist/function.zip" || ! -s "$ROOT/backend/services/agent-run/dist/microvm.zip" ]]; then
   make -C "$ROOT/backend/services/agent-run" package
 fi
 

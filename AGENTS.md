@@ -377,13 +377,23 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   (`main.py` dispatches on the payload). It is **not** a Lambda zip; `agents/` is
   excluded from the Lambda build. Multi-agent workflow orchestration (ordered
   pipeline + swarm) will be a sibling package.
-- Invocation: the SPA calls a public **Function URL** (`backend/services/agent-run`,
-  `InvokeMode=RESPONSE_STREAM`) which forwards the Auth0 `Authorization` header
-  and body to the runtime and pipes SSE back. The runtime is configured with a
+- Invocation: a **Lambda Function is capped at 15 minutes**, so the streaming
+  proxy runs in a **Lambda MicroVM** (`backend/services/agent-run/microvm/`,
+  Node HTTP server, up to 8 hours, dedicated HTTPS endpoint). The browser cannot
+  mint the MicroVM ingress `X-aws-proxy-auth` token, so a thin **control-plane
+  Lambda** (`backend/services/agent-run/index.mjs`) is invoked through **API
+  Gateway** (`POST /v1/agent-run/session`, Auth0 JWT enforced **at the gateway**)
+  and only launches a MicroVM from the agent-run image + mints its auth token
+  (`lambda-microvms:RunMicrovm` / `CreateMicrovmAuthToken`), returning
+  `{endpoint, token}`; the SPA then `POST`s to the MicroVM's `/invocations` and
+  reads the SSE stream. The MicroVM verifies the Auth0 token too, then forwards
+  the `Authorization` header and body to AgentCore and pipes SSE back. The runtime is configured with a
   **custom JWT authorizer** (Auth0 discovery URL + audience), so AgentCore
   validates the token; the entrypoint only decodes the verified `sub` → internal
   `userId` (`SUB#<sub>`), then loads `USER#<userId>` / `AGENT#<name>` and checks
-  ownership. Local dev may pass `userId` in the payload.
+  ownership. The AgentCore session is hard-capped by `max_lifetime` (25 min);
+  the MicroVM aborts the run at the same limit. Local dev streams directly from
+  the local agent app (`VITE_AGENT_RUN_MICROVM=false`).
 - Models: **OpenCode Go** (`OPENCODE_API_KEY`, `OPENCODE_BASE_URL`). Most models
   use the OpenAI-compatible `/chat/completions` via Strands `OpenAIModel`;
   `gpt-5.6-luna` is served through the Responses API via Strands
@@ -513,7 +523,8 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   `GET /v1/agents/{id}/runs`. Chat conversations use the `CHAT#` prefix (the
   code-interpreter already owns `CONV#`).
 - Infra: `infra/terraform/modules/agent_runtime` (ECR, runtime role, AgentCore
-  runtime, proxy Lambda + Function URL + CORS). Deploy with
+  runtime, control-plane Lambda + Function URL + CORS, Lambda MicroVM image +
+  MicroVM + build role). Deploy with
   `bash infra/aws/deploy-agent-runtime.sh`: it creates the ECR repo, builds and
   pushes the ARM64 image, then applies the runtime with
   `agent_worker_image_uri`. Needs the `OPENCODE_API_KEY` repo secret

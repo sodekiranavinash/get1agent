@@ -1,10 +1,14 @@
 /**
- * Streaming client for the AgentCore runtime proxy (Function URL).
+ * Streaming client for the agent-run proxy.
  *
- * The proxy forwards the Auth0 token to AgentCore, which validates it; the
- * runtime streams normalized SSE frames. Configure `VITE_AGENT_RUN_URL` with
- * the proxy's Function URL (prod) or the local worker URL (dev).
+ * Runs stream from a Lambda MicroVM (up to 8 hours) whose endpoint is minted by
+ * the API Gateway control plane (`POST /v1/agent-run/session`). The MicroVM
+ * forwards the Auth0 token to AgentCore, which validates it; the runtime
+ * streams normalized SSE frames. Set `VITE_AGENT_RUN_MICROVM=true` for the
+ * MicroVM path, or point `VITE_AGENT_RUN_URL` at the local worker (dev).
  */
+
+import { API_BASE_URL } from './api'
 
 export type AgentUsage = Record<string, number | null>
 
@@ -94,9 +98,46 @@ export type AgentRunEvent =
   | { type: 'run.error'; message: string }
 
 const RUN_URL = (import.meta.env.VITE_AGENT_RUN_URL ?? '').replace(/\/+$/, '')
+// When true, runs stream from a Lambda MicroVM (up to 8 hours, vs the
+// 15-minute Function cap). The session is bootstrapped through API Gateway
+// (`POST /v1/agent-run/session`, JWT-authorised at the gateway), which launches
+// the MicroVM and returns its endpoint + ingress token. When false (local dev),
+// stream straight from `RUN_URL/invocations`.
+const USE_MICROVM = (import.meta.env.VITE_AGENT_RUN_MICROVM ?? '') === 'true'
 
 export function agentRunConfigured(): boolean {
-  return RUN_URL.length > 0
+  return USE_MICROVM || RUN_URL.length > 0
+}
+
+type MicrovmSession = { endpoint: string; token: string; expiresAt: number }
+let cachedSession: MicrovmSession | null = null
+
+// Reuse a MicroVM session only while it still has a comfortable margin left: a
+// MicroVM is launched on demand and terminates after it has been idle for a
+// while, so a stale endpoint must be re-bootstrapped before then.
+const SESSION_REUSE_MARGIN_MS = 10 * 60 * 1000
+
+/** Ask the gateway control plane for a MicroVM endpoint + ingress token. */
+async function microvmSession(authToken: string): Promise<{ url: string; token: string }> {
+  if (cachedSession && cachedSession.expiresAt - Date.now() > SESSION_REUSE_MARGIN_MS) {
+    return {
+      url: `https://${cachedSession.endpoint}/invocations`,
+      token: cachedSession.token,
+    }
+  }
+  const response = await fetch(`${API_BASE_URL}/v1/agent-run/session`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${authToken}`, 'content-type': 'application/json' },
+    body: '{}',
+  })
+  if (!response.ok) throw new Error(`Agent session failed (${response.status})`)
+  const data = (await response.json()) as MicrovmSession
+  const expiresAt = Date.parse(data.expiresAt)
+  cachedSession = {
+    ...data,
+    expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 20 * 60 * 1000,
+  }
+  return { url: `https://${data.endpoint}/invocations`, token: data.token }
 }
 
 type RunParams = {
@@ -114,12 +155,17 @@ export async function runAgentStream(params: RunParams): Promise<void> {
   if (!RUN_URL) throw new Error('Agent run URL is not configured')
   const sessionId = params.conversationId.length >= 33 ? params.conversationId : `${params.conversationId}-${'0'.repeat(33)}`.slice(0, 64)
 
-  const response = await fetch(`${RUN_URL}/invocations`, {
+  const target = USE_MICROVM
+    ? await microvmSession(params.token)
+    : { url: `${RUN_URL}/invocations`, token: '' }
+
+  const response = await fetch(target.url, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${params.token}`,
       'content-type': 'application/json',
       accept: 'text/event-stream',
+      ...(target.token ? { 'x-aws-proxy-auth': target.token } : {}),
       'x-agent-session': sessionId,
     },
     body: JSON.stringify({

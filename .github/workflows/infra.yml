@@ -181,8 +181,10 @@ jobs:
           test -s backend/services/mcp-connections/dist/function.zip
           unzip -l backend/services/mcp-connections/dist/function.zip | grep handler.py
           test -s backend/services/agent-run/dist/function.zip
-          unzip -l backend/services/agent-run/dist/function.zip | grep handler.py
-          unzip -l backend/services/agent-run/dist/function.zip | grep 'core/jwt.py'
+          unzip -l backend/services/agent-run/dist/function.zip | grep index.mjs
+          test -s backend/services/agent-run/dist/microvm.zip
+          unzip -l backend/services/agent-run/dist/microvm.zip | grep Dockerfile
+          unzip -l backend/services/agent-run/dist/microvm.zip | grep 'app.mjs'
 
       - name: Terraform validate
         if: inputs.api_gateway || inputs.lambdas

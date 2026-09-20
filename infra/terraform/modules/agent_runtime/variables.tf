@@ -18,14 +18,47 @@ variable "proxy_zip" {
   description = "Path to the agent-run proxy Lambda zip"
 }
 
-variable "python_runtime" {
+# The proxy is Node.js: Lambda's native response streaming
+# (`awslambda.streamifyResponse`) is a Node.js managed-runtime feature.
+variable "proxy_runtime" {
   type    = string
-  default = "python3.14"
+  default = "nodejs22.x"
+}
+
+variable "proxy_handler" {
+  type    = string
+  default = "index.handler"
 }
 
 variable "proxy_timeout_seconds" {
   type    = number
   default = 900
+}
+
+# --- Lambda MicroVM (long-running streaming proxy) ---------------------------
+
+variable "microvm_zip" {
+  type        = string
+  default     = ""
+  description = "Path to the agent-run MicroVM artifact zip (Dockerfile + server)"
+}
+
+variable "artifact_bucket" {
+  type        = string
+  default     = ""
+  description = "S3 bucket that holds the MicroVM artifact zip"
+}
+
+variable "microvm_artifact_key" {
+  type        = string
+  default     = "microvms/agent-run.zip"
+  description = "S3 key for the MicroVM artifact zip"
+}
+
+variable "microvm_max_run_seconds" {
+  type        = number
+  default     = 1500
+  description = "Abort an agent run (AgentCore stream) after this many seconds"
 }
 
 variable "dynamodb_table_arns" {

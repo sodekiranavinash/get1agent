@@ -1,0 +1,10 @@
+{
+  "name": "get1agent-agent-run",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent-run control-plane Lambda (Function URL) + Lambda MicroVM streaming proxy.",
+  "dependencies": {
+    "@aws-sdk/client-lambda-microvms": "^3.1136.0"
+  }
+}

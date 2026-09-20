@@ -16,6 +16,7 @@ locals {
   ingestion_fail_zip       = abspath("${path.module}/../../../../backend/services/ingestion-mark-failed/dist/function.zip")
   ingestion_watchdog_zip   = abspath("${path.module}/../../../../backend/services/ingestion-watchdog/dist/function.zip")
   agent_run_zip            = abspath("${path.module}/../../../../backend/services/agent-run/dist/function.zip")
+  agent_run_microvm_zip    = abspath("${path.module}/../../../../backend/services/agent-run/dist/microvm.zip")
 }
 
 check "layer_base_zip_exists" {
@@ -596,8 +597,17 @@ module "agent_runtime" {
   ecr_repository_name   = "get1agent-prod-agent-worker"
   container_image_uri   = var.agent_worker_image_uri
   proxy_zip             = local.agent_run_zip
-  python_runtime        = local.backend_python_runtime
   proxy_timeout_seconds = 900
+  # AgentCore microVM lifecycle. `max_lifetime` is a hard cap that cannot be
+  # reset, so a session is terminated 25 min after it starts; `idle_timeout`
+  # reaps a session left idle for 15 min. `idle_timeout` must be <= `max_lifetime`.
+  idle_timeout_seconds  = 900
+  max_lifetime_seconds  = 1500
+  # Long-running streaming proxy (Lambda MicroVM, up to 8 hours). The run is
+  # aborted at 25 min, matching the AgentCore `max_lifetime` above.
+  microvm_zip             = local.agent_run_microvm_zip
+  artifact_bucket         = module.knowledge_storage[0].bucket_name
+  microvm_max_run_seconds = 1500
 
   dynamodb_table_arns   = [module.database[0].table_arn]
   s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]

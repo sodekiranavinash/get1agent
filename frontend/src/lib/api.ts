@@ -2,7 +2,7 @@ import { useAuth0 } from '@auth0/auth0-react'
 import { useEffect } from 'react'
 import { readActiveView } from '../auth/view'
 
-const API_BASE_URL = (
+export const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? 'https://api.get1agent.com'
 ).replace(/\/+$/, '')
 

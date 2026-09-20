@@ -14,7 +14,7 @@ module "api_gateway" {
   ]
 
   # /health is a MOCK 200 integration inside the api_gateway module (no Lambda).
-  lambda_routes = var.enable_backend_lambdas ? {
+  lambda_routes = var.enable_backend_lambdas ? merge({
     user_settings_get = {
       method               = "GET"
       path                 = "/v1/user/settings"
@@ -463,5 +463,15 @@ module "api_gateway" {
       lambda_function_name = module.mcp_connections[0].function_name
       authorization_type   = "JWT"
     }
-  } : {}
+  }, var.enable_agent_runtime ? {
+    # Auth is enforced at the gateway (JWT authorizer); the Lambda only launches
+    # a Lambda MicroVM and returns its endpoint + ingress token.
+    agent_run_session = {
+      method               = "POST"
+      path                 = "/v1/agent-run/session"
+      lambda_invoke_arn    = module.agent_runtime[0].control_plane_invoke_arn
+      lambda_function_name = module.agent_runtime[0].control_plane_function_name
+      authorization_type   = "JWT"
+    }
+  } : {}) : {}
 }

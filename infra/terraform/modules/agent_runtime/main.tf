@@ -203,48 +203,138 @@ resource "aws_lambda_function" "proxy" {
   role             = aws_iam_role.proxy.arn
   filename         = var.proxy_zip
   source_code_hash = filebase64sha256(var.proxy_zip)
-  handler          = "handler.lambda_handler"
-  runtime          = var.python_runtime
+  handler          = var.proxy_handler
+  runtime          = var.proxy_runtime
   architectures    = ["arm64"]
   timeout          = var.proxy_timeout_seconds
   memory_size      = 256
 
   environment {
     variables = {
-      AGENT_RUNTIME_ARN         = aws_bedrockagentcore_agent_runtime.worker[0].agent_runtime_arn
-      AGENT_RUNTIME_QUALIFIER   = "DEFAULT"
-      AGENT_RUN_TIMEOUT_SECONDS = tostring(var.proxy_timeout_seconds - 5)
-      # The proxy verifies the Auth0 token before invoking the runtime, so an
-      # unauthenticated request never starts a session.
-      AUTH0_DISCOVERY_URL = var.jwt_discovery_url
-      AUTH0_AUDIENCE      = join(",", var.jwt_allowed_audience)
+      # Invoked by API Gateway behind the Auth0 JWT authorizer; the Lambda only
+      # launches a MicroVM from this image, mints its ingress token, and returns
+      # the endpoint to the browser.
+      AGENT_MICROVM_IMAGE_ARN            = try(aws_lambdamicrovms_image.agent_run[0].arn, "")
+      AGENT_MICROVM_TOKEN_TTL_MINUTES    = "25"
+      # The MicroVM outlives a single run (which is aborted at
+      # `microvm_max_run_seconds`) so the stream is never cut by the platform.
+      AGENT_MICROVM_MAX_DURATION_SECONDS = tostring(var.microvm_max_run_seconds + 300)
     }
   }
 
   tags = var.tags
 }
 
-resource "aws_lambda_function_url" "proxy" {
-  count = var.container_image_uri == "" ? 0 : 1
+resource "aws_iam_role_policy" "proxy_microvm" {
+  name = "${var.name}-proxy-microvm"
+  role = aws_iam_role.proxy.id
 
-  function_name      = aws_lambda_function.proxy[0].function_name
-  authorization_type = "NONE"
-  invoke_mode        = "RESPONSE_STREAM"
-
-  cors {
-    allow_origins = var.allowed_origins
-    allow_methods = ["POST"]
-    allow_headers = ["authorization", "content-type", "x-agent-session"]
-    max_age       = 3600
-  }
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "MicrovmSession"
+      Effect = "Allow"
+      Action = [
+        "lambda-microvms:RunMicrovm",
+        "lambda-microvms:GetMicrovm",
+        "lambda-microvms:CreateMicrovmAuthToken",
+      ]
+      Resource = "*"
+    }]
+  })
 }
 
-resource "aws_lambda_permission" "proxy_public" {
+# --- Lambda MicroVM (long-running streaming proxy) ---------------------------
+#
+# A Lambda Function is capped at 15 minutes, so the streaming proxy runs in a
+# Lambda MicroVM instead: it serves a dedicated HTTPS endpoint for up to 8 hours
+# and can suspend/resume when idle. The control-plane Lambda above mints the
+# MicroVM ingress auth token and hands the endpoint to the browser.
+
+resource "aws_iam_role" "microvm_build" {
   count = var.container_image_uri == "" ? 0 : 1
 
-  statement_id           = "AllowPublicFunctionUrl"
-  action                 = "lambda:InvokeFunctionUrl"
-  function_name          = aws_lambda_function.proxy[0].function_name
-  principal              = "*"
-  function_url_auth_type = "NONE"
+  name = "${var.name}-microvm-build"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = ["sts:AssumeRole", "sts:TagSession"]
+    }]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy" "microvm_build" {
+  count = var.container_image_uri == "" ? 0 : 1
+
+  name = "${var.name}-microvm-build"
+  role = aws_iam_role.microvm_build[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ReadArtifact"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "arn:aws:s3:::${var.artifact_bucket}/${var.microvm_artifact_key}"
+      },
+      {
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "arn:aws:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:*"
+      },
+    ]
+  })
+}
+
+resource "aws_s3_object" "microvm_artifact" {
+  count = var.container_image_uri == "" ? 0 : 1
+
+  bucket      = var.artifact_bucket
+  key         = var.microvm_artifact_key
+  source      = var.microvm_zip
+  source_hash = filebase64sha256(var.microvm_zip)
+  etag        = filemd5(var.microvm_zip)
+}
+
+resource "aws_lambdamicrovms_image" "agent_run" {
+  count = var.container_image_uri == "" ? 0 : 1
+
+  name           = "${var.name}-agent-run"
+  base_image_arn = "arn:aws:lambda:${data.aws_region.current.region}:aws:microvm-image:al2023-1"
+  build_role_arn = aws_iam_role.microvm_build[0].arn
+
+  code_artifact {
+    uri = "s3://${var.artifact_bucket}/${var.microvm_artifact_key}"
+  }
+
+  cpu_configuration {
+    architecture = "ARM_64"
+  }
+
+  environment_variables = {
+    AGENT_RUNTIME_ARN         = aws_bedrockagentcore_agent_runtime.worker[0].agent_runtime_arn
+    AGENT_RUNTIME_QUALIFIER   = "DEFAULT"
+    AGENT_RUN_TIMEOUT_SECONDS = tostring(var.microvm_max_run_seconds)
+    AUTH0_DISCOVERY_URL       = var.jwt_discovery_url
+    AUTH0_AUDIENCE            = join(",", var.jwt_allowed_audience)
+    AGENT_RUN_ALLOWED_ORIGINS = join(",", var.allowed_origins)
+    AWS_REGION                = data.aws_region.current.region
+    AWS_DEFAULT_REGION        = data.aws_region.current.region
+  }
+
+  tags = var.tags
+
+  # The image build reads the zip from S3, so upload it first.
+  depends_on = [aws_s3_object.microvm_artifact]
+
+  timeouts {
+    create = "20m"
+  }
 }
