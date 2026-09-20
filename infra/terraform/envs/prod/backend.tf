@@ -657,9 +657,9 @@ module "agent_runtime" {
   ]
 }
 
-output "agent_run_function_url" {
-  value       = var.enable_backend_lambdas && var.enable_agent_runtime ? module.agent_runtime[0].proxy_function_url : ""
-  description = "Public Function URL the SPA streams agent runs through"
+output "agent_run_microvm_image_arn" {
+  value       = var.enable_backend_lambdas && var.enable_agent_runtime ? module.agent_runtime[0].microvm_image_arn : ""
+  description = "Lambda MicroVM image the agent-run proxy launches"
 }
 
 output "agent_runtime_arn" {

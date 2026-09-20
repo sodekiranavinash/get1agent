@@ -463,9 +463,11 @@ module "api_gateway" {
       lambda_function_name = module.mcp_connections[0].function_name
       authorization_type   = "JWT"
     }
-    }, var.enable_agent_runtime ? {
+    }, var.enable_agent_runtime && var.agent_worker_image_uri != "" ? {
     # Auth is enforced at the gateway (JWT authorizer); the Lambda only launches
-    # a Lambda MicroVM and returns its endpoint + ingress token.
+    # a Lambda MicroVM and returns its endpoint + ingress token. Gated on the
+    # worker image URI because the control-plane Lambda only exists once the
+    # agent runtime is deployed (see deploy-agent-runtime.sh).
     agent_run_session = {
       method               = "POST"
       path                 = "/v1/agent-run/session"

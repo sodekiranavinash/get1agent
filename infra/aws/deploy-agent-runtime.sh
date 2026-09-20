@@ -41,8 +41,11 @@ docker build --platform linux/arm64 \
 docker push "$IMAGE_URI"
 
 echo "==> Deploying the AgentCore runtime + streaming proxy"
+# `module.api_gateway` is included so the `/v1/agent-run/session` route (gated on
+# the worker image URI) is created once the control-plane Lambda exists.
 terraform apply -input=false -no-color -auto-approve -lock-timeout=5m \
   -target='module.agent_runtime[0]' \
+  -target='module.api_gateway' \
   -var "agent_worker_image_uri=$IMAGE_URI"
 
 echo "==> Agent runtime deployed: $IMAGE_URI"
