@@ -22,6 +22,12 @@
   --color-warning-soft: var(--app-warning-soft);
   --color-info: var(--app-info);
   --color-info-soft: var(--app-info-soft);
+  --color-violet: var(--app-violet);
+  --color-violet-soft: var(--app-violet-soft);
+  --color-teal: var(--app-teal);
+  --color-teal-soft: var(--app-teal-soft);
+  --color-rose: var(--app-rose);
+  --color-rose-soft: var(--app-rose-soft);
   --shadow-control: var(--app-shadow-control);
   --shadow-panel: var(--app-shadow-panel);
   --shadow-glow: var(--app-shadow-glow);
@@ -56,6 +62,12 @@
   --app-warning-soft: rgba(230, 162, 60, 0.13);
   --app-info: #5c9df5;
   --app-info-soft: rgba(92, 157, 245, 0.13);
+  --app-violet: #a78bfa;
+  --app-violet-soft: rgba(167, 139, 250, 0.14);
+  --app-teal: #2dd4bf;
+  --app-teal-soft: rgba(45, 212, 191, 0.14);
+  --app-rose: #fb7185;
+  --app-rose-soft: rgba(251, 113, 133, 0.14);
   --app-shadow-control: 0 1px 2px rgba(0, 0, 0, 0.35);
   --app-shadow-panel: 0 8px 24px rgba(0, 0, 0, 0.28);
   --app-shadow-glow: none;
@@ -84,6 +96,12 @@
   --app-warning-soft: rgba(180, 83, 9, 0.1);
   --app-info: #2563eb;
   --app-info-soft: rgba(37, 99, 235, 0.1);
+  --app-violet: #7c3aed;
+  --app-violet-soft: rgba(124, 58, 237, 0.1);
+  --app-teal: #0d9488;
+  --app-teal-soft: rgba(13, 148, 136, 0.1);
+  --app-rose: #e11d48;
+  --app-rose-soft: rgba(225, 29, 72, 0.1);
   --app-shadow-control: 0 1px 2px rgba(16, 24, 40, 0.05);
   --app-shadow-panel: 0 8px 24px rgba(16, 24, 40, 0.08);
   --app-shadow-glow: none;
@@ -152,6 +170,82 @@ body {
 
 .field:disabled {
   opacity: 0.6;
+}
+
+/* React Flow canvas (agent builder) themed with the app tokens. */
+.react-flow {
+  --xy-background-color: var(--app-canvas);
+  --xy-edge-stroke: var(--app-border-strong);
+  --xy-edge-stroke-selected: var(--app-accent);
+  --xy-edge-stroke-width: 1.5;
+  --xy-connectionline-stroke: var(--app-accent);
+  --xy-handle-background-color: var(--app-surface);
+  --xy-handle-border-color: var(--app-border-strong);
+  /* Let the page's radial wash show through instead of a flat fill. */
+  background-color: transparent;
+}
+
+.react-flow__node {
+  font-family: var(--font-sans);
+}
+
+/* React Flow ships default box styling for nodes whose type is literally
+   `input`/`output` (padding, border, fixed width, background, hover shadow).
+   Our cards draw their own chrome, so strip it entirely. */
+.react-flow__node.react-flow__node-input,
+.react-flow__node.react-flow__node-output {
+  width: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: inherit !important;
+  color: inherit !important;
+  text-align: inherit !important;
+}
+
+.react-flow__handle.agent-handle {
+  width: 8px;
+  height: 8px;
+  background: var(--app-surface);
+  border: 1.5px solid var(--app-border-strong);
+  transition: border-color 0.12s ease;
+}
+
+.react-flow__handle.agent-handle:hover {
+  border-color: var(--app-accent);
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--app-accent);
+}
+
+.react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 0.5rem;
+  box-shadow: none;
+}
+
+.react-flow__controls-button {
+  background: var(--app-surface);
+  border-bottom: 1px solid var(--app-border);
+  color: var(--app-muted);
+  fill: var(--app-muted);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--app-raised);
+  color: var(--app-foreground);
+  fill: var(--app-foreground);
+}
+
+.react-flow__minimap {
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 0.5rem;
+  background: var(--app-surface);
 }
 
 /* Dot grid for canvas-style surfaces (workflow builder, empty canvases). */
@@ -351,4 +445,19 @@ body {
   border: 1px solid var(--app-border);
   padding: 0.35rem 0.55rem;
   text-align: left;
+}
+
+/* Toasts: put the close button in the top-right corner. */
+[data-sonner-toast] [data-close-button] {
+  left: auto !important;
+  right: 0 !important;
+  transform: translate(35%, -35%) !important;
+  background: var(--app-surface) !important;
+  border: 1px solid var(--app-border) !important;
+  color: var(--app-muted) !important;
+}
+
+[data-sonner-toast] [data-close-button]:hover {
+  background: var(--app-raised) !important;
+  color: var(--app-foreground) !important;
 }

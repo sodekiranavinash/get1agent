@@ -185,6 +185,27 @@ def adjust_doc_count(kb_id: str, delta: int) -> None:
     )
 
 
+def set_doc_count(kb_id: str, count: int) -> None:
+    """One-time correction of ``docCount`` for KBs predating the counter."""
+    item = get_kb_by_id(kb_id)
+    if item is None:
+        return
+    timestamp = now_iso()
+    table().update_item(
+        Key={"pk": item["pk"], "sk": item["sk"]},
+        UpdateExpression=(
+            "SET updatedAt = :updated, docCount = :count, docCountSynced = :synced, "
+            f"{GSI2[1]} = :gsi2sk"
+        ),
+        ExpressionAttributeValues={
+            ":count": count,
+            ":synced": True,
+            ":updated": timestamp,
+            ":gsi2sk": f"{KB_PREFIX}{timestamp}#{item['name']}",
+        },
+    )
+
+
 def adjust_processing(kb_id: str, delta: int) -> int:
     """Move a KB in/out of ``processing`` based on its in-flight document count."""
     item = get_kb_by_id(kb_id)

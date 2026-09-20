@@ -25,7 +25,9 @@ def _setup(fake, monkeypatch) -> None:
     global USER_ID
     patch_pipeline(monkeypatch, fake)
     patch_search(monkeypatch, fake)
-    monkeypatch.setattr(handler, "embed_texts", lambda texts, cfg: [[0.9, 0.1, 0.0]])
+    monkeypatch.setattr(
+        handler, "embed_texts", lambda texts, cfg, **_: [[0.9, 0.1, 0.0]]
+    )
 
     profile = users.upsert_user(
         {"sub": SUB, "https://get1agent.com/email": "mcp@example.com"}

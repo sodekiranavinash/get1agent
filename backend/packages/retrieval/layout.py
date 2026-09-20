@@ -22,6 +22,11 @@ import re
 RAW_PREFIX = "raw"
 DERIVED_PREFIX = "derived"
 INDEX_PREFIX = "index"
+# Standalone user storage (files to attach to agents later). Not under `raw/`,
+# so the EventBridge ingestion rule never fires for these.
+STORAGE_PREFIX = "storage"
+# Chat/builder conversation transcripts (one JSON per conversation).
+CONVERSATION_PREFIX = "conversations"
 
 TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
@@ -46,6 +51,15 @@ def raw_key(sub: str, kb_id: str, doc_id: str, file_name: str) -> str:
 
 def raw_prefix(sub: str) -> str:
     return f"{RAW_PREFIX}/{sub}/"
+
+
+def storage_key(sub: str, file_id: str, file_name: str) -> str:
+    return f"{STORAGE_PREFIX}/{sub}/{file_id}/{file_name}"
+
+
+def conversation_key(sub: str, conversation_id: int | str) -> str:
+    """S3 key for a conversation transcript (all turns, one JSON object)."""
+    return f"{CONVERSATION_PREFIX}/{sub}/{conversation_id}.json"
 
 
 def derived_prefix(sub: str, kb_id: str, doc_id: str) -> str:

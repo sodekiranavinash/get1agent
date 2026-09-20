@@ -117,7 +117,7 @@ run_env() {
       need_backend=true
     else
       case "$PROD_TARGETS" in
-        *layer_base*|*layer_genai*|*layer_extra_tools*|*user_api*|*knowledge_mcp*|*ingestion*|*mcp_tester*|*code_interpreter*|*web_search*)
+        *layer_base*|*layer_genai*|*layer_extra_tools*|*user_api*|*knowledge_mcp*|*ingestion*|*mcp_tester*|*code_interpreter*|*web_search*|*mcp_connections*)
           need_backend=true
           ;;
       esac
@@ -137,6 +137,7 @@ run_env() {
     check_zip "$ROOT/backend/services/mcp-tester/dist/function.zip" "mcp-tester" "make -C backend/services/mcp-tester package"
     check_zip "$ROOT/backend/services/code-interpreter/dist/function.zip" "code-interpreter" "make -C backend/services/code-interpreter package"
     check_zip "$ROOT/backend/services/web-search/dist/function.zip" "web-search" "make -C backend/services/web-search package"
+    check_zip "$ROOT/backend/services/mcp-connections/dist/function.zip" "mcp-connections" "make -C backend/services/mcp-connections package"
   fi
 
   init_s3

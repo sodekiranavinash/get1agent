@@ -45,6 +45,19 @@ STATE_MACHINE_NAME = "get1agent-local-ingestion"
 # Local embedding backend (real vectors, no Bedrock).
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 LOCAL_EMBED_MODEL = os.environ.get("LOCAL_EMBED_MODEL", "mxbai-embed-large")
+# Embedding backend: voyage (Voyage AI) | local (Ollama) | bedrock.
+EMBED_MODE = os.environ.get("EMBED_MODE", "voyage").strip().lower()
+VOYAGE_API_KEY = os.environ.get("VOYAGE_API_KEY", "")
+VOYAGE_API_BASE_URL = os.environ.get(
+    "VOYAGE_API_BASE_URL", "https://api.voyageai.com/v1"
+)
+VOYAGE_TEXT_MODEL = os.environ.get("VOYAGE_TEXT_MODEL", "voyage-4-large")
+VOYAGE_MULTIMODAL_MODEL = os.environ.get(
+    "VOYAGE_MULTIMODAL_MODEL", "voyage-multimodal-3.5"
+)
+VOYAGE_RERANK_MODEL = os.environ.get("VOYAGE_RERANK_MODEL", "rerank-3")
+# Rerank backend: voyage (Voyage AI) | local (TEI) | none | bedrock.
+RERANK_MODE = os.environ.get("RERANK_MODE", "voyage").strip().lower()
 # Local cross-encoder reranker (TEI), mirrors Bedrock Rerank.
 RERANK_URL = os.environ.get("LOCAL_RERANK_URL", "http://reranker:80/rerank")
 
@@ -69,6 +82,7 @@ FUNCTIONS = {
     "mcp_tester": "get1agent-local-mcp-tester",
     "code_interpreter": "get1agent-local-code-interpreter",
     "web_search": "get1agent-local-web-search",
+    "mcp_connections": "get1agent-local-mcp-connections",
 }
 
 # Mirrors infra/terraform/envs/prod/api_gateway.tf.
@@ -88,11 +102,36 @@ ROUTES = {
         ("DELETE", "/v1/knowledge-bases/{id}/documents/{docId}"),
         ("GET", "/v1/agent-skills"),
         ("POST", "/v1/agent-skills"),
-        ("GET", "/v1/agent-skills/tools"),
+        ("GET", "/v1/agent-skills/mcp-servers"),
         ("POST", "/v1/agent-skills/parse"),
+        ("GET", "/v1/agent-skills/catalog"),
+        ("GET", "/v1/agent-skills/registry"),
+        ("POST", "/v1/agent-skills/import/preview"),
+        ("POST", "/v1/agent-skills/import"),
+        ("POST", "/v1/agent-skills/resolve-repo"),
         ("GET", "/v1/agent-skills/{id}"),
         ("PUT", "/v1/agent-skills/{id}"),
         ("DELETE", "/v1/agent-skills/{id}"),
+        ("GET", "/v1/agents"),
+        ("POST", "/v1/agents"),
+        ("GET", "/v1/agents/library"),
+        ("POST", "/v1/agents/library/{id}/install"),
+        ("GET", "/v1/agents/{id}"),
+        ("PUT", "/v1/agents/{id}"),
+        ("DELETE", "/v1/agents/{id}"),
+        ("POST", "/v1/agents/{id}/verify"),
+        ("POST", "/v1/agents/{id}/publish"),
+        ("POST", "/v1/agents/{id}/unpublish"),
+        ("GET", "/v1/storage/files"),
+        ("POST", "/v1/storage/presign"),
+        ("POST", "/v1/storage/files/{fileId}/complete"),
+        ("DELETE", "/v1/storage/files/{fileId}"),
+        ("GET", "/v1/agents/{id}/runs"),
+        ("GET", "/v1/conversations"),
+        ("POST", "/v1/conversations"),
+        ("GET", "/v1/conversations/{id}"),
+        ("PATCH", "/v1/conversations/{id}"),
+        ("DELETE", "/v1/conversations/{id}"),
     ],
     "knowledge_mcp": [
         ("POST", "/mcp"),
@@ -107,7 +146,27 @@ ROUTES = {
         ("GET", "/v1/admin/mcp/tools"),
         ("POST", "/v1/admin/mcp/call"),
     ],
+    "mcp_connections": [
+        ("GET", "/v1/mcp/catalog"),
+        ("GET", "/v1/mcp/registry"),
+        ("GET", "/v1/mcp/connections"),
+        ("POST", "/v1/mcp/connections"),
+        ("GET", "/v1/mcp/connections/{id}"),
+        ("DELETE", "/v1/mcp/connections/{id}"),
+        ("PATCH", "/v1/mcp/connections/{id}"),
+        ("POST", "/v1/mcp/connections/{id}/refresh"),
+        ("POST", "/v1/mcp/connections/{id}/authorize"),
+        ("POST", "/v1/mcp/connections/{id}/token"),
+        ("GET", "/v1/mcp/connections/{id}/tools"),
+        ("PATCH", "/v1/mcp/connections/{id}/tools"),
+        ("POST", "/v1/mcp/connections/{id}/call"),
+        ("GET", "/v1/mcp/oauth/callback"),
+        ("POST", "/mcp/remote"),
+    ],
 }
+
+# Routes that must be reachable without a JWT (browser OAuth redirects).
+PUBLIC_ROUTES = {("GET", "/v1/mcp/oauth/callback")}
 
 
 def log(message: str) -> None:
@@ -351,6 +410,20 @@ def ensure_function(
     return lm.get_function(FunctionName=name)["Configuration"]["FunctionArn"]
 
 
+def ensure_kms_key(kms, alias_name: str, description: str) -> str:
+    """Return the ARN of an alias-backed KMS key, creating it if needed."""
+    try:
+        existing = kms.describe_key(KeyId=alias_name)["KeyMetadata"]
+        return existing["Arn"]
+    except ClientError:
+        pass
+    key = kms.create_key(Description=description)
+    arn = key["KeyMetadata"]["Arn"]
+    kms.create_alias(AliasName=alias_name, TargetKeyId=key["KeyMetadata"]["KeyId"])
+    log(f"created KMS key {alias_name}")
+    return arn
+
+
 # --- step functions ----------------------------------------------------------
 
 
@@ -459,16 +532,17 @@ def ensure_http_api(apigw, function_arns: dict[str, str]) -> str:
     route_count = 0
     for key, routes in ROUTES.items():
         for method, path in routes:
+            public = (method, path) in PUBLIC_ROUTES
             apigw.create_route(
                 ApiId=api_id,
                 RouteKey=f"{method} {path}",
                 Target=f"integrations/{integrations[key]}",
-                AuthorizationType="JWT",
-                AuthorizerId=authorizer_id,
+                AuthorizationType="NONE" if public else "JWT",
+                **({} if public else {"AuthorizerId": authorizer_id}),
             )
             route_count += 1
     apigw.create_stage(ApiId=api_id, StageName="$default", AutoDeploy=True)
-    log(f"created {route_count} JWT-protected routes + $default stage")
+    log(f"created {route_count} routes + $default stage")
     return api_id
 
 
@@ -485,6 +559,7 @@ def main() -> int:
         f"{ROOT}/backend/services/mcp-tester/dist/function.zip",
         f"{ROOT}/backend/services/web-search/dist/function.zip",
         f"{ROOT}/backend/services/code-interpreter/dist/function.zip",
+        f"{ROOT}/backend/services/mcp-connections/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-dispatcher/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-extract/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-embed/dist/function.zip",
@@ -505,6 +580,7 @@ def main() -> int:
     lm = client("lambda")
     sfn = client("stepfunctions")
     apigw = client("apigatewayv2")
+    kms = client("kms")
 
     ensure_bucket(s3)
     queue_url, queue_arn = ensure_queues(sqs)
@@ -534,10 +610,14 @@ def main() -> int:
         **ddb_env,
         "S3_BUCKET": BUCKET,
         "S3_REGION": REGION,
-        "EMBED_MODE": "local",
+        "EMBED_MODE": EMBED_MODE,
         "LOCAL_EMBED_URL": OLLAMA_URL,
         "LOCAL_EMBED_MODEL": LOCAL_EMBED_MODEL,
         "TEXT_EMBED_MODEL": LOCAL_EMBED_MODEL,
+        "VOYAGE_API_KEY": VOYAGE_API_KEY,
+        "VOYAGE_API_BASE_URL": VOYAGE_API_BASE_URL,
+        "VOYAGE_TEXT_MODEL": VOYAGE_TEXT_MODEL,
+        "VOYAGE_MULTIMODAL_MODEL": VOYAGE_MULTIMODAL_MODEL,
         "VECTOR_STORE": "local",
         "AWS_REGION": REGION,
         "AWS_DEFAULT_REGION": REGION,
@@ -612,11 +692,21 @@ def main() -> int:
     )
     ensure_event_source_mapping(lm, FUNCTIONS["dispatcher"], queue_arn)
 
+    mcp_kms_key_arn = ensure_kms_key(
+        kms,
+        "alias/get1agent-local-mcp-connections",
+        "Encrypts per-user MCP OAuth tokens and client secrets at rest",
+    )
     api_env = {
         **ddb_env,
         "S3_BUCKET": BUCKET,
         "S3_REGION": REGION,
         "VECTOR_STORE": "local",
+        "EMBED_MODE": EMBED_MODE,
+        "VOYAGE_API_KEY": VOYAGE_API_KEY,
+        "VOYAGE_API_BASE_URL": VOYAGE_API_BASE_URL,
+        "VOYAGE_TEXT_MODEL": VOYAGE_TEXT_MODEL,
+        "VOYAGE_MULTIMODAL_MODEL": VOYAGE_MULTIMODAL_MODEL,
         "AWS_REGION": REGION,
         "AWS_DEFAULT_REGION": REGION,
     }
@@ -638,7 +728,9 @@ def main() -> int:
         layers=[base_layer_arn, genai_layer_arn],
         environment={
             **worker_env,
-            "RERANK_MODE": "local",
+            "RERANK_MODE": RERANK_MODE,
+            "VOYAGE_RERANK_MODEL": VOYAGE_RERANK_MODEL,
+            # Optional offline cross-encoder; used when RERANK_MODE=local.
             "LOCAL_RERANK_URL": RERANK_URL,
         },
         timeout=300,
@@ -704,6 +796,30 @@ def main() -> int:
         memory=512,
     )
 
+    # Remote MCP connections: OAuth broker + per-user token store + aggregator.
+    # It reaches arbitrary HTTPS MCP servers directly from the container, like
+    # the web-search tool reaches Exa.
+    mcp_connections_arn = ensure_function(
+        lm,
+        FUNCTIONS["mcp_connections"],
+        f"{ROOT}/backend/services/mcp-connections/dist/function.zip",
+        handler="handler.lambda_handler",
+        layers=[base_layer_arn, genai_layer_arn],
+        environment={
+            **api_env,
+            "MCP_CONNECTIONS_KMS_KEY_ARN": mcp_kms_key_arn,
+            "MCP_OAUTH_REDIRECT_URI": os.environ.get(
+                "MCP_OAUTH_REDIRECT_URI"
+            )
+            or "http://get1agent.execute-api.localhost.floci.io:4566/v1/mcp/oauth/callback",
+            "FRONTEND_URL": os.environ.get("FRONTEND_URL") or "http://localhost:5173",
+            "GITHUB_MCP_CLIENT_ID": os.environ.get("GITHUB_MCP_CLIENT_ID", ""),
+            "GITHUB_MCP_CLIENT_SECRET": os.environ.get("GITHUB_MCP_CLIENT_SECRET", ""),
+        },
+        timeout=30,
+        memory=512,
+    )
+
     api_id = ensure_http_api(
         apigw,
         {
@@ -712,6 +828,7 @@ def main() -> int:
             "web_search": web_search_arn,
             "code_interpreter": code_interpreter_arn,
             "mcp_tester": mcp_tester_arn,
+            "mcp_connections": mcp_connections_arn,
         },
     )
 

@@ -41,9 +41,10 @@ export function validateKnowledgeBaseName(value: string): string | null {
   return null
 }
 
-// Ingestion defaults. Keep in sync with backend/shared/ingestion/config.py.
-export const TEXT_EMBED_MODEL = 'amazon.titan-embed-text-v2:0'
-export const IMAGE_EMBED_MODEL = 'amazon.titan-embed-image-v1'
+// Ingestion defaults. Keep in sync with
+// backend/packages/retrieval/embedding/config.py.
+export const TEXT_EMBED_MODEL = 'voyage-4-large'
+export const IMAGE_EMBED_MODEL = 'voyage-multimodal-3.5'
 export const EMBEDDING_DIM = 1024
 export const DEFAULT_CHUNK_SIZE = 512
 export const DEFAULT_CHUNK_OVERLAP = 64

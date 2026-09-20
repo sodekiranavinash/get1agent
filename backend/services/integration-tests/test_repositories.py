@@ -230,3 +230,77 @@ def test_skills_crud_and_rename():
 
     skills.delete_skill(sub, skill["skillId"])
     assert skills.count_skills(sub) == 0
+
+
+def _agent_config(prompt="You are a careful research assistant."):
+    return {
+        "prompt": prompt,
+        "model": "claude-sonnet-4",
+        "reasoning": "medium",
+        "outputFormat": "markdown",
+        "knowledgeBaseIds": [],
+        "skillIds": [],
+        "servers": [],
+        "schedule": {"enabled": False, "cron": "", "timezone": "UTC"},
+        "graph": {"nodes": [{"id": "agent-1", "type": "agent"}], "edges": []},
+    }
+
+
+def test_agents_crud_publish_and_library():
+    from data.repositories import agents
+    from data.repositories.agents import DuplicateAgent
+
+    profile = _profile()
+    sub = profile["userId"]
+    agent = agents.create_agent(
+        sub,
+        agent_id="77777777-7777-7777-7777-777777777777",
+        name="researcher",
+        description="d",
+        config=_agent_config(),
+    )
+    assert agents.count_agents(sub) == 1
+    assert agents.get_agent(sub, agent["agentId"])["name"] == "researcher"
+    assert agents.get_agent_by_name(sub, "researcher") is not None
+
+    # Editing resets verification and removes it from the library.
+    agents.update_agent(
+        sub, agent["agentId"], name="researcher-2", description="d2", config=_agent_config()
+    )
+    renamed = agents.get_agent(sub, agent["agentId"])
+    assert renamed["name"] == "researcher-2"
+    assert renamed["status"] == "draft"
+    assert agents.get_agent_by_name(sub, "researcher") is None
+
+    # Duplicate names are rejected by the conditional write.
+    try:
+        agents.create_agent(
+            sub,
+            agent_id="99999999-9999-9999-9999-999999999999",
+            name="researcher-2",
+            description="",
+            config=_agent_config(),
+        )
+        raise AssertionError("expected DuplicateAgent")
+    except DuplicateAgent:
+        pass
+
+    # Verify, publish, then list globally through GSI3.
+    agents.mark_verified(
+        sub, agent["agentId"], status="verified", verified_at="2026-01-01T00:00:00Z"
+    )
+    agents.publish_agent(sub, agent["agentId"], published_at="2026-01-02T00:00:00Z")
+    published = agents.get_agent(sub, agent["agentId"])
+    assert published["visibility"] == "public"
+    assert agents.get_public_agent(agent["agentId"]) is not None
+    library, _ = agents.list_library()
+    assert [item["agentId"] for item in library] == [agent["agentId"]]
+
+    # Unpublishing clears the library projection.
+    agents.unpublish_agent(sub, agent["agentId"])
+    library, _ = agents.list_library()
+    assert library == []
+    assert agents.get_public_agent(agent["agentId"]) is None
+
+    agents.delete_agent(sub, agent["agentId"])
+    assert agents.count_agents(sub) == 0

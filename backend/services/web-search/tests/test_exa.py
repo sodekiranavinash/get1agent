@@ -20,15 +20,14 @@ class BuildBodyTests(unittest.TestCase):
         with self.assertRaises(exa.ExaError):
             exa.build_body({})
 
-    def test_defaults_highlights_capped_text_and_ten_results(self) -> None:
+    def test_defaults_highlights_only_and_five_results(self) -> None:
         body, warnings = exa.build_body({"query": "latest in llms"})
         self.assertEqual(body["type"], "auto")
-        self.assertEqual(body["numResults"], 10)
+        self.assertEqual(body["numResults"], 5)
         self.assertEqual(
             body["contents"],
             {
-                "text": {"maxCharacters": 4000},
-                "highlights": True,
+                "highlights": {"maxCharacters": 400},
                 "maxAgeHours": 24,
             },
         )

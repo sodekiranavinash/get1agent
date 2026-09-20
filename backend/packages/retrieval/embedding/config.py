@@ -8,11 +8,19 @@ DEFAULT_IMAGE_EMBED_MODEL = "amazon.titan-embed-image-v1"
 DEFAULT_EMBEDDING_DIM = 1024
 DEFAULT_LOCAL_EMBED_MODEL = "mxbai-embed-large"
 DEFAULT_LOCAL_EMBED_URL = "http://ollama:11434"
+# Voyage AI (https://docs.voyageai.com) — used when EMBED_MODE=voyage, e.g. when
+# Bedrock is not available yet. The API key is read from VOYAGE_API_KEY by the
+# embedding client and is deliberately never part of this config, because the
+# config is serialized into the Step Functions payload.
+DEFAULT_VOYAGE_TEXT_MODEL = "voyage-4-large"
+DEFAULT_VOYAGE_MULTIMODAL_MODEL = "voyage-multimodal-3.5"
+DEFAULT_VOYAGE_API_BASE_URL = "https://api.voyageai.com/v1"
 
 # Values a knowledge base may choose from. Keep in sync with the UI
-# (frontend/src/lib/knowledgeBases.ts).
-SUPPORTED_TEXT_EMBED_MODELS = (DEFAULT_TEXT_EMBED_MODEL,)
-SUPPORTED_IMAGE_EMBED_MODELS = (DEFAULT_IMAGE_EMBED_MODEL,)
+# (frontend/src/lib/knowledgeBases.ts). Voyage is the active backend; the Titan
+# ids are kept for the dormant ``EMBED_MODE=bedrock`` path.
+SUPPORTED_TEXT_EMBED_MODELS = (DEFAULT_VOYAGE_TEXT_MODEL,)
+SUPPORTED_IMAGE_EMBED_MODELS = (DEFAULT_VOYAGE_MULTIMODAL_MODEL,)
 SUPPORTED_CHUNK_SIZES = (256, 384, 512, 768, 1024)
 SUPPORTED_CHUNK_OVERLAPS = (0, 32, 64, 128, 256)
 
@@ -51,27 +59,46 @@ class IngestionConfig:
     bedrock_region: str
     local_embed_url: str
     local_embed_model: str
+    voyage_api_base_url: str
 
 
 def load_config() -> IngestionConfig:
     """Read pipeline settings from the environment on every call.
 
-    ``EMBED_MODE=bedrock`` uses Titan (production). ``EMBED_MODE=local`` calls a
-    local Ollama server, so embeddings are real vectors without AWS.
+    ``EMBED_MODE=voyage`` (the default) calls the Voyage AI embeddings API
+    (text and multimodal) using ``VOYAGE_API_KEY``. ``EMBED_MODE=local`` calls a
+    local Ollama server, so embeddings are real vectors without any external
+    API. ``EMBED_MODE=bedrock`` uses Titan — kept for when Bedrock access is
+    added later.
     """
     region = (
         os.environ.get("BEDROCK_REGION")
         or os.environ.get("AWS_REGION")
         or "ap-south-1"
     )
-    return IngestionConfig(
-        embed_mode=os.environ.get("EMBED_MODE", "bedrock").strip().lower(),
-        text_embed_model=os.environ.get(
+    embed_mode = os.environ.get("EMBED_MODE", "voyage").strip().lower()
+    # Non-Bedrock backends ignore the per-KB model ids (see
+    # ``load_config_for_knowledge_base``), so resolve their model names here.
+    # This also keeps the ``textModel``/``imageModel`` recorded in the staged
+    # embeddings artifact accurate.
+    if embed_mode == "voyage":
+        text_embed_model = os.environ.get(
+            "VOYAGE_TEXT_MODEL", DEFAULT_VOYAGE_TEXT_MODEL
+        )
+        image_embed_model = os.environ.get(
+            "VOYAGE_MULTIMODAL_MODEL", DEFAULT_VOYAGE_MULTIMODAL_MODEL
+        )
+    else:
+        text_embed_model = os.environ.get(
             "TEXT_EMBED_MODEL", DEFAULT_TEXT_EMBED_MODEL
-        ),
-        image_embed_model=os.environ.get(
+        )
+        image_embed_model = os.environ.get(
             "IMAGE_EMBED_MODEL", DEFAULT_IMAGE_EMBED_MODEL
-        ),
+        )
+    return IngestionConfig(
+        embed_mode=embed_mode,
+        text_embed_model=text_embed_model,
+        image_embed_model=image_embed_model,
         embedding_dim=_int("EMBED_DIM", DEFAULT_EMBEDDING_DIM),
         chunk_size=_int("CHUNK_SIZE", DEFAULT_CHUNK_SIZE),
         chunk_overlap=_int("CHUNK_OVERLAP", DEFAULT_CHUNK_OVERLAP),
@@ -86,6 +113,9 @@ def load_config() -> IngestionConfig:
         local_embed_model=os.environ.get(
             "LOCAL_EMBED_MODEL", DEFAULT_LOCAL_EMBED_MODEL
         ),
+        voyage_api_base_url=os.environ.get(
+            "VOYAGE_API_BASE_URL", DEFAULT_VOYAGE_API_BASE_URL
+        ).rstrip("/"),
     )
 
 

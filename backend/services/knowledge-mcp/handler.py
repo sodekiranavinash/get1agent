@@ -43,10 +43,11 @@ MAX_CANDIDATE_LIMIT = 100
 _GET_SCHEMA: dict[str, Any] = {
     "name": GET_TOOL,
     "description": (
-        "List the user's ready knowledge bases with their tags (and tag "
-        "descriptions). Use this first to discover which knowledge base names "
-        "and tags exist before searching. Returns a compact list only; use "
-        "search-user-knowledge-bases for document content."
+        "Call this FIRST to list the user's ready knowledge bases with their "
+        "tags (and tag descriptions), so you know which knowledge base names and "
+        "tags exist before searching. Returns a compact list only; use "
+        "search-user-knowledge-bases for document content. Do not call this "
+        "again during the same task unless the user changes the knowledge bases."
     ),
     "inputSchema": {
         "type": "object",
@@ -67,18 +68,22 @@ _SEARCH_SCHEMA: dict[str, Any] = {
     "name": SEARCH_TOOL,
     "description": (
         "Hybrid (semantic + keyword) search across the user's knowledge bases. "
-        "Returns the most relevant context with its sources. Each result's "
-        "`content` is the full page/section the match came from (use this to "
-        "answer) and `matchedContent` is the precise passage that matched. "
-        "Optionally rerank results with Amazon Bedrock for higher precision. "
-        "Always use this to ground answers in the user's documents."
+        "Call get-user-knowledge-bases once first to discover the available "
+        "knowledge base names and tags. Then call this with ONE well-formed "
+        "natural-language query per distinct question — never repeat "
+        "near-duplicate searches, and combine related questions into a single "
+        "query. Returns the most relevant context with its sources. Each "
+        "result's `content` is the full page/section the match came from (use "
+        "this to answer) and `matchedContent` is the precise passage that "
+        "matched. Set `rerank: true` for higher precision when a query is broad "
+        "or ambiguous. Always use this to ground answers in the user's documents."
     ),
     "inputSchema": {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Natural-language search query.",
+                "description": "One natural-language search query.",
             },
             "knowledgeBaseNames": {
                 "type": "array",
@@ -96,8 +101,7 @@ _SEARCH_SCHEMA: dict[str, Any] = {
             "rerank": {
                 "type": "boolean",
                 "description": (
-                    "Rerank the results with Amazon Bedrock Rerank for higher "
-                    "precision. Defaults to false."
+                    "Rerank the results for higher precision. Defaults to false."
                 ),
             },
         },
@@ -189,7 +193,7 @@ def _search(
     )
 
     embed_started = time.perf_counter()
-    vectors = embed_texts([query], load_config())
+    vectors = embed_texts([query], load_config(), input_type="query")
     if not vectors:
         raise RetrievalError("embedding_failed", "Could not embed the query", 502)
     embed_ms = int((time.perf_counter() - embed_started) * 1000)

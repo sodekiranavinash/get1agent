@@ -29,10 +29,11 @@ _WEB_SEARCH_SCHEMA: dict[str, Any] = {
         "Search the public web for current information and return clean, "
         "ready-to-use content. Use this for facts, news, people, companies, "
         "or any topic outside the user's knowledge bases. Describe the ideal "
-        "page in natural language (not keywords). By default each result "
-        "includes highlights plus up to 4000 characters of page text. Set "
-        "textMaxCharacters to change that cap, summary=true for an AI summary "
-        "(extra cost), and numResults (10-25) when you need more sources. "
+        "page in natural language (not keywords). By default it returns 5 "
+        "results with a short query-relevant highlight each (token-efficient). "
+        "Only ask for full page text (text=true / textMaxCharacters), an AI "
+        "summary (summary=true, extra cost), or more sources (numResults, up "
+        "to 25) when you actually need them. "
         "Prefer the default type='auto'; only change it when the query needs "
         "more speed ('fast'/'instant') or deeper research ('deep-lite'/'deep')."
     ),
@@ -53,7 +54,7 @@ _WEB_SEARCH_SCHEMA: dict[str, Any] = {
                 "minimum": 1,
                 "maximum": 25,
                 "description": (
-                    "How many sources to return (default 10, max 25). More "
+                    "How many sources to return (default 5, max 25). More "
                     "results cost more; only raise it when you need broader "
                     "coverage."
                 ),
@@ -153,8 +154,8 @@ _WEB_SEARCH_SCHEMA: dict[str, Any] = {
             "text": {
                 "type": "boolean",
                 "description": (
-                    "Return the full page text as markdown. Included by default "
-                    "(capped at 4000 chars) when no content option is given."
+                    "Return the full page text as markdown. Off by default; set "
+                    "true only when the short highlight is not enough."
                 ),
             },
             "textMaxCharacters": {
@@ -164,9 +165,9 @@ _WEB_SEARCH_SCHEMA: dict[str, Any] = {
             "highlights": {
                 "type": "boolean",
                 "description": (
-                    "Return query-relevant excerpts. On by default (together "
-                    "with capped text) when no content option is given; set "
-                    "false to disable."
+                    "Return query-relevant excerpts. On by default (capped at "
+                    "400 chars) when no content option is given; set false to "
+                    "disable."
                 ),
             },
             "highlightsQuery": {
@@ -175,7 +176,7 @@ _WEB_SEARCH_SCHEMA: dict[str, Any] = {
             },
             "highlightsMaxCharacters": {
                 "type": "integer",
-                "description": "Total character cap for highlights per URL.",
+                "description": "Total character cap for highlights per URL (default 400).",
             },
             "summary": {
                 "type": "boolean",

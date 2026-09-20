@@ -1,33 +1,24 @@
 import { Suspense, type ReactNode } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Outlet } from 'react-router-dom'
 import { AppFooter } from '../../components/layout/AppFooter'
 import { TopBar } from '../../components/layout/TopBar'
 import { SidebarProvider, useSidebar } from '../../components/layout/SidebarProvider'
-import { RouteSkeleton } from '../../components/ui/RouteSkeleton'
 import { AdminSidebar } from './AdminSidebar'
+
+/**
+ * Pass-through suspense boundary for lazy route chunks. The fallback is
+ * intentionally empty so the page mounts directly — see `MainLayout`.
+ */
+function RouteGate({ children }: { children: ReactNode }) {
+  return <Suspense fallback={null}>{children}</Suspense>
+}
 
 /**
  * Admin console shell. Mirrors `MainLayout` (same logo, sidebar, footer and
  * route animation) but renders the admin sidebar and lives under `/admin`.
  */
-function RouteGate({ children }: { children: ReactNode }) {
-  return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-0 flex-1 flex-col">
-          <RouteSkeleton />
-        </div>
-      }
-    >
-      {children}
-    </Suspense>
-  )
-}
-
 function AdminLayoutContent() {
   const { effectiveCollapsed } = useSidebar()
-  const location = useLocation()
 
   return (
     <div className="min-h-screen bg-canvas text-foreground">
@@ -45,21 +36,11 @@ function AdminLayoutContent() {
         }`}
       >
         <TopBar settingsPath={null} />
+        {/* No route transition animation — see `MainLayout`. */}
         <div className="flex min-h-0 flex-1 flex-col">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.14, ease: 'easeOut' }}
-              className="flex min-h-0 flex-1 flex-col"
-            >
-              <RouteGate>
-                <Outlet />
-              </RouteGate>
-            </motion.div>
-          </AnimatePresence>
+          <RouteGate>
+            <Outlet />
+          </RouteGate>
         </div>
         <AppFooter />
       </main>

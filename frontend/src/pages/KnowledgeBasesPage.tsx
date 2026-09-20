@@ -190,14 +190,14 @@ function KnowledgeBasesSkeleton() {
           <Skeleton key={index} className="h-[86px] w-full rounded-lg" />
         ))}
       </div>
-      <div className="mt-3 flex gap-3">
-        <div className="min-w-0 flex-1 space-y-3">
-          <Skeleton className="h-24 w-full rounded-lg" />
+      <div className="mt-3 flex min-h-[calc(100vh-360px)] gap-3">
+        <div className="flex min-h-[520px] min-w-0 flex-1 flex-col space-y-3">
+          <Skeleton className="h-[232px] w-full rounded-lg" />
           {Array.from({ length: 3 }).map((_, index) => (
             <Skeleton key={index} className="h-14 w-full rounded-lg" />
           ))}
         </div>
-        <Skeleton className="hidden w-[340px] shrink-0 self-stretch rounded-lg xl:block" />
+        <Skeleton className="hidden w-[380px] shrink-0 self-stretch rounded-lg xl:block" />
       </div>
     </PageShell>
   )
@@ -380,9 +380,9 @@ export function KnowledgeBasesPage() {
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: 0.05 }}
-        className="mt-3 flex gap-3"
+        className="mt-3 flex min-h-[calc(100vh-360px)] items-stretch gap-3"
       >
-        <Card padding="none" className="min-w-0 flex-1 overflow-hidden">
+        <Card padding="none" className="flex min-h-[520px] min-w-0 flex-1 flex-col overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5">
             <h2 className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
               <FileStack className="h-3.5 w-3.5 text-accent" />
@@ -401,7 +401,7 @@ export function KnowledgeBasesPage() {
             </button>
           </div>
 
-          <div className="border-b border-border p-3">
+          <div className="border-b border-border p-4">
             <FileDropzone
               remaining={maxFilesForNewKb}
               disabled={atKbLimit}
@@ -415,7 +415,7 @@ export function KnowledgeBasesPage() {
               variants={stagger}
               initial="hidden"
               animate="show"
-              className="divide-y divide-border"
+              className="flex-1 divide-y divide-border"
             >
               {knowledgeBases.map((kb) => (
                 <KnowledgeBaseRow
@@ -428,7 +428,7 @@ export function KnowledgeBasesPage() {
               ))}
             </motion.div>
           ) : (
-            <p className="px-4 py-8 text-center text-[13px] text-muted">
+            <p className="flex flex-1 items-center justify-center px-4 py-16 text-center text-[13px] text-muted">
               No knowledge bases yet. Create one to get started.
             </p>
           )}
@@ -436,11 +436,11 @@ export function KnowledgeBasesPage() {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border px-4 py-2.5 text-[11px] text-muted">
             <span title={TEXT_EMBED_MODEL} className="inline-flex items-center gap-1.5">
               <Boxes className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />
-              Text · Titan Text V2 · {EMBEDDING_DIM}-d
+              Text · Voyage 4 Large · {EMBEDDING_DIM}-d
             </span>
             <span title={IMAGE_EMBED_MODEL} className="inline-flex items-center gap-1.5">
               <ImageIcon className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />
-              Image · Titan Multimodal G1 · {EMBEDDING_DIM}-d
+              Image · Voyage Multimodal 3.5 · {EMBEDDING_DIM}-d
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Scissors className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />
@@ -458,13 +458,13 @@ export function KnowledgeBasesPage() {
             <motion.aside
               key="activity-panel"
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 340, opacity: 1 }}
+              animate={{ width: 380, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="relative hidden shrink-0 self-stretch overflow-hidden xl:block"
+              className="relative hidden min-h-[520px] shrink-0 self-stretch overflow-hidden xl:block"
             >
-              <div className="absolute inset-y-0 right-0 w-[340px]">
-                <Card padding="none" className="flex h-full flex-col overflow-hidden">
+              <div className="absolute inset-y-0 right-0 w-[380px]">
+                <Card padding="none" className="flex h-full min-h-[520px] flex-col overflow-hidden">
                   <IngestionActivity
                     events={ingestionEvents ?? []}
                     capped={cappedOut}

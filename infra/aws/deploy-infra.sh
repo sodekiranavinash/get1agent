@@ -44,6 +44,11 @@ if [[ ! -s "$ROOT/backend/services/web-search/dist/function.zip" ]]; then
   make -C "$ROOT/backend/services/web-search" package
 fi
 
+if [[ ! -s "$ROOT/backend/services/mcp-connections/dist/function.zip" ]]; then
+  echo "Packaging mcp-connections Lambda zip..."
+  make -C "$ROOT/backend/services/mcp-connections" package
+fi
+
 bash "$ROOT/infra/aws/run-terraform.sh" bootstrap "$MODE"
 bash "$ROOT/infra/aws/run-terraform.sh" web "$MODE"
 bash "$ROOT/infra/aws/run-terraform.sh" prod "$MODE"

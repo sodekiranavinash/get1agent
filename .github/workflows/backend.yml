@@ -16,7 +16,7 @@ on:
         type: boolean
         default: false
       mcp_tools:
-        description: MCP tools (web-search, code-interpreter)
+        description: MCP tools (web-search, code-interpreter, mcp-connections)
         type: boolean
         default: false
       ingestion_apis:

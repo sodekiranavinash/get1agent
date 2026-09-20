@@ -313,7 +313,7 @@ export function Sidebar({
         className={`relative flex shrink-0 border-b border-border ${
           collapsed
             ? 'flex-col items-center gap-1.5 py-2'
-            : 'h-20 items-center justify-center px-3'
+            : 'h-16 items-center justify-center px-3'
         }`}
       >
         <Link
@@ -331,7 +331,7 @@ export function Sidebar({
             <img
               src={logoSrc}
               alt="OneAgent"
-              className="h-12 w-auto max-w-[13.5rem] object-contain"
+              className="h-16 w-auto max-w-[13.5rem] object-contain"
             />
           )}
         </Link>

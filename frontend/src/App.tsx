@@ -1,4 +1,4 @@
-import { lazy } from 'react'
+import { lazy, useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { RequireAdmin } from './auth/RequireAdmin'
 import { RequireUser } from './auth/RequireUser'
@@ -71,6 +71,14 @@ const AgentSkillsPage = lazy(() =>
 const ToolsPage = lazy(() =>
   import('./pages/ToolsPage').then((m) => ({ default: m.ToolsPage })),
 )
+const StoragePage = lazy(() =>
+  import('./pages/StoragePage').then((m) => ({ default: m.StoragePage })),
+)
+const McpOAuthCallbackPage = lazy(() =>
+  import('./pages/McpOAuthCallbackPage').then((m) => ({
+    default: m.McpOAuthCallbackPage,
+  })),
+)
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
 )
@@ -83,8 +91,51 @@ const AdminIntegrationsPage = lazy(() =>
   })),
 )
 
+/**
+ * Warms the lazy route chunks once the browser is idle, so navigating to a
+ * page never waits on a chunk download — the page mounts instantly and only
+ * the API-driven skeleton can appear.
+ */
+function PrefetchRoutes() {
+  useEffect(() => {
+    const prefetch = () => {
+      void import('./pages/DashboardPage')
+      void import('./pages/AgentBuilderPage')
+      void import('./pages/WorkflowBuilderPage')
+      void import('./pages/ChatPage')
+      void import('./pages/AgentStorePage')
+      void import('./pages/WorkflowStorePage')
+      void import('./pages/ScheduledJobsPage')
+      void import('./pages/UsagePage')
+      void import('./pages/InsightsPage')
+      void import('./pages/ExperimentsPage')
+      void import('./pages/EvaluationsPage')
+      void import('./pages/MetricsPage')
+      void import('./pages/KnowledgeBasesPage')
+      void import('./pages/AgentSkillsPage')
+      void import('./pages/ToolsPage')
+      void import('./pages/StoragePage')
+      void import('./pages/SettingsPage')
+      void import('./pages/PrivacyPage')
+      void import('./admin/pages/AdminIntegrationsPage')
+    }
+    const win = window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+      cancelIdleCallback?: (id: number) => void
+    }
+    if (win.requestIdleCallback) {
+      const id = win.requestIdleCallback(prefetch, { timeout: 3000 })
+      return () => win.cancelIdleCallback?.(id)
+    }
+    const timer = window.setTimeout(prefetch, 2000)
+    return () => window.clearTimeout(timer)
+  }, [])
+  return null
+}
+
 function App() {
   return (
+    <>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/authorization/callback" element={<CallbackPage />} />
@@ -94,6 +145,7 @@ function App() {
         <Route path="/" element={<RoleRedirect />} />
         <Route path="/administration" element={<RoleRedirect />} />
         <Route path="/select-view" element={<SelectViewPage />} />
+        <Route path="/mcp/callback" element={<McpOAuthCallbackPage />} />
 
         <Route element={<RequireUser />}>
           <Route element={<MainLayout />}>
@@ -101,6 +153,7 @@ function App() {
             <Route path="/agent-builder" element={<AgentBuilderPage />} />
             <Route path="/workflow-builder" element={<WorkflowBuilderPage />} />
             <Route path="/chat" element={<ChatPage />} />
+            <Route path="/chat/conversation/:conversationId" element={<ChatPage />} />
             <Route path="/agent-store" element={<AgentStorePage />} />
             <Route path="/workflow-store" element={<WorkflowStorePage />} />
             <Route path="/scheduled-jobs" element={<ScheduledJobsPage />} />
@@ -112,6 +165,7 @@ function App() {
             <Route path="/knowledge-bases" element={<KnowledgeBasesPage />} />
             <Route path="/agent-skills" element={<AgentSkillsPage />} />
             <Route path="/tools" element={<ToolsPage />} />
+            <Route path="/storage" element={<StoragePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
           </Route>
@@ -131,6 +185,8 @@ function App() {
       </Route>
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
+    <PrefetchRoutes />
+    </>
   )
 }
 

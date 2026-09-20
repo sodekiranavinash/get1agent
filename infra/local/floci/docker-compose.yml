@@ -3,7 +3,12 @@
 #
 #   make floci-build     # build Lambda zips (layers + services)
 #   make floci-up        # start dynamodb + floci; init hook provisions resources
-#   make floci-down      # stop and remove the stack
+#   make floci-down      # stop and remove the stack (named volumes are kept)
+#
+# S3/Lambda/API state (Floci) and the DynamoDB table persist in the
+# `floci_data` and `dynamodb_data` named volumes, so restarts keep uploaded
+# documents and the retrieval index. Wipe everything with:
+#   docker compose -f infra/local/floci/docker-compose.yml down -v
 #
 # Run `make floci-up` only after `make floci-build` (the init hook uploads the
 # zips). See infra/local/floci/README.md for details.
@@ -13,7 +18,11 @@ services:
   # Operational data (single table + GSIs). Floci does not emulate DynamoDB.
   dynamodb:
     image: amazon/dynamodb-local:latest
-    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    # Persist to a named volume so `make floci-down`/restarts do not wipe data.
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/home/dynamodblocal/data"]
+    user: root
+    volumes:
+      - dynamodb_data:/home/dynamodblocal/data
     ports:
       - "${DYNAMODB_PORT:-8000}:8000"
     networks:
@@ -30,7 +39,9 @@ services:
       # Lambda containers, and it resolves to 127.0.0.1 from the host/browser,
       # so presigned S3 URLs and the execute-api host work from both.
       FLOCI_HOSTNAME: localhost.floci.io
-      FLOCI_STORAGE_MODE: memory
+      # Persist S3/Lambda/API state to the /app/data volume so restarts keep
+      # uploaded documents and the retrieval index (see `floci_data` below).
+      FLOCI_STORAGE_MODE: persistent
       FLOCI_INIT_HOOKS_TIMEOUT_SECONDS: "300"
       # Read by the init hook (infra/local/floci/init/ready.d/10-provision.py).
       KB_BUCKET: ${S3_BUCKET:-get1agent-local}
@@ -40,10 +51,24 @@ services:
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.get1agent.com}
       OLLAMA_URL: http://ollama:11434
       LOCAL_EMBED_MODEL: ${LOCAL_EMBED_MODEL:-mxbai-embed-large}
+      # Embedding backend: voyage (Voyage AI) | local (Ollama) | bedrock.
+      EMBED_MODE: ${EMBED_MODE:-voyage}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      VOYAGE_API_BASE_URL: ${VOYAGE_API_BASE_URL:-https://api.voyageai.com/v1}
+      VOYAGE_TEXT_MODEL: ${VOYAGE_TEXT_MODEL:-voyage-4-large}
+      VOYAGE_MULTIMODAL_MODEL: ${VOYAGE_MULTIMODAL_MODEL:-voyage-multimodal-3.5}
+      VOYAGE_RERANK_MODEL: ${VOYAGE_RERANK_MODEL:-rerank-3}
+      # Rerank backend: voyage (Voyage AI) | local (TEI) | none | bedrock.
+      RERANK_MODE: ${RERANK_MODE:-voyage}
       LOCAL_RERANK_URL: http://reranker:80/rerank
       # Exa web-search tool (public HTTPS API, no emulation).
       EXA_API_KEY: ${EXA_API_KEY:-}
       EXA_API_BASE_URL: ${EXA_API_BASE_URL:-https://api.exa.ai}
+      # Remote MCP connections (GitHub OAuth App + callback overrides).
+      GITHUB_MCP_CLIENT_ID: ${GITHUB_MCP_CLIENT_ID:-}
+      GITHUB_MCP_CLIENT_SECRET: ${GITHUB_MCP_CLIENT_SECRET:-}
+      MCP_OAUTH_REDIRECT_URI: ${MCP_OAUTH_REDIRECT_URI:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
     ports:
       - "${FLOCI_PORT:-4566}:4566"
     volumes:
@@ -51,12 +76,15 @@ services:
       - ./init:/etc/floci/init:ro
       - ../../../backend:/opt/get1agent/backend:ro
       - ../../../infra:/opt/get1agent/infra:ro
+      - floci_data:/app/data
     networks:
       - get1agent
 
   # Real text embeddings for local ingestion (1024-dim, matches the schema).
+  # Opt-in profile: only started for EMBED_MODE=local.
   ollama:
     image: ollama/ollama:latest
+    profiles: ["local-embeddings"]
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
@@ -64,12 +92,12 @@ services:
     networks:
       - get1agent
 
-  # Real cross-encoder reranker for local retrieval (mirrors Bedrock Rerank).
-  # HuggingFace Text Embeddings Inference serves POST /rerank. TEI's CPU image
-  # is amd64; on Apple Silicon Docker runs it under Rosetta. `make floci` waits
-  # for /health before continuing.
+  # Real cross-encoder reranker for local retrieval (mirrors Voyage/Bedrock
+  # Rerank). HuggingFace Text Embeddings Inference serves POST /rerank. Opt-in
+  # profile: only started for RERANK_MODE=local.
   reranker:
     image: ${RERANKER_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
+    profiles: ["local-rerank"]
     command:
       [
         "--model-id",
@@ -89,5 +117,7 @@ networks:
     name: get1agent-floci
 
 volumes:
+  floci_data:
+  dynamodb_data:
   ollama_models:
   reranker_models:

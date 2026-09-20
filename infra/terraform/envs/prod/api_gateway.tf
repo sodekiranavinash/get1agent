@@ -113,9 +113,9 @@ module "api_gateway" {
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
-    agent_skills_tools = {
+    agent_skills_mcp_servers = {
       method               = "GET"
-      path                 = "/v1/agent-skills/tools"
+      path                 = "/v1/agent-skills/mcp-servers"
       lambda_invoke_arn    = module.user_api[0].invoke_arn
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
@@ -123,6 +123,41 @@ module "api_gateway" {
     agent_skills_parse = {
       method               = "POST"
       path                 = "/v1/agent-skills/parse"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_catalog = {
+      method               = "GET"
+      path                 = "/v1/agent-skills/catalog"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_registry = {
+      method               = "GET"
+      path                 = "/v1/agent-skills/registry"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_import_preview = {
+      method               = "POST"
+      path                 = "/v1/agent-skills/import/preview"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_import = {
+      method               = "POST"
+      path                 = "/v1/agent-skills/import"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agent_skills_resolve_repo = {
+      method               = "POST"
+      path                 = "/v1/agent-skills/resolve-repo"
       lambda_invoke_arn    = module.user_api[0].invoke_arn
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
@@ -144,6 +179,146 @@ module "api_gateway" {
     agent_skills_delete = {
       method               = "DELETE"
       path                 = "/v1/agent-skills/{id}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agents_list = {
+      method               = "GET"
+      path                 = "/v1/agents"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agents_create = {
+      method               = "POST"
+      path                 = "/v1/agents"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agents_library = {
+      method               = "GET"
+      path                 = "/v1/agents/library"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agents_library_install = {
+      method               = "POST"
+      path                 = "/v1/agents/library/{id}/install"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agents_get = {
+      method               = "GET"
+      path                 = "/v1/agents/{id}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agents_update = {
+      method               = "PUT"
+      path                 = "/v1/agents/{id}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agents_delete = {
+      method               = "DELETE"
+      path                 = "/v1/agents/{id}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agents_verify = {
+      method               = "POST"
+      path                 = "/v1/agents/{id}/verify"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agents_publish = {
+      method               = "POST"
+      path                 = "/v1/agents/{id}/publish"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agents_unpublish = {
+      method               = "POST"
+      path                 = "/v1/agents/{id}/unpublish"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    storage_files_list = {
+      method               = "GET"
+      path                 = "/v1/storage/files"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    storage_presign = {
+      method               = "POST"
+      path                 = "/v1/storage/presign"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    storage_complete = {
+      method               = "POST"
+      path                 = "/v1/storage/files/{fileId}/complete"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    storage_delete = {
+      method               = "DELETE"
+      path                 = "/v1/storage/files/{fileId}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    agents_runs = {
+      method               = "GET"
+      path                 = "/v1/agents/{id}/runs"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    conversations_list = {
+      method               = "GET"
+      path                 = "/v1/conversations"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    conversations_create = {
+      method               = "POST"
+      path                 = "/v1/conversations"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    conversations_get = {
+      method               = "GET"
+      path                 = "/v1/conversations/{id}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    conversations_update = {
+      method               = "PATCH"
+      path                 = "/v1/conversations/{id}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    conversations_delete = {
+      method               = "DELETE"
+      path                 = "/v1/conversations/{id}"
       lambda_invoke_arn    = module.user_api[0].invoke_arn
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
@@ -181,6 +356,111 @@ module "api_gateway" {
       path                 = "/v1/admin/mcp/call"
       lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
       lambda_function_name = module.mcp_tester[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_catalog = {
+      method               = "GET"
+      path                 = "/v1/mcp/catalog"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_registry = {
+      method               = "GET"
+      path                 = "/v1/mcp/registry"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_connections_list = {
+      method               = "GET"
+      path                 = "/v1/mcp/connections"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_connections_create = {
+      method               = "POST"
+      path                 = "/v1/mcp/connections"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_connections_get = {
+      method               = "GET"
+      path                 = "/v1/mcp/connections/{id}"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_connections_delete = {
+      method               = "DELETE"
+      path                 = "/v1/mcp/connections/{id}"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_connections_update = {
+      method               = "PATCH"
+      path                 = "/v1/mcp/connections/{id}"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_connections_refresh = {
+      method               = "POST"
+      path                 = "/v1/mcp/connections/{id}/refresh"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_connections_authorize = {
+      method               = "POST"
+      path                 = "/v1/mcp/connections/{id}/authorize"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_connections_token = {
+      method               = "POST"
+      path                 = "/v1/mcp/connections/{id}/token"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_connections_tools = {
+      method               = "GET"
+      path                 = "/v1/mcp/connections/{id}/tools"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_connections_tool_update = {
+      method               = "PATCH"
+      path                 = "/v1/mcp/connections/{id}/tools"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_connections_call = {
+      method               = "POST"
+      path                 = "/v1/mcp/connections/{id}/call"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "JWT"
+    }
+    mcp_oauth_callback = {
+      method               = "GET"
+      path                 = "/v1/mcp/oauth/callback"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
+      authorization_type   = "NONE"
+    }
+    remote_mcp = {
+      method               = "POST"
+      path                 = "/mcp/remote"
+      lambda_invoke_arn    = module.mcp_connections[0].invoke_arn
+      lambda_function_name = module.mcp_connections[0].function_name
       authorization_type   = "JWT"
     }
   } : {}

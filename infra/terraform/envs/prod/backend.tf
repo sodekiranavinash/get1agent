@@ -8,12 +8,14 @@ locals {
   mcp_tester_zip           = abspath("${path.module}/../../../../backend/services/mcp-tester/dist/function.zip")
   code_interpreter_zip     = abspath("${path.module}/../../../../backend/services/code-interpreter/dist/function.zip")
   web_search_zip           = abspath("${path.module}/../../../../backend/services/web-search/dist/function.zip")
+  mcp_connections_zip      = abspath("${path.module}/../../../../backend/services/mcp-connections/dist/function.zip")
   ingestion_dispatcher_zip = abspath("${path.module}/../../../../backend/services/ingestion-dispatcher/dist/function.zip")
   ingestion_extract_zip    = abspath("${path.module}/../../../../backend/services/ingestion-extract/dist/function.zip")
   ingestion_embed_zip      = abspath("${path.module}/../../../../backend/services/ingestion-embed/dist/function.zip")
   ingestion_index_zip      = abspath("${path.module}/../../../../backend/services/ingestion-index/dist/function.zip")
   ingestion_fail_zip       = abspath("${path.module}/../../../../backend/services/ingestion-mark-failed/dist/function.zip")
   ingestion_watchdog_zip   = abspath("${path.module}/../../../../backend/services/ingestion-watchdog/dist/function.zip")
+  agent_run_zip            = abspath("${path.module}/../../../../backend/services/agent-run/dist/function.zip")
 }
 
 check "layer_base_zip_exists" {
@@ -69,6 +71,13 @@ check "web_search_zip_exists" {
   assert {
     condition     = !var.enable_backend_lambdas || fileexists(local.web_search_zip)
     error_message = "web-search zip not found at ${local.web_search_zip}. Run: make -C backend/services/web-search package"
+  }
+}
+
+check "mcp_connections_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.mcp_connections_zip)
+    error_message = "mcp-connections zip not found at ${local.mcp_connections_zip}. Run: make -C backend/services/mcp-connections package"
   }
 }
 
@@ -181,14 +190,16 @@ module "user_api" {
   dynamodb_table_arns   = [module.database[0].table_arn]
 
   environment = {
-    DYNAMODB_TABLE   = module.database[0].table_name
-    S3_BUCKET        = module.knowledge_storage[0].bucket_name
-    S3_REGION        = var.aws_region
-    VECTOR_STORE     = "s3vectors"
-    S3_VECTOR_BUCKET = module.vectors[0].vector_bucket_name
-    EMBED_MODE       = "bedrock"
-    BEDROCK_REGION   = var.aws_region
-    TEXT_EMBED_MODEL = "amazon.titan-embed-text-v2:0"
+    DYNAMODB_TABLE          = module.database[0].table_name
+    S3_BUCKET               = module.knowledge_storage[0].bucket_name
+    S3_REGION               = var.aws_region
+    VECTOR_STORE            = "s3vectors"
+    S3_VECTOR_BUCKET        = module.vectors[0].vector_bucket_name
+    EMBED_MODE              = "voyage"
+    VOYAGE_API_KEY          = var.voyage_api_key
+    VOYAGE_API_BASE_URL     = var.voyage_api_base_url
+    VOYAGE_TEXT_MODEL       = var.voyage_text_model
+    VOYAGE_MULTIMODAL_MODEL = var.voyage_multimodal_model
   }
 
   depends_on = [
@@ -216,26 +227,21 @@ module "knowledge_mcp" {
   s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
   s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
   dynamodb_table_arns   = [module.database[0].table_arn]
-  bedrock_model_arns = [
-    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0",
-  ]
-  bedrock_rerank_arns = [
-    "arn:aws:bedrock:${var.rerank_region}::foundation-model/${var.rerank_model}",
-  ]
 
   environment = {
-    DYNAMODB_TABLE    = module.database[0].table_name
-    S3_BUCKET         = module.knowledge_storage[0].bucket_name
-    S3_REGION         = var.aws_region
-    VECTOR_STORE      = "s3vectors"
-    S3_VECTOR_BUCKET  = module.vectors[0].vector_bucket_name
-    EMBED_MODE        = "bedrock"
-    BEDROCK_REGION    = var.aws_region
-    TEXT_EMBED_MODEL  = "amazon.titan-embed-text-v2:0"
-    IMAGE_EMBED_MODEL = "amazon.titan-embed-image-v1"
-    RERANK_MODE       = "bedrock"
-    RERANK_REGION     = var.rerank_region
-    RERANK_MODEL_ARN  = "arn:aws:bedrock:${var.rerank_region}::foundation-model/${var.rerank_model}"
+    DYNAMODB_TABLE          = module.database[0].table_name
+    S3_BUCKET               = module.knowledge_storage[0].bucket_name
+    S3_REGION               = var.aws_region
+    VECTOR_STORE            = "s3vectors"
+    S3_VECTOR_BUCKET        = module.vectors[0].vector_bucket_name
+    EMBED_MODE              = "voyage"
+    VOYAGE_API_KEY          = var.voyage_api_key
+    VOYAGE_API_BASE_URL     = var.voyage_api_base_url
+    VOYAGE_TEXT_MODEL       = var.voyage_text_model
+    VOYAGE_MULTIMODAL_MODEL = var.voyage_multimodal_model
+    # Rerank is opt-in per request and falls back to RRF order when unreachable.
+    VOYAGE_RERANK_MODEL = var.voyage_rerank_model
+    RERANK_MODE         = "voyage"
   }
 
   depends_on = [
@@ -343,6 +349,52 @@ module "web_search" {
 
 }
 
+module "mcp_connections_kms" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/kms"
+
+  name        = "get1agent-prod-mcp-connections"
+  description = "Encrypts per-user MCP OAuth tokens and client secrets at rest"
+  tags        = { Service = "mcp-connections" }
+}
+
+module "mcp_connections" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_function"
+
+  name             = "get1agent-prod-mcp-connections"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.mcp_connections_zip
+  source_code_hash = filebase64sha256(local.mcp_connections_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_base[0].arn, module.layer_genai[0].arn]
+
+  memory_size = 512
+  timeout     = 30
+
+  s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
+  dynamodb_table_arns = [module.database[0].table_arn]
+  kms_key_arns        = [module.mcp_connections_kms[0].key_arn]
+
+  environment = {
+    DYNAMODB_TABLE              = module.database[0].table_name
+    S3_BUCKET                   = module.knowledge_storage[0].bucket_name
+    S3_REGION                   = var.aws_region
+    MCP_CONNECTIONS_KMS_KEY_ARN = module.mcp_connections_kms[0].key_arn
+    MCP_OAUTH_REDIRECT_URI      = var.mcp_oauth_redirect_uri != "" ? var.mcp_oauth_redirect_uri : "https://${var.api_hostname}/v1/mcp/oauth/callback"
+    FRONTEND_URL                = var.frontend_url
+    GITHUB_MCP_CLIENT_ID        = var.GITHUB_MCP_CLIENT_ID
+    GITHUB_MCP_CLIENT_SECRET    = var.GITHUB_MCP_CLIENT_SECRET
+  }
+
+  depends_on = [
+    module.knowledge_storage,
+    module.database,
+    module.mcp_connections_kms,
+  ]
+}
+
 module "ingestion_extract" {
   count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
   source = "../../modules/lambda_function"
@@ -388,19 +440,15 @@ module "ingestion_embed" {
   s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
   dynamodb_table_arns = [module.database[0].table_arn]
 
-  bedrock_model_arns = [
-    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0",
-    "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-image-v1",
-  ]
-
   environment = {
-    DYNAMODB_TABLE    = module.database[0].table_name
-    S3_BUCKET         = module.knowledge_storage[0].bucket_name
-    S3_REGION         = var.aws_region
-    EMBED_MODE        = "bedrock"
-    BEDROCK_REGION    = var.aws_region
-    TEXT_EMBED_MODEL  = "amazon.titan-embed-text-v2:0"
-    IMAGE_EMBED_MODEL = "amazon.titan-embed-image-v1"
+    DYNAMODB_TABLE          = module.database[0].table_name
+    S3_BUCKET               = module.knowledge_storage[0].bucket_name
+    S3_REGION               = var.aws_region
+    EMBED_MODE              = "voyage"
+    VOYAGE_API_KEY          = var.voyage_api_key
+    VOYAGE_API_BASE_URL     = var.voyage_api_base_url
+    VOYAGE_TEXT_MODEL       = var.voyage_text_model
+    VOYAGE_MULTIMODAL_MODEL = var.voyage_multimodal_model
   }
 
   depends_on = [module.knowledge_storage, module.database]
@@ -426,15 +474,16 @@ module "ingestion_index" {
   dynamodb_table_arns   = [module.database[0].table_arn]
 
   environment = {
-    DYNAMODB_TABLE    = module.database[0].table_name
-    S3_BUCKET         = module.knowledge_storage[0].bucket_name
-    S3_REGION         = var.aws_region
-    VECTOR_STORE      = "s3vectors"
-    S3_VECTOR_BUCKET  = module.vectors[0].vector_bucket_name
-    EMBED_MODE        = "bedrock"
-    BEDROCK_REGION    = var.aws_region
-    TEXT_EMBED_MODEL  = "amazon.titan-embed-text-v2:0"
-    IMAGE_EMBED_MODEL = "amazon.titan-embed-image-v1"
+    DYNAMODB_TABLE          = module.database[0].table_name
+    S3_BUCKET               = module.knowledge_storage[0].bucket_name
+    S3_REGION               = var.aws_region
+    VECTOR_STORE            = "s3vectors"
+    S3_VECTOR_BUCKET        = module.vectors[0].vector_bucket_name
+    EMBED_MODE              = "voyage"
+    VOYAGE_API_KEY          = var.voyage_api_key
+    VOYAGE_API_BASE_URL     = var.voyage_api_base_url
+    VOYAGE_TEXT_MODEL       = var.voyage_text_model
+    VOYAGE_MULTIMODAL_MODEL = var.voyage_multimodal_model
   }
 
   depends_on = [
@@ -535,4 +584,75 @@ module "ingestion_dispatcher" {
   }
 
   depends_on = [module.ingestion]
+}
+
+# --- AgentCore agent runtime (Strands worker) + streaming proxy --------------
+
+module "agent_runtime" {
+  count  = var.enable_backend_lambdas && var.enable_agent_runtime ? 1 : 0
+  source = "../../modules/agent_runtime"
+
+  name                  = "get1agent-prod-agent-worker"
+  ecr_repository_name   = "get1agent-prod-agent-worker"
+  container_image_uri   = var.agent_worker_image_uri
+  proxy_zip             = local.agent_run_zip
+  python_runtime        = local.backend_python_runtime
+  proxy_timeout_seconds = 900
+
+  dynamodb_table_arns   = [module.database[0].table_arn]
+  s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
+  s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
+  mcp_function_arns = [
+    module.knowledge_mcp[0].function_arn,
+    module.web_search[0].function_arn,
+    module.code_interpreter[0].function_arn,
+    module.mcp_connections[0].function_arn,
+  ]
+
+  jwt_discovery_url    = "https://${var.auth0_domain}/.well-known/openid-configuration"
+  jwt_allowed_audience = [var.auth0_audience]
+  allowed_origins      = var.agent_run_allowed_origins
+
+  runtime_environment = {
+    OPENCODE_API_KEY              = var.opencode_api_key
+    OPENCODE_BASE_URL             = var.opencode_base_url
+    DYNAMODB_TABLE                = module.database[0].table_name
+    S3_BUCKET                     = module.knowledge_storage[0].bucket_name
+    S3_REGION                     = var.aws_region
+    VECTOR_STORE                  = "s3vectors"
+    S3_VECTOR_BUCKET              = module.vectors[0].vector_bucket_name
+    EMBED_MODE                    = "voyage"
+    VOYAGE_API_KEY                = var.voyage_api_key
+    VOYAGE_API_BASE_URL           = var.voyage_api_base_url
+    VOYAGE_TEXT_MODEL             = var.voyage_text_model
+    VOYAGE_MULTIMODAL_MODEL       = var.voyage_multimodal_model
+    KNOWLEDGE_MCP_FUNCTION        = module.knowledge_mcp[0].function_name
+    WEB_SEARCH_MCP_FUNCTION       = module.web_search[0].function_name
+    CODE_INTERPRETER_MCP_FUNCTION = module.code_interpreter[0].function_name
+    REMOTE_MCP_FUNCTION           = module.mcp_connections[0].function_name
+    AGENT_SESSION_PREFIX          = "agent-sessions/"
+    AGENT_MAX_TURNS               = "40"
+    AWS_REGION                    = var.aws_region
+    AWS_DEFAULT_REGION            = var.aws_region
+  }
+
+  depends_on = [
+    module.database,
+    module.knowledge_storage,
+    module.vectors,
+    module.knowledge_mcp,
+    module.web_search,
+    module.code_interpreter,
+    module.mcp_connections,
+  ]
+}
+
+output "agent_run_function_url" {
+  value       = var.enable_backend_lambdas && var.enable_agent_runtime ? module.agent_runtime[0].proxy_function_url : ""
+  description = "Public Function URL the SPA streams agent runs through"
+}
+
+output "agent_runtime_arn" {
+  value       = var.enable_backend_lambdas && var.enable_agent_runtime ? module.agent_runtime[0].agent_runtime_arn : ""
+  description = "AgentCore runtime ARN"
 }

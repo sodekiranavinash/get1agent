@@ -116,6 +116,12 @@ variable "dynamodb_table_arns" {
   description = "DynamoDB table ARNs this Lambda may read/write"
 }
 
+variable "kms_key_arns" {
+  type        = list(string)
+  default     = []
+  description = "KMS key ARNs this Lambda may encrypt/decrypt with"
+}
+
 variable "event_source_queue_arn" {
   type        = string
   default     = ""

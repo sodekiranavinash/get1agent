@@ -1,0 +1,49 @@
+{
+  "skills": [
+    {
+      "id": "pdf",
+      "name": "pdf",
+      "description": "Read, extract text/tables, merge, split, rotate, watermark, fill forms and create PDFs.",
+      "author": "anthropic",
+      "kind": "tool",
+      "sourceUrl": "https://github.com/anthropics/skills/tree/main/skills/pdf",
+      "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/pdf/SKILL.md"
+    },
+    {
+      "id": "docx",
+      "name": "docx",
+      "description": "Create, read and edit Word documents with tracked changes, comments and formatting.",
+      "author": "anthropic",
+      "kind": "tool",
+      "sourceUrl": "https://github.com/anthropics/skills/tree/main/skills/docx",
+      "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/docx/SKILL.md"
+    },
+    {
+      "id": "xlsx",
+      "name": "xlsx",
+      "description": "Create, read and analyze Excel spreadsheets, formulas and charts.",
+      "author": "anthropic",
+      "kind": "tool",
+      "sourceUrl": "https://github.com/anthropics/skills/tree/main/skills/xlsx",
+      "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/xlsx/SKILL.md"
+    },
+    {
+      "id": "pptx",
+      "name": "pptx",
+      "description": "Create and edit PowerPoint presentations with layouts, notes and speaker decks.",
+      "author": "anthropic",
+      "kind": "tool",
+      "sourceUrl": "https://github.com/anthropics/skills/tree/main/skills/pptx",
+      "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/pptx/SKILL.md"
+    },
+    {
+      "id": "canvas-design",
+      "name": "canvas-design",
+      "description": "Create original visual art and design pieces as .png or .pdf with a design philosophy.",
+      "author": "anthropic",
+      "kind": "tool",
+      "sourceUrl": "https://github.com/anthropics/skills/tree/main/skills/canvas-design",
+      "rawUrl": "https://raw.githubusercontent.com/anthropics/skills/main/skills/canvas-design/SKILL.md"
+    }
+  ]
+}

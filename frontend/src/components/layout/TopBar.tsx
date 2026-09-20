@@ -34,7 +34,7 @@ const iconButton =
 /** Slim global bar: command palette, theme, help, notifications, account. */
 export function TopBar({ extraLinks, settingsPath = '/settings' }: TopBarProps) {
   return (
-    <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-canvas/85 px-4 backdrop-blur-md lg:px-6">
+    <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-canvas/85 px-4 backdrop-blur-md lg:px-6">
       <CommandPalette extraLinks={extraLinks} />
 
       <div className="flex items-center gap-1.5">

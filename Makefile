@@ -21,8 +21,8 @@ RERANKER_IMAGE ?= ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
 RERANKER_PORT ?= 8080
 export RERANKER_IMAGE RERANKER_PORT
 
-.PHONY: help ui test test-unit floci floci-env floci-artifacts floci-build floci-up floci-wait \
-	floci-embed floci-rerank floci-reload floci-down floci-logs
+.PHONY: help ui agent test test-unit floci floci-env floci-artifacts floci-build floci-up floci-wait \
+	floci-embed floci-rerank floci-reload floci-down floci-logs floci-oauth-proxy
 
 help:
 	@echo "get1agent local dev (Floci + DynamoDB Local)"
@@ -31,6 +31,7 @@ help:
 	@echo "                        provision S3/SQS/EventBridge/Step Functions/Lambda"
 	@echo "                        + API Gateway, and print the local API URL"
 	@echo "  make ui               Start the React app (localhost:5173)"
+	@echo "  make agent            Run the agent runtime locally (:8080)"
 	@echo "  make test             Run backend integration tests (no Docker; moto)"
 	@echo ""
 	@echo "  Floci stack:"
@@ -45,6 +46,12 @@ help:
 
 ui:
 	cd frontend && npm run dev
+
+# Run the AgentCore agent runtime locally on :8080 against the local Floci stack.
+# Installs the venv on first run; loads the repo-root .env for the OpenCode Go key.
+agent:
+	@test -x backend/agents/.venv/bin/python || $(MAKE) -C backend/agents install
+	$(MAKE) -C backend/agents run
 
 # Backend integration tests: moto-backed DynamoDB + in-memory S3. No Docker/AWS.
 test:
@@ -70,6 +77,7 @@ floci-build:
 	$(MAKE) -C backend/services/mcp-tester package
 	$(MAKE) -C backend/services/web-search package
 	$(MAKE) -C backend/services/code-interpreter package
+	$(MAKE) -C backend/services/mcp-connections package
 	$(MAKE) -C backend/services/ingestion-dispatcher package
 	$(MAKE) -C backend/services/ingestion-extract package
 	$(MAKE) -C backend/services/ingestion-embed package
@@ -88,6 +96,7 @@ floci-artifacts:
 		backend/services/mcp-tester/dist/function.zip \
 		backend/services/web-search/dist/function.zip \
 		backend/services/code-interpreter/dist/function.zip \
+		backend/services/mcp-connections/dist/function.zip \
 		backend/services/ingestion-dispatcher/dist/function.zip \
 		backend/services/ingestion-extract/dist/function.zip \
 		backend/services/ingestion-embed/dist/function.zip \
@@ -115,23 +124,41 @@ floci-reload: floci-env
 	$(MAKE) floci-build
 	$(COMPOSE) exec -T floci python3 /etc/floci/init/ready.d/10-provision.py
 
-# Pull the local embedding model (real vectors for ingestion).
+# Pull the local embedding model (only needed for EMBED_MODE=local).
 floci-embed: floci-env
-	@echo "waiting for ollama..."
-	@until $(COMPOSE) exec -T ollama ollama list >/dev/null 2>&1; do sleep 2; done
-	$(COMPOSE) exec -T ollama ollama pull $(LOCAL_EMBED_MODEL)
+	@mode=$$(grep -E '^EMBED_MODE=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
+	if [ "$${mode:-voyage}" != "local" ]; then \
+		echo "EMBED_MODE=$${mode:-voyage}; skipping Ollama (not needed)."; \
+	else \
+		$(COMPOSE) --profile local-embeddings up -d ollama; \
+		echo "waiting for ollama..."; \
+		until $(COMPOSE) --profile local-embeddings exec -T ollama ollama list >/dev/null 2>&1; do sleep 2; done; \
+		$(COMPOSE) --profile local-embeddings exec -T ollama ollama pull $(LOCAL_EMBED_MODEL); \
+	fi
 
-# Wait for the local reranker to download its model and pass /health.
+# Wait for the local reranker (only needed for RERANK_MODE=local).
 floci-rerank: floci-env
-	@echo "waiting for reranker (first run downloads the model)..."
-	@until curl -fsS "http://localhost:$(RERANKER_PORT)/health" >/dev/null 2>&1; do sleep 3; done
-	@echo "reranker ready on http://localhost:$(RERANKER_PORT)"
+	@mode=$$(grep -E '^RERANK_MODE=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
+	if [ "$${mode:-voyage}" != "local" ]; then \
+		echo "RERANK_MODE=$${mode:-voyage}; skipping local reranker (not needed)."; \
+	else \
+		$(COMPOSE) --profile local-rerank up -d reranker; \
+		echo "waiting for reranker (first run downloads the model)..."; \
+		until curl -fsS "http://localhost:$(RERANKER_PORT)/health" >/dev/null 2>&1; do sleep 3; done; \
+		echo "reranker ready on http://localhost:$(RERANKER_PORT)"; \
+	fi
 
 floci-down: floci-env
 	$(COMPOSE) down
 
 floci-logs: floci-env
 	$(COMPOSE) logs -f floci
+
+# Loopback OAuth callback forwarder: providers reject plaintext HTTP redirects
+# unless they are loopback, and Floci only serves the API on its own host. Run
+# this and set MCP_OAUTH_REDIRECT_URI=http://127.0.0.1:8765/v1/mcp/oauth/callback.
+floci-oauth-proxy:
+	python3 infra/local/floci/oauth-loopback.py --port $${OAUTH_PROXY_PORT:-8765}
 
 # One command: build (if needed), start, provision, print the API URL.
 floci: floci-env

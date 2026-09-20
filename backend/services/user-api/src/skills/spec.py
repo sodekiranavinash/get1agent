@@ -22,17 +22,19 @@ MAX_SKILL_CONTENT_BYTES = 100 * 1024  # 100 KB of markdown body
 MAX_SKILLS_PER_USER = 50
 MAX_ALLOWED_TOOLS = 20
 
-# Built-in tools every user can grant. ``code-interpreter`` and ``web-search``
-# are the two default MCP servers. Knowledge-base tools are internal and are
-# intentionally never surfaced here.
+# Built-in MCP servers every user can grant to a skill. ``code-interpreter``
+# and ``web-search`` are the two default servers. Knowledge-base tools are
+# internal and are intentionally never surfaced here.
 DEFAULT_TOOLS: list[dict[str, str]] = [
     {
         "name": "code-interpreter",
+        "label": "Code Interpreter",
         "description": "Run Python in a sandbox for data analysis and file processing.",
         "source": "builtin",
     },
     {
         "name": "web-search",
+        "label": "Web Search",
         "description": "Search the web for current information and citations.",
         "source": "builtin",
     },

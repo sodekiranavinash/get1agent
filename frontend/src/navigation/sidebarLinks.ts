@@ -10,6 +10,7 @@ import {
   FlaskConical,
   Gauge,
   GitBranch,
+  HardDrive,
   LayoutDashboard,
   MessageSquare,
   Plug,
@@ -40,8 +41,9 @@ export const sidebarSections: Record<string, string> = {
   // Empty label = pinned at the top with no section header.
   home: '',
   build: 'Build',
-  library: 'Library',
-  evaluate: 'Evaluate',
+  resources: 'Resources',
+  marketplace: 'Marketplace',
+  labs: 'Labs',
   manage: 'Manage',
 }
 
@@ -53,14 +55,7 @@ export const sidebarLinks: SidebarLink[] = [
     section: 'home',
   },
   { to: '/chat', label: 'Chat', icon: MessageSquare, section: 'home' },
-  {
-    to: '/scheduled-jobs',
-    label: 'Schedules',
-    tooltip: 'Scheduled Jobs',
-    icon: CalendarClock,
-    section: 'home',
-    badge: '3',
-  },
+  { to: '/storage', label: 'Storage', icon: HardDrive, section: 'home' },
 
   {
     to: '/agent-builder',
@@ -75,41 +70,50 @@ export const sidebarLinks: SidebarLink[] = [
     section: 'build',
   },
   {
+    to: '/scheduled-jobs',
+    label: 'Schedules',
+    tooltip: 'Scheduled Jobs',
+    icon: CalendarClock,
+    section: 'build',
+    badge: '3',
+  },
+
+  {
     to: '/knowledge-bases',
     label: 'Knowledge',
     icon: FileStack,
-    section: 'build',
+    section: 'resources',
   },
   {
     to: '/agent-skills',
     label: 'Agent skills',
     icon: Sparkles,
-    section: 'build',
+    section: 'resources',
   },
-  { to: '/tools', label: 'MCP Tools', icon: Plug, section: 'build' },
+  { to: '/tools', label: 'MCP Tools', icon: Plug, section: 'resources' },
 
-  { to: '/agent-store', label: 'Agents', icon: BookOpen, section: 'library' },
+  { to: '/agent-store', label: 'Agents', icon: BookOpen, section: 'marketplace' },
   {
     to: '/workflow-store',
     label: 'Workflows',
     icon: GitBranch,
-    section: 'library',
+    section: 'marketplace',
   },
 
   {
     to: '/experiments',
-    label: 'Experiments',
+    label: 'Playground',
     icon: FlaskConical,
-    section: 'evaluate',
+    section: 'labs',
   },
   {
     to: '/evaluations',
     label: 'Evaluations',
     icon: ClipboardCheck,
-    section: 'evaluate',
+    section: 'labs',
   },
-  { to: '/metrics', label: 'Metrics', icon: Gauge, section: 'evaluate' },
-  { to: '/insights', label: 'Insights', icon: BarChart3, section: 'evaluate' },
+  { to: '/metrics', label: 'Metrics', icon: Gauge, section: 'labs' },
+  { to: '/insights', label: 'Traces', icon: BarChart3, section: 'labs' },
 
   { to: '/usage', label: 'Usage', icon: CreditCard, section: 'manage' },
 ]
@@ -117,7 +121,8 @@ export const sidebarLinks: SidebarLink[] = [
 export const sectionOrder: string[] = [
   'home',
   'build',
-  'library',
-  'evaluate',
+  'resources',
+  'marketplace',
+  'labs',
   'manage',
 ]

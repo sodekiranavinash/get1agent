@@ -1,0 +1,88 @@
+{
+  "servers": [
+    {
+      "id": "github",
+      "name": "GitHub",
+      "description": "Repositories, issues, pull requests, code search and Actions.",
+      "category": "Developer",
+      "source": "public",
+      "docsUrl": "https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md",
+      "serverUrl": "https://api.githubcopilot.com/mcp/",
+      "transport": "streamable-http",
+      "auth": {
+        "type": "oauth",
+        "registration": "pre",
+        "clientIdEnv": "GITHUB_MCP_CLIENT_ID",
+        "clientSecretEnv": "GITHUB_MCP_CLIENT_SECRET",
+        "issuer": "https://github.com/login/oauth",
+        "authorizationEndpoint": "https://github.com/login/oauth/authorize",
+        "tokenEndpoint": "https://github.com/login/oauth/access_token",
+        "resource": "https://api.githubcopilot.com/mcp",
+        "scopes": [
+          "repo",
+          "read:org",
+          "read:user",
+          "user:email",
+          "read:packages",
+          "read:project",
+          "gist",
+          "notifications",
+          "workflow"
+        ]
+      }
+    },
+    {
+      "id": "deepwiki",
+      "name": "DeepWiki",
+      "description": "Ask questions about any public GitHub repository. DeepWiki reads the repo's docs, structure and code and answers in plain language — useful for understanding unfamiliar projects. Free and needs no sign-in.",
+      "category": "Developer",
+      "source": "public",
+      "docsUrl": "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+      "serverUrl": "https://mcp.deepwiki.com/mcp",
+      "transport": "streamable-http",
+      "auth": {
+        "type": "none"
+      }
+    },
+    {
+      "id": "microsoft-learn",
+      "name": "Microsoft Learn",
+      "description": "Search and read Microsoft's official documentation — Azure, .NET, Microsoft 365 and more — plus verified code samples. Free and needs no sign-in.",
+      "category": "Developer",
+      "source": "public",
+      "docsUrl": "https://github.com/MicrosoftDocs/mcp",
+      "serverUrl": "https://learn.microsoft.com/api/mcp",
+      "transport": "streamable-http",
+      "auth": {
+        "type": "none"
+      }
+    },
+    {
+      "id": "cloudflare-docs",
+      "name": "Cloudflare Docs",
+      "description": "Search Cloudflare's developer documentation — Workers, Pages, R2, D1, Zero Trust and more. Free and needs no sign-in.",
+      "category": "Developer",
+      "source": "public",
+      "docsUrl": "https://developers.cloudflare.com/agents/model-context-protocol/",
+      "serverUrl": "https://docs.mcp.cloudflare.com/mcp",
+      "transport": "streamable-http",
+      "auth": {
+        "type": "none"
+      }
+    },
+    {
+      "id": "linear",
+      "name": "Linear",
+      "description": "Issues, projects, cycles and comments for product teams. Sign in with your Linear account.",
+      "category": "Productivity",
+      "source": "public",
+      "docsUrl": "https://linear.app/docs/mcp",
+      "serverUrl": "https://mcp.linear.app/mcp",
+      "transport": "streamable-http",
+      "auth": {
+        "type": "oauth",
+        "registration": "dcr"
+      }
+    }
+  ]
+}

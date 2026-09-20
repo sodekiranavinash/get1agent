@@ -96,6 +96,22 @@
       ]
     },
     {
+      "name": "mcp-connections",
+      "group": "mcp-tools",
+      "dir": "backend/services/mcp-connections",
+      "function_name": "get1agent-prod-mcp-connections",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data"
+      ],
+      "layers": [
+        "base",
+        "genai"
+      ]
+    },
+    {
       "name": "ingestion-dispatcher",
       "group": "ingestion-apis",
       "dir": "backend/services/ingestion-dispatcher",

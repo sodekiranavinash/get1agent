@@ -9,6 +9,7 @@ type DialogProps = {
   onOpenChange: (open: boolean) => void
   title: string
   description?: string
+  icon?: ReactNode
   size?: DialogSize
   banner?: ReactNode
   contentClassName?: string
@@ -28,6 +29,7 @@ export function Dialog({
   onOpenChange,
   title,
   description,
+  icon,
   size = 'lg',
   banner,
   contentClassName = '',
@@ -43,15 +45,18 @@ export function Dialog({
             className={`dialog-content relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-panel focus:outline-none ${sizeStyles[size]} ${contentClassName}`}
           >
           <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-3.5">
-            <div className="min-w-0">
-              <RadixDialog.Title className="text-sm font-semibold tracking-tight text-foreground">
-                {title}
-              </RadixDialog.Title>
-              {description ? (
-                <RadixDialog.Description className="mt-0.5 text-xs leading-relaxed text-muted">
-                  {description}
-                </RadixDialog.Description>
-              ) : null}
+            <div className="flex min-w-0 items-start gap-3">
+              {icon ? <span className="mt-0.5 shrink-0">{icon}</span> : null}
+              <div className="min-w-0">
+                <RadixDialog.Title className="text-sm font-semibold tracking-tight text-foreground">
+                  {title}
+                </RadixDialog.Title>
+                {description ? (
+                  <RadixDialog.Description className="mt-0.5 text-xs leading-relaxed text-muted">
+                    {description}
+                  </RadixDialog.Description>
+                ) : null}
+              </div>
             </div>
             <RadixDialog.Close
               className="-mr-1 rounded-md p-1.5 text-subtle transition-colors hover:bg-raised hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"

@@ -29,6 +29,8 @@ TARGETS=()
   TARGETS+=(-target='module.mcp_tester[0]')
   TARGETS+=(-target='module.code_interpreter[0]')
   TARGETS+=(-target='module.web_search[0]')
+  TARGETS+=(-target='module.mcp_connections_kms[0]')
+  TARGETS+=(-target='module.mcp_connections[0]')
 }
 
 need_backend_artifacts=false
@@ -60,7 +62,10 @@ if [[ "$need_backend_artifacts" == true ]]; then
   if [[ ! -s "$ROOT/backend/services/web-search/dist/function.zip" ]]; then
     make -C "$ROOT/backend/services/web-search" package
   fi
+  if [[ ! -s "$ROOT/backend/services/mcp-connections/dist/function.zip" ]]; then
+    make -C "$ROOT/backend/services/mcp-connections" package
+  fi
 fi
 
-export PROD_TARGETS="${TARGETS[*]}"
+export PROD_TARGETS="${TARGETS[*]:-}"
 bash "$ROOT/infra/aws/run-terraform.sh" prod apply

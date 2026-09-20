@@ -41,6 +41,7 @@ resource "aws_lambda_function" "this" {
     aws_iam_role_policy.bedrock_rerank,
     aws_iam_role_policy.bedrock_agentcore,
     aws_iam_role_policy.dynamodb_access,
+    aws_iam_role_policy.kms_access,
     aws_iam_role_policy.lambda_invoke,
     aws_iam_role_policy.xray,
   ]

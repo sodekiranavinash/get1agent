@@ -4,7 +4,7 @@ import { usePageQuery } from '../hooks/usePageQuery'
 import { formatBytes, formatRelative } from './knowledgeBases'
 
 export const AGENT_SKILLS_QUERY_KEY = 'agent-skills'
-export const AGENT_TOOLS_QUERY_KEY = 'agent-skills-tools'
+export const AGENT_MCP_SERVERS_QUERY_KEY = 'agent-skills-mcp-servers'
 
 // Keep these in sync with backend/services/user-api/user_api/skills/spec.py.
 export const MAX_SKILLS_PER_USER = 50
@@ -16,7 +16,7 @@ export const SKILL_NAME_MAX = 64
 
 export { formatBytes, formatRelative }
 
-export type SkillSource = 'write' | 'upload'
+export type SkillSource = 'write' | 'upload' | 'registry'
 
 export type AgentSkill = {
   id: string
@@ -34,9 +34,9 @@ export type AgentSkillDetail = AgentSkill & {
   markdown: string
 }
 
-export type AgentTool = {
+export type AgentMcpServer = {
+  id: string
   name: string
-  description: string
   source: string
 }
 
@@ -45,6 +45,65 @@ export type ParsedSkill = {
   description: string | null
   allowedTools: string[]
   content: string
+}
+
+export type SkillKind = 'prompt' | 'tool' | 'unknown'
+
+export type SkillRegistryItem = {
+  id: string
+  name: string
+  namespace: string | null
+  description: string
+  author: string | null
+  stars: number
+  installs: number
+  sourceUrl: string | null
+  rawUrl: string
+  kind?: SkillKind
+}
+
+export type SkillRegistryResult = {
+  skills: SkillRegistryItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type SkillCatalogItem = {
+  id: string
+  name: string
+  description: string
+  author: string
+  owner: string
+  kind: SkillKind
+  sourceUrl: string | null
+  rawUrl: string
+}
+
+export type SkillImportPreview = {
+  rawUrl: string
+  name: string | null
+  description: string | null
+  content: string
+  allowedTools: string[]
+  kind: SkillKind
+  suggestedServers: string[]
+  referencedFiles: string[]
+  sizeBytes: number
+}
+
+export type SkillRepoSkill = {
+  name: string
+  path: string
+  rawUrl: string
+  sourceUrl: string
+}
+
+export type SkillRepoResult = {
+  owner: string
+  repo: string
+  ref: string
+  skills: SkillRepoSkill[]
 }
 
 export type AgentSkillUsage = {
@@ -169,6 +228,50 @@ export async function parseSkillMarkdown(
   return api.post<ParsedSkill>('/v1/agent-skills/parse', { markdown })
 }
 
+/** Curated One Agent Marketplace skills (owner: 1agent). */
+export async function fetchSkillCatalog(api: ApiClient): Promise<SkillCatalogItem[]> {
+  const response = await api.get<{ skills: SkillCatalogItem[] }>('/v1/agent-skills/catalog')
+  return response.skills
+}
+
+/** Search the live skills registry (claude-plugins.dev), optionally by kind. */
+export async function searchSkillRegistry(
+  api: ApiClient,
+  params: { search?: string; offset?: number; limit?: number; kind?: 'prompt' | 'tool' } = {},
+): Promise<SkillRegistryResult> {
+  const query = new URLSearchParams()
+  if (params.search) query.set('search', params.search)
+  if (params.offset) query.set('offset', String(params.offset))
+  if (params.limit) query.set('limit', String(params.limit))
+  if (params.kind) query.set('kind', params.kind)
+  const suffix = query.toString()
+  return api.get<SkillRegistryResult>(`/v1/agent-skills/registry${suffix ? `?${suffix}` : ''}`)
+}
+
+/** Fetch and parse a raw SKILL.md for preview (no persistence). */
+export async function previewSkillImport(
+  api: ApiClient,
+  rawUrl: string,
+): Promise<SkillImportPreview> {
+  return api.post<SkillImportPreview>('/v1/agent-skills/import/preview', { rawUrl })
+}
+
+/** Import a skill, granting the MCP servers the user selected. */
+export async function importAgentSkill(
+  api: ApiClient,
+  payload: { rawUrl: string; name?: string; description?: string; allowedTools: string[] },
+): Promise<AgentSkillDetail> {
+  return api.post<AgentSkillDetail>('/v1/agent-skills/import', payload)
+}
+
+/** List the SKILL.md files in a GitHub repo (like `npx skills add owner/repo`). */
+export async function resolveSkillRepo(
+  api: ApiClient,
+  repo: string,
+): Promise<SkillRepoResult> {
+  return api.post<SkillRepoResult>('/v1/agent-skills/resolve-repo', { repo })
+}
+
 // --- hooks -------------------------------------------------------------------
 
 export function useAgentSkills() {
@@ -185,12 +288,14 @@ export function invalidateAgentSkills(): void {
   invalidateQuery(AGENT_SKILLS_QUERY_KEY)
 }
 
-/** Tools the skill editor may grant (built-ins now; user MCP tools later). */
-export function useAgentTools(): { tools: AgentTool[]; refetch: () => void } {
+/** MCP servers a skill editor may grant (built-ins + the user's connections). */
+export function useMcpServers(): { servers: AgentMcpServer[]; refetch: () => void } {
   const api = useApiClient()
-  const query = useQuery(AGENT_TOOLS_QUERY_KEY, async () => {
-    const response = await api.get<{ tools: AgentTool[] }>('/v1/agent-skills/tools')
-    return response.tools
+  const query = useQuery(AGENT_MCP_SERVERS_QUERY_KEY, async () => {
+    const response = await api.get<{ servers: AgentMcpServer[] }>(
+      '/v1/agent-skills/mcp-servers',
+    )
+    return response.servers
   })
-  return { tools: query.data ?? [], refetch: query.refetch }
+  return { servers: query.data ?? [], refetch: query.refetch }
 }

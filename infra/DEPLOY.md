@@ -2,7 +2,7 @@
 
 **API Gateway HTTP API** handles `api.get1agent.com` with Auth0 JWT, CORS, and
 throttling. The backend is serverless: **DynamoDB** (operational data), **S3**
-(documents + keyword index), **S3 Vectors** (embeddings) and **Bedrock**. There
+(documents + keyword index), **S3 Vectors** (embeddings) and **Voyage AI**. There
 is no VPC and no RDS.
 
 | Stack | Region | Resources |
@@ -72,7 +72,7 @@ Browser → Cloudflare → API Gateway (JWT) → Lambda functions
                                           ├─ DynamoDB (single table + GSIs)
                                           ├─ S3 (raw/derived/index artifacts)
                                           ├─ S3 Vectors (per-user embedding index)
-                                          └─ Bedrock (embeddings + optional rerank)
+                                          └─ Voyage AI (embeddings)
 ```
 
 | Component | Role |
@@ -81,7 +81,7 @@ Browser → Cloudflare → API Gateway (JWT) → Lambda functions
 | **DynamoDB** | Single table `get1agent` (users, KBs, documents, tags, skills, events, quotas, sessions) |
 | **S3** | Document uploads, derived artifacts, keyword index, parents, manifests |
 | **S3 Vectors** | One vector index per user (`idx-<userId>`) |
-| **Bedrock** | Titan Text V2 embeddings; opt-in `amazon.rerank-v1:0` rerank (us-west-2) |
+| **Voyage AI** | Text + multimodal embeddings and opt-in rerank (`voyage-4-large` / `voyage-multimodal-3.5` / `rerank-3`); key via `TF_VAR_voyage_api_key` |
 
 ---
 

@@ -184,14 +184,17 @@ sparse GSIs. **No vectors, chunks, or postings in DynamoDB.**
 | Tag | `DOC#<docId>` | `TAG#<lowerName>` | `g2pk=USER#<userId>, g2sk=TAG#<lowerName>#<docId>` | name, description |
 | Ingestion event | `DOC#<docId>` | `EVENT#<ts>#<seq>` | `g3pk=USER#<userId>#EVENT, g3sk=<ts>#<docId>` | stage, status, message, details, TTL |
 | Skill | `USER#<userId>` | `SKILL#<lowerName>` | `g1pk=SKILL#<skillId>, g1sk=#META`; `g2pk=USER#<userId>, g2sk=SKILL#<name>` | skillId, name, description, allowedTools, content, source, timestamps |
+| Agent | `USER#<userId>` | `AGENT#<lowerName>` | `g1pk=AGENT#<agentId>, g1sk=#META`; `g2pk=USER#<userId>, g2sk=AGENT#<updatedAt>#<name>`; published only: `g3pk=AGENTLIB#public, g3sk=<publishedAt>#<agentId>` | agentId, name, description, status (draft/verified/published), visibility, source, version, config (prompt, model, reasoning, outputFormat, knowledgeBaseIds, skillIds, servers, schedule, graph), nodeCount, verifiedAt, lastRunAt, publishedAt, installCount, forkedFrom, timestamps |
+| Storage file | `USER#<userId>` | `STORAGE#<fileId>` | — | fileId, fileName, s3Key, contentType, sizeBytes, status, timestamps |
 | Session (code-interp) | `USER#<userId>` | `CONV#<conversationId>` | — | sessionId, expiresAt (TTL), createdAt, lastUsedAt |
 
 **GSIs (all sparse):**
-- **GSI1 "byId"** — `gsi1pk`, `gsi1sk`: resolve KB/document/skill by UUID.
+- **GSI1 "byId"** — `gsi1pk`, `gsi1sk`: resolve KB/document/skill/agent by UUID.
 - **GSI2 "byUser/type"** — `gsi2pk=USER#<userId>`, `gsi2sk=<TYPE>#…`: list KBs,
-  skills, tags, documents by user (prefix queries).
-- **GSI3 "byStatus/time"** — `gsi3pk`: watchdog (`DOCSTATUS#processing`) and
-  recent events (`USER#<userId>#EVENT`).
+  skills, agents, tags, documents by user (prefix queries).
+- **GSI3 "byStatus/time"** — `gsi3pk`: watchdog (`DOCSTATUS#processing`), recent
+  events (`USER#<userId>#EVENT`) and the public agent library
+  (`AGENTLIB#public`, `gsi3sk=<publishedAt>#<agentId>`).
 
 **Table config:** on-demand (`PAY_PER_REQUEST`); TTL attribute `expiresAt`.
 
@@ -354,7 +357,8 @@ Every existing route/method/status/response is preserved:
 - `POST /v1/knowledge-bases/{id}/documents/inline`
 - `POST /v1/knowledge-bases/{id}/documents/{docId}/complete`
 - `DELETE /v1/knowledge-bases/{id}/documents/{docId}`
-- `GET/POST /v1/agent-skills`, `GET /v1/agent-skills/tools`, `POST /v1/agent-skills/parse`
+- `GET/POST /v1/agent-skills`, `GET /v1/agent-skills/mcp-servers`, `POST /v1/agent-skills/parse`
+- `GET /v1/agent-skills/catalog`, `GET /v1/agent-skills/registry`, `POST /v1/agent-skills/resolve-repo`, `POST /v1/agent-skills/import/preview`, `POST /v1/agent-skills/import`
 - `GET/PUT/DELETE /v1/agent-skills/{id}`
 - `GET/POST /v1/user/settings`
 - `POST /mcp`, `POST /mcp/web-search`, `POST /mcp/code-interpreter`

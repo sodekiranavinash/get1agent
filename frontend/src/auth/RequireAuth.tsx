@@ -11,7 +11,10 @@ export function RequireAuth() {
   }
 
   if (isLoading) {
-    return <AuthStatusScreen>Loading…</AuthStatusScreen>
+    // Render a bare canvas while the Auth0 SDK initializes — no loading card.
+    // Once auth resolves, the page mounts directly and shows its own data
+    // skeleton if the API is slow.
+    return <main className="min-h-screen bg-canvas" />
   }
 
   if (!isAuthenticated) {

@@ -9,6 +9,16 @@ DEFAULT_RERANK_MODEL_ARN = os.environ.get(
     "RERANK_MODEL_ARN",
     "arn:aws:bedrock:us-west-2::foundation-model/amazon.rerank-v1:0",
 )
+# Voyage AI reranker (https://docs.voyageai.com/reference/reranker-api).
+DEFAULT_VOYAGE_RERANK_MODEL = os.environ.get(
+    "VOYAGE_RERANK_MODEL", "rerank-3"
+)
+DEFAULT_VOYAGE_API_BASE_URL = os.environ.get(
+    "VOYAGE_API_BASE_URL", "https://api.voyageai.com/v1"
+)
+VOYAGE_RERANK_TIMEOUT = int(
+    os.environ.get("VOYAGE_RERANK_TIMEOUT_SECONDS", "60")
+)
 # Local cross-encoder served by HuggingFace Text Embeddings Inference (TEI).
 DEFAULT_LOCAL_RERANK_URL = os.environ.get(
     "LOCAL_RERANK_URL", "http://reranker:80/rerank"
@@ -19,8 +29,21 @@ LOCAL_RERANK_BATCH_SIZE = int(os.environ.get("LOCAL_RERANK_BATCH_SIZE", "32"))
 
 
 def rerank_mode() -> str:
-    """``bedrock`` in production, ``local`` (TEI) or ``none`` locally."""
-    return os.environ.get("RERANK_MODE", "none").strip().lower()
+    """``voyage`` (default), ``bedrock``, ``local`` (TEI) or ``none``."""
+    return os.environ.get("RERANK_MODE", "voyage").strip().lower()
+
+
+def _warn(message: str, error: BaseException) -> None:
+    print(
+        json.dumps(
+            {
+                "level": "warning",
+                "message": message,
+                "error": repr(error),
+            }
+        ),
+        flush=True,
+    )
 
 
 def _post_local_rerank(url: str, query: str, texts: list[str]) -> list[dict[str, Any]]:
@@ -114,6 +137,56 @@ def _rerank_bedrock(
     return ranked[:top_k]
 
 
+def _rerank_voyage(
+    query: str, candidates: list[dict[str, Any]], top_k: int
+) -> list[dict[str, Any]]:
+    """Score ``(query, candidate)`` pairs with the Voyage rerank API."""
+    import urllib.error
+    import urllib.request
+
+    api_key = os.environ.get("VOYAGE_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("VOYAGE_API_KEY is not configured")
+
+    payload = json.dumps(
+        {
+            "query": query,
+            "documents": [candidate["content"] for candidate in candidates],
+            "model": DEFAULT_VOYAGE_RERANK_MODEL,
+            "top_k": max(1, min(top_k, len(candidates))),
+            "truncation": True,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{DEFAULT_VOYAGE_API_BASE_URL.rstrip('/')}/rerank",
+        data=payload,
+        headers={
+            "content-type": "application/json",
+            "accept": "application/json",
+            "authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=VOYAGE_RERANK_TIMEOUT
+        ) as response:
+            body = json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read()[:500].decode("utf-8", "replace")
+        raise RuntimeError(f"Voyage rerank returned HTTP {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Could not reach Voyage rerank: {exc.reason}") from exc
+
+    ranked: list[dict[str, Any]] = []
+    for result in body.get("data") or []:
+        index = int(result["index"])
+        candidate = dict(candidates[index])
+        candidate["rerankScore"] = float(result.get("relevance_score", 0.0))
+        ranked.append(candidate)
+    return ranked[:top_k]
+
+
 def rerank_candidates(
     query: str,
     candidates: list[dict[str, Any]],
@@ -123,15 +196,22 @@ def rerank_candidates(
     region: str | None = None,
     url: str | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
-    """Rerank candidates with Bedrock (prod) or a local TEI cross-encoder (dev).
+    """Rerank candidates with Voyage (default), Bedrock or a local TEI cross-encoder.
 
     Returns ``(ranked, applied)``. ``applied`` is ``False`` when reranking is
-    disabled or the local reranker is unreachable, in which case the input order
-    is preserved so a search never fails because of the reranker.
+    disabled or the reranker is unreachable, in which case the input order is
+    preserved so a search never fails because of the reranker.
     """
     mode = rerank_mode()
     if not candidates or mode == "none":
         return candidates[:top_k], False
+
+    if mode == "voyage":
+        try:
+            return _rerank_voyage(query, candidates, top_k), True
+        except Exception as exc:  # noqa: BLE001 - never fail a search on rerank
+            _warn("Voyage reranker unavailable; using RRF order", exc)
+            return candidates[:top_k], False
 
     if mode == "local":
         try:
@@ -145,16 +225,7 @@ def rerank_candidates(
                 True,
             )
         except Exception as exc:  # noqa: BLE001 - never fail a search on rerank
-            print(
-                json.dumps(
-                    {
-                        "level": "warning",
-                        "message": "local reranker unavailable; using RRF order",
-                        "error": repr(exc),
-                    }
-                ),
-                flush=True,
-            )
+            _warn("local reranker unavailable; using RRF order", exc)
             return candidates[:top_k], False
 
     return (

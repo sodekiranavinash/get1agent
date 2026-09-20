@@ -9,8 +9,9 @@ PYTHON_VERSION := 3.14
 LAMBDA_IMAGE := public.ecr.aws/lambda/python:3.14
 
 build: lock
-	rm -rf "$(LAYER_DIR)/dist"
 	mkdir -p "$(DIST)"
+	find "$(DIST)" -mindepth 1 -delete
+	rm -f "$(REQ)" "$(LAYER_DIR)/dist/layer.zip"
 	uv export --project . --no-dev --no-hashes -o "$(REQ)"
 	$(MAKE) install-deps
 	find "$(DIST)" -type d -name __pycache__ -prune -exec rm -rf {} +
@@ -32,10 +33,9 @@ install-deps-docker:
 	docker run --rm --platform linux/arm64 \
 		--user "$$(id -u):$$(id -g)" \
 		--entrypoint /bin/bash \
-		-v "$(REQ):/tmp/requirements.txt:ro" \
-		-v "$(DIST):/out" \
+		-v "$(LAYER_DIR)/dist:/work" \
 		$(LAMBDA_IMAGE) \
-		-c "/var/lang/bin/python$(PYTHON_VERSION) -m pip install --no-cache-dir --no-compile -r /tmp/requirements.txt -t /out"
+		-c "/var/lang/bin/python$(PYTHON_VERSION) -m pip install --no-cache-dir --no-compile -r /work/requirements.txt -t /work/python"
 
 lock:
 	uv lock

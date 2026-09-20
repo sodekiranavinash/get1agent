@@ -109,6 +109,16 @@ jobs:
         run: make package
         working-directory: backend/services/web-search
 
+      - name: Package mcp-connections zip
+        if: inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/services/mcp-connections
+
+      - name: Package agent-run zip
+        if: inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/services/agent-run
+
       - name: Package ingestion-dispatcher zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
@@ -168,6 +178,11 @@ jobs:
           unzip -l backend/services/code-interpreter/dist/function.zip | grep handler.py
           test -s backend/services/web-search/dist/function.zip
           unzip -l backend/services/web-search/dist/function.zip | grep handler.py
+          test -s backend/services/mcp-connections/dist/function.zip
+          unzip -l backend/services/mcp-connections/dist/function.zip | grep handler.py
+          test -s backend/services/agent-run/dist/function.zip
+          unzip -l backend/services/agent-run/dist/function.zip | grep handler.py
+          unzip -l backend/services/agent-run/dist/function.zip | grep 'core/jwt.py'
 
       - name: Terraform validate
         if: inputs.api_gateway || inputs.lambdas
@@ -199,7 +214,25 @@ jobs:
           APPLY_API_GATEWAY: ${{ inputs.api_gateway }}
           APPLY_BACKEND_LAMBDAS: ${{ inputs.lambdas }}
           TF_VAR_exa_api_key: ${{ secrets.EXA_API_KEY }}
+          TF_VAR_voyage_api_key: ${{ secrets.VOYAGE_API_KEY }}
+          TF_VAR_opencode_api_key: ${{ secrets.OPENCODE_API_KEY }}
+          # GitHub forbids secret names starting with GITHUB_, so the repo
+          # secrets are MCP_GITHUB_*; they feed the GITHUB_MCP_* Terraform vars.
+          TF_VAR_GITHUB_MCP_CLIENT_ID: ${{ secrets.MCP_GITHUB_CLIENT_ID }}
+          TF_VAR_GITHUB_MCP_CLIENT_SECRET: ${{ secrets.MCP_GITHUB_CLIENT_SECRET }}
         run: bash infra/aws/apply-prod.sh
+
+      - name: Agent runtime (build + push image, deploy)
+        if: inputs.lambdas
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          IMAGE_TAG: ${{ github.sha }}
+          TF_VAR_exa_api_key: ${{ secrets.EXA_API_KEY }}
+          TF_VAR_voyage_api_key: ${{ secrets.VOYAGE_API_KEY }}
+          TF_VAR_opencode_api_key: ${{ secrets.OPENCODE_API_KEY }}
+          TF_VAR_GITHUB_MCP_CLIENT_ID: ${{ secrets.MCP_GITHUB_CLIENT_ID }}
+          TF_VAR_GITHUB_MCP_CLIENT_SECRET: ${{ secrets.MCP_GITHUB_CLIENT_SECRET }}
+        run: bash infra/aws/deploy-agent-runtime.sh
 
       - name: Print prod outputs
         if: inputs.api_gateway || inputs.lambdas

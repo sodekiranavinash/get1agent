@@ -46,7 +46,7 @@ export function FileDropzone({
     <div
       {...getRootProps()}
       className={`flex cursor-pointer items-center justify-center gap-3 rounded-lg border border-dashed text-center transition-colors ${
-        compact ? 'px-4 py-3' : 'flex-col px-6 py-8'
+        compact ? 'min-h-[200px] flex-col px-6 py-10' : 'min-h-[240px] flex-col px-6 py-12'
       } ${
         isDragActive
           ? 'border-accent bg-accent-soft'
@@ -56,12 +56,12 @@ export function FileDropzone({
       <input {...getInputProps()} />
       <div
         className={`flex shrink-0 items-center justify-center rounded-md border border-border bg-raised text-accent ${
-          compact ? 'h-8 w-8' : 'h-10 w-10'
+          compact ? 'h-11 w-11' : 'h-12 w-12'
         }`}
       >
-        <UploadCloud className={compact ? 'h-4 w-4' : 'h-5 w-5'} strokeWidth={1.5} />
+        <UploadCloud className={compact ? 'h-5 w-5' : 'h-6 w-6'} strokeWidth={1.5} />
       </div>
-      <div className={compact ? 'text-left' : ''}>
+      <div className="max-w-md text-center">
         <p className="text-[13px] font-medium text-foreground">
           {isDragActive ? 'Drop files to add them' : 'Drag & drop files, or click to browse'}
         </p>

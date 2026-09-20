@@ -44,6 +44,13 @@ export function Auth0ProviderWithNavigate({
       authorizationParams={authorizationParams}
       onRedirectCallback={onRedirectCallback}
       skipRedirectCallback={skipRedirectCallback}
+      // Persist tokens across full-page refreshes. The default in-memory
+      // cache is wiped on every reload, forcing a ~1-2s silent-auth round
+      // trip to Auth0 during which the app can only show a blank screen.
+      // With localstorage the SDK restores the session synchronously and
+      // the page mounts immediately (silent auth still runs automatically
+      // once the access token expires).
+      cacheLocation="localstorage"
     >
       {children}
     </Auth0Provider>

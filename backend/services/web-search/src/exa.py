@@ -22,12 +22,13 @@ from typing import Any
 
 DEFAULT_BASE_URL = "https://api.exa.ai"
 DEFAULT_TIMEOUT_SECONDS = 30
-DEFAULT_RESULTS = 10
+DEFAULT_RESULTS = 5
 MAX_RESULTS = 25
 DEFAULT_MAX_AGE_HOURS = 24
-# When the caller asks for no specific content, return highlights plus capped
-# full text. Exa bills `/search` per request, so both cost the same as
-# highlights alone; the cap keeps the agent's token budget bounded.
+# When the caller asks for no specific content, return highlights only (the
+# token-efficient default): a short, query-relevant excerpt per result. Full
+# page text is opt-in via ``text: true`` so a search cannot flood the context.
+DEFAULT_HIGHLIGHTS_MAX_CHARACTERS = 400
 DEFAULT_TEXT_MAX_CHARACTERS = 4000
 SEARCH_PATH = "/search"
 
@@ -106,9 +107,9 @@ def build_contents(params: dict[str, Any]) -> dict[str, Any]:
     )
     include_summary = bool(summary_opt) or bool(summary_query)
 
-    # Default content: when the caller asks for nothing specific, return
-    # highlights plus capped full text. Exa charges per request, so this is the
-    # same price as highlights alone while giving the agent richer context.
+    # Default content: when the caller asks for nothing specific, return capped
+    # highlights only. Full text is opt-in; both cost the same at Exa, so this
+    # keeps the agent's token budget small without losing the relevant excerpt.
     if (
         text_opt is None
         and highlights_opt is None
@@ -119,8 +120,8 @@ def build_contents(params: dict[str, Any]) -> dict[str, Any]:
         and not summary_query
     ):
         include_highlights = True
-        include_text = True
-        text_max = DEFAULT_TEXT_MAX_CHARACTERS
+        include_text = False
+        highlights_max = DEFAULT_HIGHLIGHTS_MAX_CHARACTERS
 
     contents: dict[str, Any] = {}
     if include_text:

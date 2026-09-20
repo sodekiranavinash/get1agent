@@ -9,6 +9,7 @@ export function Toaster(props: ToasterProps) {
     <Sonner
       theme={theme}
       position="bottom-right"
+      closeButton
       className="toaster group"
       toastOptions={{
         classNames: {

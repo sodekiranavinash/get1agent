@@ -11,6 +11,7 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const proxyTarget = env.VITE_API_PROXY_TARGET
+  const agentRunTarget = env.VITE_AGENT_RUN_PROXY_TARGET
 
   return {
     plugins: [react(), tailwindcss()],
@@ -19,12 +20,24 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, './src'),
       },
     },
-    server: proxyTarget
-      ? {
-          proxy: {
-            '/v1': { target: proxyTarget, changeOrigin: true },
-          },
-        }
-      : undefined,
+    server:
+      proxyTarget || agentRunTarget
+        ? {
+            proxy: {
+              ...(proxyTarget ? { '/v1': { target: proxyTarget, changeOrigin: true } } : {}),
+              // The local AgentCore app serves /invocations but no CORS headers,
+              // so route the browser's agent runs through the dev server.
+              ...(agentRunTarget
+                ? {
+                    '/agent-run': {
+                      target: agentRunTarget,
+                      changeOrigin: true,
+                      rewrite: (p: string) => p.replace(/^\/agent-run/, ''),
+                    },
+                  }
+                : {}),
+            },
+          }
+        : undefined,
   }
 })

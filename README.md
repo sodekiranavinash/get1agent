@@ -11,7 +11,7 @@ Monorepo for get1agent.
 │   ├── services/   # Lambda apps (user-api, knowledge-mcp, mcp-tester, ingestion-*, web-search, code-interpreter)
 │   │   ├── dependency-layers/   # third-party Lambda layers: base, genai, extra-tools, ml
 │   │   └── integration-tests/   # integration tests (moto DynamoDB + in-memory S3)
-│   ├── agents/     # AgentCore runtime apps (host, worker)
+│   ├── agents/     # AgentCore runtime (agentflow: single-agent; workflow later)
 │   └── packages/   # shared modules: core, data, retrieval, ingestion
 ├── infra/      # Terraform, deploy scripts, local Floci stack
 └── README.md

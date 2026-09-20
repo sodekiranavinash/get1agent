@@ -92,6 +92,9 @@ def test_knowledge_base_document_flow(fake_storage, monkeypatch):
     assert completed["sizeBytes"] == 11
     assert completed["tags"][0]["name"] == "Resume"
 
+    # The KB list reports the real file count.
+    assert _call("GET", "/v1/knowledge-bases")["knowledgeBases"][0]["fileCount"] == 1
+
     # Same file name is rejected while a document exists.
     _call(
         "POST",
@@ -107,6 +110,7 @@ def test_knowledge_base_document_flow(fake_storage, monkeypatch):
         expect=201,
     )
     assert inline["fileName"] == "notes.md" and inline["status"] == "uploaded"
+    assert _call("GET", "/v1/knowledge-bases")["knowledgeBases"][0]["fileCount"] == 2
 
     detail = _call("GET", f"/v1/knowledge-bases/{kb_id}")
     assert len(detail["documents"]) == 2
@@ -121,6 +125,7 @@ def test_knowledge_base_document_flow(fake_storage, monkeypatch):
 
     _call("DELETE", f"/v1/knowledge-bases/{kb_id}/documents/{doc_id}")
     assert len(_call("GET", f"/v1/knowledge-bases/{kb_id}")["documents"]) == 1
+    assert _call("GET", "/v1/knowledge-bases")["knowledgeBases"][0]["fileCount"] == 1
     # Removing a document must also clear its ingestion timeline.
     remaining = _call("GET", "/v1/knowledge-bases/events", query={"limit": "20"})["events"]
     assert all(event["fileName"] != "resume.pdf" for event in remaining), remaining
@@ -144,7 +149,8 @@ def test_agent_skills(fake_storage, monkeypatch):
     skill_id = skill["id"]
 
     assert _call("GET", "/v1/agent-skills")["skills"][0]["name"] == "pdf-processing"
-    assert _call("GET", "/v1/agent-skills/tools")["tools"][0]["name"] == "code-interpreter"
+    servers = _call("GET", "/v1/agent-skills/mcp-servers")["servers"]
+    assert servers[0]["id"] == "code-interpreter" and servers[0]["source"] == "builtin"
 
     parsed = _call(
         "POST",
@@ -162,6 +168,91 @@ def test_agent_skills(fake_storage, monkeypatch):
 
     _call("DELETE", f"/v1/agent-skills/{skill_id}")
     assert _call("GET", "/v1/agent-skills")["skills"] == []
+
+
+def test_agents(fake_storage, monkeypatch):
+    patch_lambda_storage(monkeypatch, handler, fake_storage)
+
+    payload = {
+        "name": "researcher",
+        "description": "d",
+        "config": {
+            "version": 2,
+            "prompt": "You are a careful research assistant.",
+            "model": "deepseek-v4-flash-vision-exp",
+            "reasoning": "medium",
+            "outputFormat": "markdown",
+            "input": {"query": "Summarise my resume.", "fileIds": []},
+            "output": {"format": "markdown", "instructions": "Cite sources."},
+            "defaultQuestions": ["Summarise my resume", "What are my strengths?"],
+            "knowledgeBaseIds": [],
+            "knowledgeRerank": True,
+            "skillIds": [],
+            "servers": [
+                {"id": "web-search", "name": "Web Search", "source": "builtin", "tools": None}
+            ],
+            "memory": {"enabled": True},
+            "schedule": {"enabled": False, "cron": "", "timezone": "UTC"},
+            "graph": {"nodes": [{"id": "agent-1", "type": "agent"}], "edges": []},
+        },
+    }
+    created = _call("POST", "/v1/agents", payload, expect=201)
+    agent_id = created["id"]
+    assert created["status"] == "draft" and created["model"] == "deepseek-v4-flash-vision-exp"
+    assert created["config"]["knowledgeRerank"] is True
+    assert created["config"]["version"] == 2
+    assert created["config"]["memory"] == {"enabled": True}
+    assert created["config"]["input"]["query"] == "Summarise my resume."
+    assert created["config"]["output"]["instructions"] == "Cite sources."
+    assert created["config"]["defaultQuestions"] == [
+        "Summarise my resume",
+        "What are my strengths?",
+    ]
+    assert created["defaultQuestions"] == created["config"]["defaultQuestions"]
+
+    # A non-boolean rerank flag is rejected.
+    _call(
+        "POST",
+        "/v1/agents",
+        {
+            **payload,
+            "name": "bad-rerank",
+            "config": {**payload["config"], "knowledgeRerank": "yes"},
+        },
+        expect=400,
+    )
+
+    # Publishing before a successful test is rejected.
+    _call("POST", f"/v1/agents/{agent_id}/publish", {}, expect=409)
+
+    verified = _call("POST", f"/v1/agents/{agent_id}/verify", {})
+    assert verified["valid"] is True
+    assert verified["agent"]["status"] == "verified"
+
+    published = _call("POST", f"/v1/agents/{agent_id}/publish", {})
+    assert published["visibility"] == "public"
+
+    library = _call("GET", "/v1/agents/library")["agents"]
+    assert library[0]["id"] == agent_id and library[0]["isMine"] is True
+
+    # Re-saving without renaming is an update, not a name clash.
+    same = _call("PUT", f"/v1/agents/{agent_id}", payload)
+    assert same["id"] == agent_id and same["name"] == "researcher"
+
+    # Editing invalidates the verification and unpublishes the agent.
+    updated = _call("PUT", f"/v1/agents/{agent_id}", {**payload, "name": "researcher-2"})
+    assert updated["status"] == "draft" and updated["visibility"] == "private"
+    assert _call("GET", "/v1/agents/library")["agents"] == []
+
+    # A missing prompt fails the dry-run.
+    bad = {**payload, "name": "bad-agent", "config": {**payload["config"], "prompt": ""}}
+    bad_created = _call("POST", "/v1/agents", bad, expect=201)
+    result = _call("POST", f"/v1/agents/{bad_created['id']}/verify", {})
+    assert result["valid"] is False and result["errors"]
+
+    _call("DELETE", f"/v1/agents/{bad_created['id']}")
+    _call("DELETE", f"/v1/agents/{agent_id}")
+    assert _call("GET", "/v1/agents")["agents"] == []
 
 
 def test_admin_view_is_rejected(fake_storage, monkeypatch):
