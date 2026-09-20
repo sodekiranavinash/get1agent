@@ -93,8 +93,12 @@ export const handler = async () => {
         allowedPorts: [{ allPorts: {} }],
       }),
     )
+    // `authToken` is a map keyed by the header to send it in.
+    const token =
+      result.authToken?.['X-aws-proxy-auth'] ?? Object.values(result.authToken ?? {})[0]
+    if (!token) throw new Error('MicroVM auth token was empty')
     const expiresAt = new Date(Date.now() + TOKEN_TTL_MINUTES * 60 * 1000).toISOString()
-    return json(200, { endpoint, token: result.authToken, expiresAt })
+    return json(200, { endpoint, token, expiresAt })
   } catch (error) {
     console.log(
       JSON.stringify({ level: 'error', message: 'session start failed', error: String(error) }),

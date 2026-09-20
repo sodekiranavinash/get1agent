@@ -238,9 +238,10 @@ resource "aws_iam_role_policy" "proxy_microvm" {
       Sid    = "MicrovmSession"
       Effect = "Allow"
       Action = [
-        "lambda-microvms:RunMicrovm",
-        "lambda-microvms:GetMicrovm",
-        "lambda-microvms:CreateMicrovmAuthToken",
+        # Lambda MicroVM IAM actions live in the `lambda:` namespace.
+        "lambda:RunMicrovm",
+        "lambda:GetMicrovm",
+        "lambda:CreateMicrovmAuthToken",
       ]
       Resource = "*"
     }]
