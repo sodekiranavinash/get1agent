@@ -1,21 +1,25 @@
 /**
  * Lambda MicroVM host for the agent-run streaming proxy.
  *
- * Runs a small HTTP server inside the MicroVM. Unlike a Lambda Function
- * (15-minute cap), a MicroVM can run for up to 8 hours, so this path holds long
+ * Runs a small HTTP + WebSocket server inside the MicroVM. A Lambda Function is
+ * capped at 15 minutes; a MicroVM runs up to 8 hours, so this path holds long
  * agent runs open. The AgentCore session is capped by the runtime's
  * `max_lifetime` (25 min).
  *
- * Routes:
+ * Transports:
  *   GET  /ping          health/readiness
- *   POST /invocations   verify the Auth0 token, stream the AgentCore SSE back
- *
- * All ingress requests must also carry the AWS `X-aws-proxy-auth` token minted
- * by the control plane (`backend/services/agent-run/index.mjs`); the platform
- * rejects requests without it before they reach this app.
+ *   POST /invocations   HTTP + `X-aws-proxy-auth` (curl / non-browser clients)
+ *   WS   /invocations   browser transport: the MicroVM ingress auth token
+ *                       cannot be sent as an HTTP header cross-origin (CORS
+ *                       preflight strips it), so browsers use a WebSocket and
+ *                       carry the token in the `lambda-microvms.authentication.*`
+ *                       subprotocol. The first WS message is
+ *                       `{ token: <Auth0>, payload: { agentId, input, ... } }`.
  */
 
 import http from 'node:http'
+
+import { WebSocketServer } from 'ws'
 
 import { agentRunConfigured, handleInvocation } from '../proxy.mjs'
 
@@ -55,6 +59,25 @@ function readBody(request) {
   })
 }
 
+/** Verify the caller, open the AgentCore stream and forward frames to `write`. */
+async function streamRun({ authorization, body }, write) {
+  const result = await handleInvocation({ authorization, body })
+  if (!result.stream) {
+    write(errorFrame(result.error))
+    return
+  }
+  const reader = result.stream.getReader()
+  try {
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      write(Buffer.from(value).toString('utf8'))
+    }
+  } catch (error) {
+    write(errorFrame(String(error?.message || error)))
+  }
+}
+
 const server = http.createServer(async (request, response) => {
   const origin = request.headers.origin
   const cors = corsHeaders(origin)
@@ -74,43 +97,56 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === 'POST' && (path === '/invocations' || path === '/')) {
     const body = await readBody(request).catch(() => '')
-    const result = await handleInvocation({
-      authorization: request.headers.authorization,
-      body,
-    })
-
-    if (!result.stream) {
-      response.writeHead(result.status, {
-        ...cors,
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-      })
-      response.end(errorFrame(result.error))
-      return
-    }
-
+    let started = false
     response.writeHead(200, {
       ...cors,
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     })
-    const reader = result.stream.getReader()
-    try {
-      for (;;) {
-        const { value, done } = await reader.read()
-        if (done) break
-        response.write(value)
-      }
-    } catch (error) {
-      response.write(errorFrame(String(error?.message || error)))
-    }
+    await streamRun(
+      { authorization: request.headers.authorization, body },
+      (chunk) => {
+        if (!started) started = true
+        response.write(chunk)
+      },
+    )
     response.end()
     return
   }
 
   response.writeHead(404, cors)
   response.end()
+})
+
+const wss = new WebSocketServer({ server, path: '/invocations' })
+
+wss.on('connection', (socket) => {
+  let started = false
+  socket.on('error', () => {})
+  socket.on('message', async (raw) => {
+    if (started) return
+    started = true
+
+    let message
+    try {
+      message = JSON.parse(raw.toString())
+    } catch {
+      socket.close(1003, 'invalid message')
+      return
+    }
+
+    await streamRun(
+      {
+        authorization: `Bearer ${message.token || ''}`,
+        body: JSON.stringify(message.payload || {}),
+      },
+      (chunk) => {
+        if (socket.readyState === socket.OPEN) socket.send(chunk)
+      },
+    )
+    socket.close()
+  })
 })
 
 server.listen(PORT, () => {

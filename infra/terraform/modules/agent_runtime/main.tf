@@ -345,6 +345,12 @@ resource "aws_lambdamicrovms_image" "agent_run" {
   # The image build reads the zip from S3, so upload it first.
   depends_on = [aws_s3_object.microvm_artifact]
 
+  # Rebuild the image whenever the artifact changes (the `code_artifact.uri` is
+  # stable, so Terraform would otherwise not detect a new zip).
+  lifecycle {
+    replace_triggered_by = [aws_s3_object.microvm_artifact]
+  }
+
   timeouts {
     create = "20m"
   }

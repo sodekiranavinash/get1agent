@@ -1,0 +1,10 @@
+{
+  "name": "agent-run-microvm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent-run streaming proxy served from a Lambda MicroVM (HTTP + WebSocket).",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

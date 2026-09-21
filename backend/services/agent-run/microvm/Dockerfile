@@ -7,6 +7,10 @@ FROM node:24-alpine
 
 WORKDIR /app
 
+# Install the WebSocket server dependency.
+COPY package.json ./
+RUN npm install --omit=dev --no-audit --no-fund
+
 # The streaming server plus the shared proxy core it imports.
 COPY app.mjs ./microvm/app.mjs
 COPY proxy.mjs ./proxy.mjs

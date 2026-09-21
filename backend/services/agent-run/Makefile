@@ -19,7 +19,7 @@ package-lambda:
 package-microvm:
 	rm -rf $(DIST)/microvm && mkdir -p $(DIST)/microvm
 	cp proxy.mjs $(DIST)/microvm/
-	cp microvm/app.mjs microvm/Dockerfile $(DIST)/microvm/
+	cp microvm/app.mjs microvm/Dockerfile microvm/package.json $(DIST)/microvm/
 	rm -f $(DIST)/microvm.zip
 	cd $(DIST)/microvm && zip -qXr ../microvm.zip .
 

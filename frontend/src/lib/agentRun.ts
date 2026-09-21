@@ -120,12 +120,9 @@ let cachedSession: MicrovmSession | null = null
 const SESSION_REUSE_MARGIN_MS = 10 * 60 * 1000
 
 /** Ask the gateway control plane for a MicroVM endpoint + ingress token. */
-async function microvmSession(authToken: string): Promise<{ url: string; token: string }> {
+async function microvmSession(authToken: string): Promise<{ endpoint: string; token: string }> {
   if (cachedSession && cachedSession.expiresAt - Date.now() > SESSION_REUSE_MARGIN_MS) {
-    return {
-      url: `https://${cachedSession.endpoint}/invocations`,
-      token: cachedSession.token,
-    }
+    return { endpoint: cachedSession.endpoint, token: cachedSession.token }
   }
   const response = await fetch(`${API_BASE_URL}/v1/agent-run/session`, {
     method: 'POST',
@@ -140,7 +137,7 @@ async function microvmSession(authToken: string): Promise<{ url: string; token: 
     token: data.token,
     expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 20 * 60 * 1000,
   }
-  return { url: `https://${data.endpoint}/invocations`, token: data.token }
+  return { endpoint: data.endpoint, token: data.token }
 }
 
 type RunParams = {
@@ -154,29 +151,95 @@ type RunParams = {
   signal?: AbortSignal
 }
 
+/** Incremental SSE frame parser; invokes `onEvent` for each `data:` frame. */
+function makeFrameParser(onEvent: (event: AgentRunEvent) => void): (chunk: string) => void {
+  let buffer = ''
+  return (chunk) => {
+    buffer += chunk
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) {
+      const line = frame.split('\n').find((entry) => entry.startsWith('data:'))
+      if (!line) continue
+      try {
+        onEvent(JSON.parse(line.slice(5).trim()) as AgentRunEvent)
+      } catch {
+        // Ignore keep-alives / partial frames.
+      }
+    }
+  }
+}
+
+function runPayload(params: RunParams) {
+  return {
+    agentId: params.agentId,
+    input: params.input,
+    conversationId: params.conversationId,
+    ...(params.model ? { model: params.model } : {}),
+  }
+}
+
+/**
+ * Stream a run through the Lambda MicroVM over WebSocket.
+ *
+ * Browsers can't put the MicroVM ingress token in an HTTP header (the CORS
+ * preflight strips custom headers and the ingress rejects it), so the token
+ * travels in the `lambda-microvms.authentication.*` WebSocket subprotocol.
+ * The Auth0 token is sent in the first message and forwarded to AgentCore.
+ */
+async function runViaMicrovm(params: RunParams): Promise<void> {
+  const session = await microvmSession(params.token)
+  const parse = makeFrameParser(params.onEvent)
+
+  await new Promise<void>((resolve, reject) => {
+    const socket = new WebSocket(`wss://${session.endpoint}/invocations`, [
+      'lambda-microvms',
+      `lambda-microvms.authentication.${session.token}`,
+      'lambda-microvms.port.8080',
+    ])
+    let settled = false
+    const abort = () => socket.close()
+    params.signal?.addEventListener('abort', abort)
+
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ token: params.token, payload: runPayload(params) }))
+    }
+    socket.onmessage = (event) => {
+      if (typeof event.data === 'string') parse(event.data)
+    }
+    socket.onerror = () => {
+      if (!settled) {
+        settled = true
+        reject(new Error('Agent stream failed'))
+      }
+    }
+    socket.onclose = () => {
+      params.signal?.removeEventListener('abort', abort)
+      if (!settled) {
+        settled = true
+        resolve()
+      }
+    }
+  })
+}
+
 export async function runAgentStream(params: RunParams): Promise<void> {
+  if (USE_MICROVM) {
+    await runViaMicrovm(params)
+    return
+  }
   if (!RUN_URL) throw new Error('Agent run URL is not configured')
   const sessionId = params.conversationId.length >= 33 ? params.conversationId : `${params.conversationId}-${'0'.repeat(33)}`.slice(0, 64)
 
-  const target = USE_MICROVM
-    ? await microvmSession(params.token)
-    : { url: `${RUN_URL}/invocations`, token: '' }
-
-  const response = await fetch(target.url, {
+  const response = await fetch(`${RUN_URL}/invocations`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${params.token}`,
       'content-type': 'application/json',
       accept: 'text/event-stream',
-      ...(target.token ? { 'x-aws-proxy-auth': target.token } : {}),
       'x-agent-session': sessionId,
     },
-    body: JSON.stringify({
-      agentId: params.agentId,
-      input: params.input,
-      conversationId: params.conversationId,
-      ...(params.model ? { model: params.model } : {}),
-    }),
+    body: JSON.stringify(runPayload(params)),
     signal: params.signal,
   })
 
@@ -184,24 +247,12 @@ export async function runAgentStream(params: RunParams): Promise<void> {
     throw new Error(`Agent run failed (${response.status})`)
   }
 
+  const parse = makeFrameParser(params.onEvent)
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
-  let buffer = ''
-
   for (;;) {
     const { value, done } = await reader.read()
     if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const frames = buffer.split('\n\n')
-    buffer = frames.pop() ?? ''
-    for (const frame of frames) {
-      const line = frame.split('\n').find((entry) => entry.startsWith('data:'))
-      if (!line) continue
-      try {
-        params.onEvent(JSON.parse(line.slice(5).trim()) as AgentRunEvent)
-      } catch {
-        // Ignore keep-alives / partial frames.
-      }
-    }
+    parse(decoder.decode(value, { stream: true }))
   }
 }
