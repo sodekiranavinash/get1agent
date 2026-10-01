@@ -77,6 +77,8 @@ floci-build:
 	$(MAKE) -C backend/services/mcp-tester package
 	$(MAKE) -C backend/services/web-search package
 	$(MAKE) -C backend/services/code-interpreter package
+	$(MAKE) -C backend/services/http-fetch package
+	$(MAKE) -C backend/services/custom-tools package
 	$(MAKE) -C backend/services/mcp-connections package
 	$(MAKE) -C backend/services/ingestion-dispatcher package
 	$(MAKE) -C backend/services/ingestion-extract package
@@ -96,6 +98,8 @@ floci-artifacts:
 		backend/services/mcp-tester/dist/function.zip \
 		backend/services/web-search/dist/function.zip \
 		backend/services/code-interpreter/dist/function.zip \
+		backend/services/http-fetch/dist/function.zip \
+		backend/services/custom-tools/dist/function.zip \
 		backend/services/mcp-connections/dist/function.zip \
 		backend/services/ingestion-dispatcher/dist/function.zip \
 		backend/services/ingestion-extract/dist/function.zip \

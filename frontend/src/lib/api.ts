@@ -1,6 +1,8 @@
 import { useAuth0 } from '@auth0/auth0-react'
 import { useEffect } from 'react'
 import { readActiveView } from '../auth/view'
+import { useDemoMode } from '../auth/useDemoMode'
+import { demoResponse } from './demoData'
 
 export const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? 'https://api.get1agent.com'
@@ -98,16 +100,38 @@ let tokenGetter: TokenGetter = () => {
 
 const apiClient = createApiClient(() => tokenGetter())
 
+// --- read-only demo client ---------------------------------------------------
+
+export const READ_ONLY_MESSAGE =
+  'This is a read-only demo — sign in to make changes.'
+
+function demoRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const method = String(options.method ?? 'GET').toUpperCase()
+  if (method !== 'GET') return Promise.reject(new ApiError(403, READ_ONLY_MESSAGE))
+  return Promise.resolve(demoResponse(path) as T)
+}
+
+const demoClient: ApiClient = {
+  request: demoRequest,
+  get: (path, options) => demoRequest(path, { ...options, method: 'GET' }),
+  post: () => Promise.reject(new ApiError(403, READ_ONLY_MESSAGE)),
+  put: () => Promise.reject(new ApiError(403, READ_ONLY_MESSAGE)),
+  patch: () => Promise.reject(new ApiError(403, READ_ONLY_MESSAGE)),
+  delete: () => Promise.reject(new ApiError(403, READ_ONLY_MESSAGE)),
+}
+
 /**
  * Returns the shared, referentially-stable `ApiClient`. Because its identity
  * never changes, callbacks and effects that depend on it stay stable.
  */
 export function useApiClient(): ApiClient {
   const { getAccessTokenSilently } = useAuth0()
+  const demo = useDemoMode()
 
   useEffect(() => {
     tokenGetter = getAccessTokenSilently
   }, [getAccessTokenSilently])
 
+  if (demo) return demoClient
   return apiClient
 }

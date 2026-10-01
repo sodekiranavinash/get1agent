@@ -187,6 +187,7 @@ sparse GSIs. **No vectors, chunks, or postings in DynamoDB.**
 | Agent | `USER#<userId>` | `AGENT#<lowerName>` | `g1pk=AGENT#<agentId>, g1sk=#META`; `g2pk=USER#<userId>, g2sk=AGENT#<updatedAt>#<name>`; published only: `g3pk=AGENTLIB#public, g3sk=<publishedAt>#<agentId>` | agentId, name, description, status (draft/verified/published), visibility, source, version, config (prompt, model, reasoning, outputFormat, knowledgeBaseIds, skillIds, servers, schedule, graph), nodeCount, verifiedAt, lastRunAt, publishedAt, installCount, forkedFrom, timestamps |
 | Storage file | `USER#<userId>` | `STORAGE#<fileId>` | — | fileId, fileName, s3Key, contentType, sizeBytes, status, timestamps |
 | Session (code-interp) | `USER#<userId>` | `CONV#<conversationId>` | — | sessionId, expiresAt (TTL), createdAt, lastUsedAt |
+| Playground session | `USER#<userId>` | `PGSESSION#<sessionId>` | `g2pk=USER#<userId>, g2sk=PGSESSION#<updatedAt>#<sessionId>` | sessionId, title, serverId, serverSlug, toolId, toolName, lastPreview, messageCount, timestamps; the message transcript (including each generated proposal) is one S3 object (`playground/<userId>/<sessionId>.json`) |
 
 **GSIs (all sparse):**
 - **GSI1 "byId"** — `gsi1pk`, `gsi1sk`: resolve KB/document/skill/agent by UUID.

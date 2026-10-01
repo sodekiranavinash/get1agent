@@ -6,8 +6,10 @@ import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
 import { StatCard } from '../components/ui/StatCard'
 import { fadeUp, stagger } from '../lib/motion'
+import { useDemoMode } from '../auth/useDemoMode'
+import { demoDashboard } from '../lib/demo/dashboard'
 
-const weeklyTokens = [
+const staticWeeklyTokens = [
   { label: 'Mon', value: 62 },
   { label: 'Tue', value: 74 },
   { label: 'Wed', value: 68 },
@@ -17,7 +19,7 @@ const weeklyTokens = [
   { label: 'Sun', value: 88 },
 ]
 
-const workflowRuns = [
+const staticWorkflowRuns = [
   { label: 'Mon', value: 12 },
   { label: 'Tue', value: 18 },
   { label: 'Wed', value: 15 },
@@ -27,7 +29,7 @@ const workflowRuns = [
   { label: 'Sun', value: 21 },
 ]
 
-const kpis = [
+const staticKpis = [
   {
     label: 'Avg. daily tokens',
     value: '118K',
@@ -66,6 +68,41 @@ const kpis = [
 ]
 
 export function InsightsPage() {
+  const demo = useDemoMode()
+  const insights = demoDashboard.insights
+
+  const kpis = demo
+    ? [
+        {
+          ...staticKpis[0],
+          value: insights.avgDailyTokens,
+          change: '+9% vs last week',
+          trend: 'up' as const,
+          spark: insights.weeklyTokens.map((row) => row.value),
+        },
+        {
+          ...staticKpis[1],
+          value: insights.successRate,
+          change: '+2% vs last week',
+          trend: 'up' as const,
+        },
+        {
+          ...staticKpis[2],
+          value: insights.activeAgents,
+          change: '3 ran today',
+          trend: 'neutral' as const,
+        },
+        {
+          ...staticKpis[3],
+          value: `${insights.costPerDay}/day`,
+          change: '-6% vs last week',
+          trend: 'down' as const,
+        },
+      ]
+    : staticKpis
+  const weeklyTokens = demo ? insights.weeklyTokens : staticWeeklyTokens
+  const workflowRuns = demo ? insights.weeklyRuns : staticWorkflowRuns
+
   return (
     <PageShell>
       <PageHeader
@@ -93,7 +130,7 @@ export function InsightsPage() {
               <div className="p-4">
                 <MiniBars
                   data={weeklyTokens}
-                  max={100}
+                  max={Math.max(1, ...weeklyTokens.map((entry) => entry.value))}
                   tone="bg-gradient-to-t from-accent/50 to-accent"
                 />
               </div>
@@ -110,7 +147,7 @@ export function InsightsPage() {
               <div className="p-4">
                 <MiniBars
                   data={workflowRuns}
-                  max={24}
+                  max={Math.max(1, ...workflowRuns.map((entry) => entry.value))}
                   tone="bg-gradient-to-t from-info/50 to-info"
                 />
               </div>

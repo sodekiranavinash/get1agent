@@ -67,7 +67,13 @@ resource "aws_apigatewayv2_stage" "this" {
 
   tags = var.tags
 
-  depends_on = [aws_cloudwatch_log_group.api]
+  # route_settings must be applied after the routes exist, otherwise
+  # UpdateStage fails with 404 "Unable to find Route by key ..." for any
+  # throttled route that Terraform hasn't created yet.
+  depends_on = [
+    aws_cloudwatch_log_group.api,
+    aws_apigatewayv2_route.lambda,
+  ]
 }
 
 resource "aws_cloudwatch_log_group" "api" {
@@ -98,11 +104,14 @@ resource "aws_apigatewayv2_route" "lambda" {
   authorizer_id      = each.value.authorization_type == "JWT" ? aws_apigatewayv2_authorizer.auth0.id : null
 }
 
+# One permission per *function*, not per route. Every route already uses the
+# same wildcard `source_arn`, so a per-route statement was redundant and, with
+# 200+ routes, blew past the 20 KB Lambda resource-policy limit on `user-api`.
 resource "aws_lambda_permission" "lambda_apigw" {
-  for_each = var.lambda_routes
+  for_each = toset([for route in values(var.lambda_routes) : route.lambda_function_name])
 
   action        = "lambda:InvokeFunction"
-  function_name = each.value.lambda_function_name
+  function_name = each.value
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.this.execution_arn}/*/*"
 }

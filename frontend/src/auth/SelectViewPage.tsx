@@ -3,6 +3,7 @@ import { ShieldCheck, UserRound } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useTheme } from '../theme/ThemeProvider'
 import { useView } from './ViewProvider'
+import { useDemoMode } from './useDemoMode'
 import type { AppView } from './view'
 
 type ViewOption = {
@@ -20,7 +21,11 @@ const OPTIONS: ViewOption[] = [
 export function SelectViewPage() {
   const { view, available, chooseView } = useView()
   const { theme } = useTheme()
+  const demo = useDemoMode()
   const logoSrc = theme === 'light' ? '/white_logo.png' : '/dark_logo.png'
+
+  // The demo has no view picker.
+  if (demo) return <Navigate to="/dashboard" replace />
 
   if (view !== null) {
     return (

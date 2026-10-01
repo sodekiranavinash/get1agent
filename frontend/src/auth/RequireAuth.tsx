@@ -2,9 +2,16 @@ import { useAuth0 } from '@auth0/auth0-react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { AUTH_PATHS } from './authUrls'
 import { AuthStatusScreen } from './AuthStatusScreen'
+import { useDemoMode } from './useDemoMode'
 
 export function RequireAuth() {
   const { isLoading, isAuthenticated, error } = useAuth0()
+  const demo = useDemoMode()
+
+  // Read-only demo: allow the shell without an account (no API is called).
+  if (demo) {
+    return <Outlet />
+  }
 
   if (error) {
     return <AuthStatusScreen tone="error">{error.message}</AuthStatusScreen>

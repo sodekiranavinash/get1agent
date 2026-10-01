@@ -81,6 +81,12 @@ variable "mcp_function_arns" {
   default = []
 }
 
+variable "kms_key_arns" {
+  type        = list(string)
+  default     = []
+  description = "KMS keys the runtime may decrypt (Vault provider secrets)"
+}
+
 variable "runtime_environment" {
   type        = map(string)
   default     = {}

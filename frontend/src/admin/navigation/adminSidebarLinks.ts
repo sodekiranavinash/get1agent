@@ -1,9 +1,13 @@
 import {
   Code2,
+  Coins,
+  Download,
   FileStack,
   Globe,
+  LifeBuoy,
   Plug,
   Server,
+  ShieldAlert,
   type LucideIcon,
 } from 'lucide-react'
 import type { SidebarLink } from '../../navigation/sidebarLinks'
@@ -20,6 +24,15 @@ export const adminSectionOrder: string[] = ['admin']
 
 /** Root route for the MCP tester; per-server pages hang off this path. */
 export const MCP_TOOLS_PATH = '/admin/mcp-tools'
+
+/** Admin route for AI-credit management. */
+export const ADMIN_USERS_PATH = '/admin/users'
+
+/** Admin route for the support inbox. */
+export const ADMIN_SUPPORT_PATH = '/admin/support'
+
+/** Admin route for the security-report inbox. */
+export const ADMIN_SECURITY_PATH = '/admin/security-reports'
 
 /** `get1agent-prod-knowledge-mcp` -> `knowledge-mcp` (stable route segment). */
 export function mcpServerSlug(server: string): string {
@@ -47,6 +60,11 @@ const SERVER_META: Record<string, McpServerMeta> = {
     label: 'Code Interpreter',
     description: 'Run Python in an isolated sandbox.',
     icon: Code2,
+  },
+  'http-fetch': {
+    label: 'HTTP Fetch',
+    description: 'Fetch a public URL and read stored files.',
+    icon: Download,
   },
 }
 
@@ -98,6 +116,27 @@ export function buildAdminLinks(tools?: McpTool[]): SidebarLink[] {
       icon: Plug,
       section: 'admin',
       children,
+    },
+    {
+      to: ADMIN_USERS_PATH,
+      label: 'AI Credits',
+      tooltip: 'AI Credits',
+      icon: Coins,
+      section: 'admin',
+    },
+    {
+      to: ADMIN_SUPPORT_PATH,
+      label: 'Support',
+      tooltip: 'Support inbox',
+      icon: LifeBuoy,
+      section: 'admin',
+    },
+    {
+      to: ADMIN_SECURITY_PATH,
+      label: 'Security',
+      tooltip: 'Security reports',
+      icon: ShieldAlert,
+      section: 'admin',
     },
   ]
 }

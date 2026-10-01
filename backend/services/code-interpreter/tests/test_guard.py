@@ -12,8 +12,10 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SRC))
+# The guard now lives in the shared `core` package, bundled at deploy time.
+sys.path.insert(0, str(SRC.parents[1] / "packages"))
 
-from src import guard  # noqa: E402
+from core.sandbox import guard  # noqa: E402
 
 
 class GuardCheckTests(unittest.TestCase):
@@ -38,6 +40,14 @@ class GuardCheckTests(unittest.TestCase):
     def test_blocks_network_import(self) -> None:
         self.assertFalse(guard.check("import requests").ok)
 
+    def test_allows_urllib_parse(self) -> None:
+        self.assertTrue(guard.check("import urllib.parse").ok)
+        self.assertTrue(guard.check("from urllib.parse import urljoin").ok)
+
+    def test_blocks_urllib_request(self) -> None:
+        self.assertFalse(guard.check("import urllib.request").ok)
+        self.assertFalse(guard.check("from urllib.request import urlopen").ok)
+
     def test_blocks_dynamic_exec(self) -> None:
         self.assertFalse(guard.check("exec('print(1)')").ok)
 
@@ -52,8 +62,12 @@ class GuardCheckTests(unittest.TestCase):
     def test_blocks_pip_install_string(self) -> None:
         self.assertFalse(guard.check("print('pip install numpy')").ok)
 
-    def test_blocks_model_download_string(self) -> None:
-        self.assertFalse(guard.check("url = 'https://example.com/model.bin'").ok)
+    def test_blocks_download_command_string(self) -> None:
+        self.assertFalse(guard.check("cmd = 'git clone https://github.com/x/y'").ok)
+
+    def test_allows_bare_url_literal(self) -> None:
+        # A parser may carry an example/default URL in a docstring or constant.
+        self.assertTrue(guard.check("base = 'https://example.com'\nprint(base)").ok)
 
     def test_blocks_from_pretrained(self) -> None:
         self.assertFalse(
@@ -97,6 +111,32 @@ class PreludeTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn('"ok": true', proc.stdout)
+
+    def test_prelude_allows_urllib_parse(self) -> None:
+        script = (
+            guard.prelude()
+            + "\nimport urllib.parse\n"
+            + "print(urllib.parse.urljoin('https://a.com/x/', '../b'))\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("https://a.com/b", proc.stdout)
+
+    def test_prelude_blocks_urllib_request(self) -> None:
+        script = guard.prelude() + "\nimport urllib.request\n"
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("blocked by policy", proc.stderr)
 
 
 if __name__ == "__main__":

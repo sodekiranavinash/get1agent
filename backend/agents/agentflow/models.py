@@ -88,8 +88,31 @@ def resolve_model_id(model_id: str | None) -> str:
 
 
 def build_model(
-    config: RuntimeConfig, model_id: str, session_id: str | None = None
+    config: RuntimeConfig,
+    model_id: str,
+    session_id: str | None = None,
+    provider: dict[str, Any] | None = None,
 ) -> Any:
+    """Build a Strands model.
+
+    ``provider`` (from :mod:`agentflow.provider`) switches to the user's own
+    OpenAI-compatible endpoint instead of the platform gateway. A user provider
+    always speaks ``/chat/completions`` (no Responses-API branch) and the Go
+    routing header is omitted.
+    """
+    if provider:
+        from strands.models.openai import OpenAIModel
+
+        return OpenAIModel(
+            client_args={
+                "api_key": provider["apiKey"],
+                "base_url": provider["baseUrl"],
+                "default_headers": {"user-agent": CLIENT_USER_AGENT},
+            },
+            model_id=model_id,
+            context_window_limit=context_window_limit(model_id),
+        )
+
     if not config.opencode_api_key:
         raise RuntimeError("OPENCODE_API_KEY is not configured")
     headers = {"user-agent": CLIENT_USER_AGENT}

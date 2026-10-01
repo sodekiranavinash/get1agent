@@ -24,13 +24,46 @@ class BuildSystemPromptTests(unittest.TestCase):
         self.assertIn("Respond in JSON.", prompt)
         self.assertIn("Be terse.", prompt)
 
-    def test_skills_are_injected(self) -> None:
+    def test_skills_use_progressive_disclosure(self) -> None:
         prompt = prompts.build_system_prompt(
             {"prompt": "p"},
             [{"name": "pdf", "description": "Read PDFs", "content": "Use pymupdf."}],
         )
-        self.assertIn("### Skill: pdf", prompt)
-        self.assertIn("Use pymupdf.", prompt)
+        # The skill body must NOT be pasted into the prompt — only guidance to
+        # activate it, so the agent decides when the skill applies.
+        self.assertNotIn("Use pymupdf.", prompt)
+        self.assertNotIn("### Skill: pdf", prompt)
+        self.assertIn("`skills` tool", prompt)
+        self.assertIn("available_skills", prompt)
+
+    def test_answer_mode_controls_depth(self) -> None:
+        summarize = prompts.build_system_prompt({"prompt": "p", "answerMode": "summarize"}, [])
+        self.assertIn("Answer mode: SUMMARIZE", summarize)
+        normal = prompts.build_system_prompt({"prompt": "p", "answerMode": "normal"}, [])
+        self.assertIn("Answer mode: NORMAL", normal)
+        detailed = prompts.build_system_prompt({"prompt": "p", "answerMode": "detailed"}, [])
+        self.assertIn("Answer mode: DETAILED", detailed)
+
+    def test_answer_mode_legacy_values(self) -> None:
+        # Values saved before the rename still map to their meaning.
+        self.assertIn(
+            "Answer mode: NORMAL",
+            prompts.build_system_prompt({"prompt": "p", "answerMode": "medium"}, []),
+        )
+        self.assertIn(
+            "Answer mode: DETAILED",
+            prompts.build_system_prompt({"prompt": "p", "answerMode": "deep"}, []),
+        )
+
+    def test_answer_mode_defaults_to_summarize(self) -> None:
+        prompt = prompts.build_system_prompt({"prompt": "p"}, [])
+        self.assertIn("Answer mode: SUMMARIZE", prompt)
+
+    def test_high_reasoning_adds_a_hint(self) -> None:
+        prompt = prompts.build_system_prompt({"prompt": "p", "reasoning": "high"}, [])
+        self.assertIn("Reasoning effort: HIGH", prompt)
+        medium = prompts.build_system_prompt({"prompt": "p", "reasoning": "medium"}, [])
+        self.assertNotIn("Reasoning effort", medium)
 
     def test_default_prompt_when_empty(self) -> None:
         prompt = prompts.build_system_prompt({}, [])

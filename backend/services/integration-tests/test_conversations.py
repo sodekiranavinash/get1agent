@@ -129,3 +129,28 @@ def test_conversation_requires_owned_agent(fake_storage, monkeypatch):
     missing = "00000000-0000-0000-0000-000000000000"
     _call("POST", "/v1/conversations", {"agentId": missing}, expect=404)
     _call("POST", "/v1/conversations", {"agentId": "not-a-uuid"}, expect=404)
+
+
+def test_create_clears_stale_transcript(fake_storage, monkeypatch):
+    """A newly minted id must not inherit a stale transcript object."""
+    patch_lambda_storage(monkeypatch, handler, fake_storage)
+    agent_id = _create_agent()["id"]
+    user_id = _call("GET", "/v1/user/settings")["id"]
+
+    first = _call("POST", "/v1/conversations", {"agentId": agent_id}, expect=201)
+    next_id = first["conversationId"] + 1
+
+    from retrieval.layout import conversation_key
+
+    fake_storage.put_json(
+        conversation_key(user_id, next_id),
+        {
+            "conversationId": next_id,
+            "userId": user_id,
+            "turns": [{"runId": "stale", "question": "old turn"}],
+        },
+    )
+
+    second = _call("POST", "/v1/conversations", {"agentId": agent_id}, expect=201)
+    assert second["conversationId"] == next_id
+    assert conversation_key(user_id, next_id) not in fake_storage.data

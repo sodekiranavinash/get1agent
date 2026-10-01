@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from typing import Any
 
 
@@ -26,24 +27,33 @@ class Storage:
             or os.environ.get("AWS_REGION")
         )
         self._client = None
+        # Guard the lazy client so concurrent callers (the term-index fan-out)
+        # build exactly one boto3 client. boto3 clients are themselves safe to
+        # share across threads once constructed.
+        self._client_lock = threading.Lock()
 
     @property
     def mode(self) -> str:
         return "s3"
 
     def _s3(self):
-        if self._client is None:
-            import boto3
-            from botocore.config import Config
+        client = self._client
+        if client is None:
+            with self._client_lock:
+                if self._client is None:
+                    import boto3
+                    from botocore.config import Config
 
-            # Virtual-hosted addressing makes boto3 sign against the bucket's
-            # regional endpoint instead of the global s3.amazonaws.com one.
-            self._client = boto3.client(
-                "s3",
-                region_name=self.region,
-                config=Config(s3={"addressing_style": "virtual"}),
-            )
-        return self._client
+                    # Virtual-hosted addressing makes boto3 sign against the
+                    # bucket's regional endpoint instead of the global
+                    # s3.amazonaws.com one.
+                    self._client = boto3.client(
+                        "s3",
+                        region_name=self.region,
+                        config=Config(s3={"addressing_style": "virtual"}),
+                    )
+                client = self._client
+        return client
 
     def put_bytes(
         self, key: str, data: bytes, content_type: str = "application/octet-stream"

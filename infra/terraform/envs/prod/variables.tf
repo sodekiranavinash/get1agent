@@ -49,9 +49,66 @@ variable "auth0_audience" {
   default = "https://api.get1agent.com"
 }
 
+variable "agent_service_client_id" {
+  type        = string
+  default     = ""
+  description = "Auth0 M2M client id the eval worker uses to run agents server-side (service auth)"
+}
+
+variable "agent_service_client_secret" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Auth0 M2M client secret for the eval worker's service token"
+}
+
+variable "auth0_token_url" {
+  type        = string
+  default     = ""
+  description = "Auth0 token endpoint for client-credentials; defaults to https://<auth0_domain>/oauth/token"
+}
+
+variable "upstash_redis_rest_url" {
+  type        = string
+  default     = ""
+  description = "Upstash Redis REST URL for the best-effort cache (embeddings + search)"
+}
+
+variable "upstash_redis_rest_token" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Upstash Redis REST token for the best-effort cache"
+}
+
+variable "upstash_vector_rest_url" {
+  type        = string
+  default     = ""
+  description = "Upstash Vector REST URL for the semantic cache"
+}
+
+variable "upstash_vector_rest_token" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Upstash Vector REST token for the semantic cache"
+}
+
 variable "enable_api_custom_domain" {
   type    = bool
   default = true
+}
+
+variable "stage_throttle_burst_limit" {
+  type        = number
+  default     = 100
+  description = "API Gateway HTTP API stage-level burst limit, common to all routes (requests)"
+}
+
+variable "stage_throttle_rate_limit" {
+  type        = number
+  default     = 50
+  description = "API Gateway HTTP API stage-level steady-state rate, common to all routes (requests/second)"
 }
 
 variable "knowledge_bases_bucket_name" {
@@ -158,6 +215,18 @@ variable "web_search_max_results" {
   description = "Hard cap on Exa results per web-search call (cost guard)"
 }
 
+variable "http_fetch_timeout_seconds" {
+  type        = number
+  default     = 60
+  description = "Lambda timeout for the http-fetch MCP tool"
+}
+
+variable "http_fetch_allowed_domains" {
+  type        = string
+  default     = ""
+  description = "Optional comma-separated host allowlist for http-fetch (empty allows any public host)"
+}
+
 variable "mcp_oauth_redirect_uri" {
   type        = string
   default     = ""
@@ -206,6 +275,39 @@ variable "opencode_base_url" {
   type        = string
   default     = "https://opencode.ai/zen/go/v1"
   description = "OpenCode Go OpenAI-compatible base URL"
+}
+
+variable "enable_langfuse" {
+  type        = bool
+  default     = true
+  description = "Send agent-runtime traces to Langfuse (disables AgentCore's ADOT exporter for the runtime)"
+}
+
+variable "langfuse_host" {
+  type        = string
+  default     = "https://cloud.langfuse.com"
+  description = "Langfuse base URL (US: https://us.cloud.langfuse.com; self-hosted: your URL)"
+}
+
+variable "langfuse_public_key" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Langfuse public key for agent tracing (set via TF_VAR_langfuse_public_key)"
+}
+
+variable "langfuse_secret_key" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Langfuse secret key for agent tracing (set via TF_VAR_langfuse_secret_key)"
+}
+
+variable "trace_link_secret" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "HMAC secret for signed, expiring trace links (set via TF_VAR_trace_link_secret)"
 }
 
 variable "agent_run_allowed_origins" {

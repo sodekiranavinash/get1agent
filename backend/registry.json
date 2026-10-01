@@ -96,6 +96,39 @@
       ]
     },
     {
+      "name": "http-fetch",
+      "group": "mcp-tools",
+      "dir": "backend/services/http-fetch",
+      "function_name": "get1agent-prod-http-fetch",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data",
+        "retrieval"
+      ],
+      "layers": [
+        "base",
+        "genai"
+      ]
+    },
+    {
+      "name": "custom-tools",
+      "group": "mcp-tools",
+      "dir": "backend/services/custom-tools",
+      "function_name": "get1agent-prod-custom-tools",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data"
+      ],
+      "layers": [
+        "base",
+        "genai"
+      ]
+    },
+    {
       "name": "mcp-connections",
       "group": "mcp-tools",
       "dir": "backend/services/mcp-connections",
@@ -197,6 +230,21 @@
         "ingestion"
       ],
       "layers": []
+    },
+    {
+      "name": "scheduler",
+      "group": "scheduler",
+      "dir": "backend/services/scheduler",
+      "function_name": "get1agent-prod-scheduler",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data"
+      ],
+      "layers": [
+        "base"
+      ]
     }
   ]
 }

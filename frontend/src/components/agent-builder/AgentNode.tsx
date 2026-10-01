@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import {
+  agentAnswerModeLabel,
   agentModelLabel,
   describeSchedule,
   type AgentNodeData,
@@ -98,16 +99,14 @@ function summarize(names: string[], empty: string): string {
 function cardSubtitle(data: AgentNodeData, { knowledgeBases, skills }: Lookups): string {
   switch (data.kind) {
     case 'agent': {
-      const reasoning = data.reasoning ?? 'medium'
-      return `${agentModelLabel(data.model)} · ${reasoning[0].toUpperCase() + reasoning.slice(1)}`
+      const reasoning = data.reasoning ?? 'low'
+      return `${agentModelLabel(data.model)} · ${reasoning[0].toUpperCase() + reasoning.slice(1)} · ${agentAnswerModeLabel(data.answerMode)}`
     }
     case 'input': {
-      const query = data.input?.trim()
       const files = (data.inputFileIds ?? []).length
       const questions = (data.defaultQuestions ?? []).length
-      if (!query && files === 0 && questions === 0) return 'No query yet'
+      if (files === 0 && questions === 0) return 'Asked at run time'
       const parts: string[] = []
-      if (query) parts.push(query)
       if (files > 0) parts.push(`${files} file${files === 1 ? '' : 's'}`)
       if (questions > 0) parts.push(`${questions} starter question${questions === 1 ? '' : 's'}`)
       return parts.join(' · ')

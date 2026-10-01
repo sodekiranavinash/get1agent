@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   AlertCircle,
   Code2,
+  Download,
   ExternalLink,
   Globe,
   KeyRound,
@@ -76,6 +78,12 @@ const builtInTools: BuiltInTool[] = [
     description: 'Run Python in a sandbox for data analysis and file processing.',
     icon: Code2,
     tone: 'text-success',
+  },
+  {
+    name: 'HTTP Fetch Tool',
+    description: 'Call a public URL/API and read the saved file from your storage.',
+    icon: Download,
+    tone: 'text-info',
   },
 ]
 
@@ -542,6 +550,7 @@ function ManageToolsDialog({
 
 export function ToolsPage() {
   const api = useApiClient()
+  const navigate = useNavigate()
   const { data, isPending, error, refetch } = usePageQuery(
     TOOLS_QUERY_KEY,
     async () => {
@@ -668,9 +677,8 @@ export function ToolsPage() {
     setAddOpen(true)
   }
 
-  const createServer = () => {
-    toast.info('Creating and publishing your own MCP server is coming soon')
-  }
+  // Authoring a server is done in the MCP Builder (chat-to-code workspace).
+  const createServer = () => navigate('/mcp-builder')
 
   const submitCustom = async () => {
     setFormError(null)

@@ -44,6 +44,11 @@ if [[ ! -s "$ROOT/backend/services/web-search/dist/function.zip" ]]; then
   make -C "$ROOT/backend/services/web-search" package
 fi
 
+if [[ ! -s "$ROOT/backend/services/http-fetch/dist/function.zip" ]]; then
+  echo "Packaging http-fetch Lambda zip..."
+  make -C "$ROOT/backend/services/http-fetch" package
+fi
+
 if [[ ! -s "$ROOT/backend/services/mcp-connections/dist/function.zip" ]]; then
   echo "Packaging mcp-connections Lambda zip..."
   make -C "$ROOT/backend/services/mcp-connections" package

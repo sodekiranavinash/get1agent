@@ -9,9 +9,13 @@ S3 session and the conversation transcript) is never modified.
 Knowledge results are exempt: they are the user's grounding data and the
 knowledge tool deliberately returns page-sized context.
 
-Knobs: ``AGENT_TOOL_RESULT_MAX_CHARS`` (default 1500) and
-``AGENT_TOOL_RESULT_KEEP_FULL`` (default 2 — the most recent N tool results are
-left untouched).
+Knobs:
+
+* ``AGENT_TOOL_RESULT_MAX_CHARS`` (default 1500) — cap for older results.
+* ``AGENT_TOOL_RESULT_RECENT_CHARS`` (default 6000) — cap for the most recent
+  ``AGENT_TOOL_RESULT_KEEP_FULL`` (default 2) results. Recent results get a
+  larger budget but are still capped, so one huge web-search payload (or a
+  ``text=true`` fetch) can never flood the context.
 """
 
 from __future__ import annotations
@@ -38,6 +42,13 @@ def _keep_full() -> int:
         return int(os.environ.get("AGENT_TOOL_RESULT_KEEP_FULL") or "2")
     except ValueError:
         return 2
+
+
+def _recent_chars() -> int:
+    try:
+        return int(os.environ.get("AGENT_TOOL_RESULT_RECENT_CHARS") or "6000")
+    except ValueError:
+        return 6000
 
 
 def _tool_names(messages: list[dict[str, Any]]) -> dict[str, str]:
@@ -91,10 +102,17 @@ def trim_tool_results(
     *,
     max_chars: int | None = None,
     keep_full: int | None = None,
+    recent_chars: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Return a copy of ``messages`` with older tool results truncated."""
+    """Return a copy of ``messages`` with older tool results truncated.
+
+    The most recent ``keep_full`` results are capped at ``recent_chars`` (not
+    left unbounded) so a single large tool payload cannot flood the context;
+    older results are capped at ``max_chars``.
+    """
     limit = max_chars if max_chars is not None else _max_chars()
     keep = keep_full if keep_full is not None else _keep_full()
+    recent = recent_chars if recent_chars is not None else _recent_chars()
     names = _tool_names(messages)
 
     result_indexes = [
@@ -113,9 +131,13 @@ def trim_tool_results(
         is_result = any(
             isinstance(block, dict) and "toolResult" in block for block in content
         )
-        if not is_result or index in keep_indexes:
+        if not is_result:
             trimmed.append(message)
             continue
+
+        # Recent results get the larger cap; older results the smaller one. Both
+        # are bounded, so no single tool payload can blow the context.
+        cap = recent if index in keep_indexes else limit
 
         new_content: list[Any] = []
         for block in content:
@@ -127,7 +149,7 @@ def trim_tool_results(
             if names.get(use_id) in EXEMPT_TOOLS:
                 new_content.append(block)
                 continue
-            result["content"] = _truncate_value(result.get("content"), limit)
+            result["content"] = _truncate_value(result.get("content"), cap)
             new_block = dict(block)
             new_block["toolResult"] = result
             new_content.append(new_block)

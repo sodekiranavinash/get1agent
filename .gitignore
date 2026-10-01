@@ -130,3 +130,9 @@ override.tf.json
 
 # Local dev storage (stand-in for S3)
 infra/local/.storage/
+
+# Personal career files (contain PII — keep out of this public repo)
+resume.md
+linkedin-profile.md
+eu-cover-letter.md
+career-notes.md

@@ -77,7 +77,7 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --app-canvas: #f6f7f9;
+  --app-canvas: #ffffff;
   --app-surface: #ffffff;
   --app-raised: #f2f4f7;
   --app-elevated: #e8ebef;
@@ -345,6 +345,32 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .dialog-overlay[data-state="open"],
   .dialog-content[data-state="open"] {
+    animation: none;
+  }
+}
+
+/* Login / entry screen: a slow drift for the blurred aurora blobs. */
+@keyframes aurora-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -5%, 0) scale(1.12);
+  }
+}
+
+.animate-aurora {
+  animation: aurora-drift 16s ease-in-out infinite;
+}
+
+.animate-aurora-slow {
+  animation: aurora-drift 24s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-aurora,
+  .animate-aurora-slow {
     animation: none;
   }
 }

@@ -30,6 +30,12 @@ DEFAULT_MAX_AGE_HOURS = 24
 # page text is opt-in via ``text: true`` so a search cannot flood the context.
 DEFAULT_HIGHLIGHTS_MAX_CHARACTERS = 400
 DEFAULT_TEXT_MAX_CHARACTERS = 4000
+# Hard caps on the content a single search can return, so a full-text request
+# (`text: true`) or an inflated character budget cannot flood the agent's
+# context. Results are also bounded by the runtime's tool-result trimming.
+MAX_HIGHLIGHTS_MAX_CHARACTERS = 2000
+MAX_TEXT_MAX_CHARACTERS = 8000
+MAX_SUBPAGES = 20
 SEARCH_PATH = "/search"
 
 # The API accepts arbitrary strings as category hints; these are the documented
@@ -93,7 +99,11 @@ def _clamp_results(value: Any, default: int, maximum: int) -> int:
 def build_contents(params: dict[str, Any]) -> dict[str, Any]:
     """Map the flat tool arguments onto Exa's nested ``contents`` object."""
     text_max = _as_int(params.get("textMaxCharacters"))
+    if text_max is not None:
+        text_max = max(1, min(MAX_TEXT_MAX_CHARACTERS, text_max))
     highlights_max = _as_int(params.get("highlightsMaxCharacters"))
+    if highlights_max is not None:
+        highlights_max = max(1, min(MAX_HIGHLIGHTS_MAX_CHARACTERS, highlights_max))
     highlights_query = str(params.get("highlightsQuery") or "").strip()
     summary_query = str(params.get("summaryQuery") or "").strip()
 
@@ -125,9 +135,11 @@ def build_contents(params: dict[str, Any]) -> dict[str, Any]:
 
     contents: dict[str, Any] = {}
     if include_text:
-        contents["text"] = (
-            {"maxCharacters": text_max} if text_max is not None else True
-        )
+        # Always bound full text: a bare `text: true` would otherwise return whole
+        # pages and dominate the context.
+        contents["text"] = {
+            "maxCharacters": text_max if text_max is not None else DEFAULT_TEXT_MAX_CHARACTERS
+        }
     if include_highlights:
         highlights: dict[str, Any] = {}
         if highlights_query:
@@ -147,7 +159,7 @@ def build_contents(params: dict[str, Any]) -> dict[str, Any]:
         contents["livecrawlTimeout"] = max(1, livecrawl_timeout)
     subpages = _as_int(params.get("subpages"))
     if subpages is not None:
-        contents["subpages"] = max(0, min(100, subpages))
+        contents["subpages"] = max(0, min(MAX_SUBPAGES, subpages))
     subpage_target = _as_list(params.get("subpageTarget"))
     if subpage_target:
         contents["subpageTarget"] = subpage_target

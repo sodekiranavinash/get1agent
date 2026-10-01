@@ -4,7 +4,11 @@ import secrets
 from typing import Any
 
 from data.client import now_iso, table
-from data.keys import IDENTITY_SK, PROFILE_SK, sub_pk, user_pk
+from data.keys import GSI3, IDENTITY_SK, PROFILE_SK, sub_pk, user_pk
+
+# Shared GSI3 partition listing every user profile (admin console). Sparse: an
+# item only appears once it carries the ``gsi3pk`` attribute.
+USERS_ALL_PK = "USERS#all"
 
 # Auth0 requires namespaced custom claims on access tokens.
 CLAIM_NAMESPACE = "https://get1agent.com/"
@@ -17,6 +21,18 @@ _ID_PREFIX = "u_"
 
 def claim(claims: dict[str, Any], name: str) -> Any:
     return claims.get(f"{CLAIM_NAMESPACE}{name}", claims.get(name))
+
+
+def is_admin_claims(claims: dict[str, Any]) -> bool:
+    """True when the token carries the admin role (mirrors ``core.auth``)."""
+    if claim(claims, "isAdmin"):
+        return True
+    roles = claim(claims, "roles") or []
+    if isinstance(roles, str):
+        roles = [roles]
+    if not isinstance(roles, list):
+        return False
+    return any(str(role).strip().lower() == "admin" for role in roles)
 
 
 def _new_user_id() -> str:
@@ -72,6 +88,12 @@ def _profile_item(
     elif existing and existing.get("fullName"):
         item["fullName"] = existing["fullName"]
     item["createdAt"] = (existing or {}).get("createdAt") or timestamp
+    item["isAdmin"] = is_admin_claims(claims)
+    # Project the profile onto GSI3 so the admin console can list users without
+    # a Scan. Newest first via the ``<createdAt>#<userId>`` sort key.
+    if sub:
+        item[GSI3[0]] = USERS_ALL_PK
+        item[GSI3[1]] = f"{item['createdAt']}#{user_id}"
     return item
 
 
@@ -124,6 +146,27 @@ def get_user_by_id(user_id: str | None) -> dict[str, Any] | None:
         Key={"pk": user_pk(normalized), "sk": PROFILE_SK}, ConsistentRead=True
     )
     return response.get("Item")
+
+
+def list_users(
+    limit: int = 25, exclusive_start_key: dict[str, Any] | None = None
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """A page of user profiles (newest first) for the admin console.
+
+    Uses the shared GSI3 partition — never a Scan. Returns the items and the
+    ``LastEvaluatedKey`` to pass back as a cursor.
+    """
+    kwargs: dict[str, Any] = {
+        "IndexName": "byStatus",
+        "KeyConditionExpression": f"{GSI3[0]} = :pk",
+        "ExpressionAttributeValues": {":pk": USERS_ALL_PK},
+        "ScanIndexForward": False,
+        "Limit": max(1, min(int(limit), 100)),
+    }
+    if exclusive_start_key:
+        kwargs["ExclusiveStartKey"] = exclusive_start_key
+    response = table().query(**kwargs)
+    return response.get("Items") or [], response.get("LastEvaluatedKey")
 
 
 def get_user_by_sub(sub: str | None) -> dict[str, Any] | None:
@@ -188,5 +231,6 @@ def get_or_create_user(claims: dict[str, Any]) -> dict[str, Any]:
     user_id = str(profile["userId"])
     settings.ensure_settings(user_id)
     settings.ensure_notification_preferences(user_id)
-    quotas.ensure_quota(user_id)
+    # Admins get a larger application-token budget ($20 vs the $2 default).
+    quotas.ensure_quota(user_id, is_admin=is_admin_claims(claims))
     return profile

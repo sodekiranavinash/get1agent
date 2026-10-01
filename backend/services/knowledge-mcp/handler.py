@@ -8,6 +8,7 @@ retrieval Lambda any more.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from typing import Any
@@ -154,7 +155,7 @@ def search_user_knowledge_bases(
     """Run hybrid search across the user's knowledge bases."""
     sub = require_sub()
     try:
-        result = _search(
+        result = _search_cached(
             sub,
             str(query or "").strip(),
             knowledge_base_names=_as_list(knowledgeBaseNames),
@@ -171,6 +172,68 @@ def search_user_knowledge_bases(
     return json_dumps(result)
 
 
+def _search_cached(
+    sub: str,
+    query: str,
+    *,
+    knowledge_base_names: list[str],
+    tags: list[str],
+    rerank: bool,
+    top_k: int = DEFAULT_TOP_K,
+    max_per_document: int = DEFAULT_MAX_PER_DOCUMENT,
+) -> dict[str, Any]:
+    """Single-flight wrapper around the real ``_search`` (dedupe concurrent work).
+
+    Rate limiting is handled at the API Gateway; this only avoids recomputing the
+    same search for concurrent identical requests.
+    """
+    try:
+        from core import cache
+    except Exception:  # noqa: BLE001
+        cache = None  # type: ignore[assignment]
+    try:
+        from core import singleflight
+    except Exception:  # noqa: BLE001 - dedupe is optional
+        singleflight = None  # type: ignore[assignment]
+
+    result_key = ""
+    if cache is not None and cache.enabled():
+        result_key = cache.cache_key(
+            "search",
+            sub,
+            query,
+            ",".join(sorted(knowledge_base_names)),
+            ",".join(sorted(tags)),
+            bool(rerank),
+            top_k,
+            max_per_document,
+        )
+        hit = cache.get(result_key)
+        if hit is not None:
+            return hit
+
+    def compute() -> dict[str, Any]:
+        return _search(
+            sub,
+            query,
+            knowledge_base_names=knowledge_base_names,
+            tags=tags,
+            rerank=rerank,
+            top_k=top_k,
+            max_per_document=max_per_document,
+        )
+
+    if singleflight is not None and singleflight.enabled() and result_key:
+        return singleflight.single_flight(
+            lock_key=cache.cache_key("sf", result_key),  # noqa: SLF001
+            result_key=result_key,
+            ttl_seconds=singleflight.lock_ttl(),
+            wait=singleflight.wait_seconds(),
+            compute=compute,
+        )
+    return compute()
+
+
 def _search(
     sub: str,
     query: str,
@@ -183,6 +246,32 @@ def _search(
 ) -> dict[str, Any]:
     if not query:
         raise RetrievalError("invalid_request", "query is required")
+
+    try:
+        from core import cache
+    except Exception:  # noqa: BLE001 - cache is optional
+        cache = None  # type: ignore[assignment]
+    cache_key = ""
+    if cache is not None and cache.enabled():
+        cache_key = cache.cache_key(
+            "search",
+            sub,
+            query,
+            ",".join(sorted(knowledge_base_names)),
+            ",".join(sorted(tags)),
+            bool(rerank),
+            top_k,
+            max_per_document,
+        )
+        hit = cache.get(cache_key)
+        if hit is not None:
+            return hit
+
+    try:
+        from core import semantic_cache
+    except Exception:  # noqa: BLE001 - semantic cache is optional
+        semantic_cache = None  # type: ignore[assignment]
+    kb_signature = ",".join(sorted(knowledge_base_names)) or "*"
 
     use_rerank = bool(rerank)
     candidate_limit = _int(
@@ -197,6 +286,13 @@ def _search(
     if not vectors:
         raise RetrievalError("embedding_failed", "Could not embed the query", 502)
     embed_ms = int((time.perf_counter() - embed_started) * 1000)
+
+    if semantic_cache is not None and semantic_cache.enabled():
+        semantic_hit = semantic_cache.lookup(
+            user_id=sub, vector=vectors[0], require={"kb": kb_signature}
+        )
+        if semantic_hit is not None:
+            return semantic_hit
 
     search_started = time.perf_counter()
     result = search(
@@ -250,7 +346,7 @@ def _search(
         for candidate in selected
     ]
 
-    return {
+    payload = {
         "chunks": chunks,
         "sources": group_sources(selected),
         "meta": {
@@ -268,6 +364,17 @@ def _search(
         },
         "error": None,
     }
+    if cache_key:
+        cache.set(cache_key, payload, cache.ttl("search", 300))
+    if semantic_cache is not None and semantic_cache.enabled():
+        semantic_cache.store(
+            user_id=sub,
+            vector=vectors[0],
+            value=payload,
+            vector_id=hashlib.sha256(query.encode("utf-8")).hexdigest()[:32],
+            require={"kb": kb_signature},
+        )
+    return payload
 
 
 # Register tools explicitly so optional arguments are not marked required.

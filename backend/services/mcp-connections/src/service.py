@@ -21,6 +21,7 @@ from core import crypto, mcp_http, oauth
 from core.storage import Storage
 from data.client import now_epoch, now_iso
 from data.repositories import mcp_connections as repo
+from data.repositories import vault as vault_repo
 from data.repositories.mcp_connections import (
     STATUS_CONNECTED,
     STATUS_ERROR,
@@ -498,7 +499,18 @@ def _uses_token(connection: dict[str, Any]) -> bool:
 
 
 def _token_for(user_id: str, connection: dict[str, Any]) -> str | None:
-    return access_token(user_id, connection) if _uses_token(connection) else None
+    if not _uses_token(connection):
+        return None
+    token = access_token(user_id, connection)
+    # An API key may be stored as a Vault reference (``{{vault:name}}``) so the
+    # secret lives encrypted in the Vault instead of on the connection. Resolve
+    # it here, at call time, so rotating the Vault value is picked up live.
+    if vault_repo.has_references(token):
+        try:
+            token = vault_repo.resolve_references(user_id, token)
+        except vault_repo.VaultReferenceError as exc:
+            raise ApiError(400, str(exc)) from exc
+    return token
 
 
 def _retry_after_auth_error(user_id: str, connection: dict[str, Any]) -> dict[str, Any]:

@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   BarChart3,
   BookOpen,
+  BookText,
   Bot,
   CalendarClock,
   ClipboardCheck,
@@ -11,11 +12,14 @@ import {
   Gauge,
   GitBranch,
   HardDrive,
+  KeyRound,
   LayoutDashboard,
+  LifeBuoy,
   MessageSquare,
   Plug,
   Sparkles,
   Workflow,
+  Wrench,
 } from 'lucide-react'
 
 export type SidebarChild = {
@@ -45,6 +49,7 @@ export const sidebarSections: Record<string, string> = {
   marketplace: 'Marketplace',
   labs: 'Labs',
   manage: 'Manage',
+  help: 'Help',
 }
 
 export const sidebarLinks: SidebarLink[] = [
@@ -75,8 +80,34 @@ export const sidebarLinks: SidebarLink[] = [
     tooltip: 'Scheduled Jobs',
     icon: CalendarClock,
     section: 'build',
-    badge: '3',
   },
+  {
+    to: '/mcp-builder',
+    label: 'MCP Builder',
+    icon: Wrench,
+    section: 'build',
+  },
+  {
+    to: '/traces',
+    label: 'Traces',
+    tooltip: 'Traces',
+    icon: BarChart3,
+    section: 'labs',
+  },
+  {
+    to: '/playground',
+    label: 'Playground',
+    tooltip: 'Prompt Playground',
+    icon: FlaskConical,
+    section: 'labs',
+  },
+  {
+    to: '/evaluations',
+    label: 'Evaluations',
+    icon: ClipboardCheck,
+    section: 'labs',
+  },
+  { to: '/metrics', label: 'Metrics', icon: Gauge, section: 'labs' },
 
   {
     to: '/knowledge-bases',
@@ -100,22 +131,22 @@ export const sidebarLinks: SidebarLink[] = [
     section: 'marketplace',
   },
 
-  {
-    to: '/experiments',
-    label: 'Playground',
-    icon: FlaskConical,
-    section: 'labs',
-  },
-  {
-    to: '/evaluations',
-    label: 'Evaluations',
-    icon: ClipboardCheck,
-    section: 'labs',
-  },
-  { to: '/metrics', label: 'Metrics', icon: Gauge, section: 'labs' },
-  { to: '/insights', label: 'Traces', icon: BarChart3, section: 'labs' },
-
+  { to: '/vault', label: 'Vault', icon: KeyRound, section: 'manage' },
   { to: '/usage', label: 'Usage', icon: CreditCard, section: 'manage' },
+
+  {
+    to: '/docs',
+    label: 'Docs',
+    tooltip: 'Documentation',
+    icon: BookText,
+    section: 'help',
+  },
+  {
+    to: '/support',
+    label: 'Support',
+    icon: LifeBuoy,
+    section: 'help',
+  },
 ]
 
 export const sectionOrder: string[] = [
@@ -125,4 +156,5 @@ export const sectionOrder: string[] = [
   'marketplace',
   'labs',
   'manage',
+  'help',
 ]

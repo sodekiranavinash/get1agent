@@ -3,6 +3,7 @@
 The wire contract (consumed by the builder panel and the chat screen):
 
     {"type": "run.started",   "runId", "agentId", "sessionId"}
+    {"type": "skills",        "skills": [{"id", "name"}]}
     {"type": "plan.started"}
     {"type": "plan",          "understanding", "subQueries": [{"query", "todos"}]}
     {"type": "text",          "data"}
@@ -10,8 +11,12 @@ The wire contract (consumed by the builder panel and the chat screen):
     {"type": "tool.input",    "toolUseId", "input"}
     {"type": "tool.stream",   "name", "data"}
     {"type": "tool.result",   "toolUseId", "status", "data", "sources"}
+    {"type": "question",      "questionId", "question", "options", "allowCustom"}
     {"type": "run.completed", "stopReason", "usage"}
     {"type": "run.error",     "message"}
+
+The ``question`` frame is human-in-the-loop only (chat): the agent paused via a
+Strands interrupt and the client resumes the same run with ``interruptResponses``.
 """
 
 from __future__ import annotations
@@ -20,16 +25,45 @@ import json
 from typing import Any
 
 
+# ``accumulated_usage`` is an object in some Strands versions and a plain dict
+# in others, and the keys are camelCase or snake_case depending on the version.
+_USAGE_KEYS: dict[str, tuple[str, ...]] = {
+    "inputTokens": ("inputTokens", "input_tokens"),
+    "outputTokens": ("outputTokens", "output_tokens"),
+    "totalTokens": ("totalTokens", "total_tokens"),
+}
+
+
+def _usage_value(usage: Any, names: tuple[str, ...]) -> Any:
+    for name in names:
+        if isinstance(usage, dict):
+            if usage.get(name) is not None:
+                return usage[name]
+        else:
+            value = getattr(usage, name, None)
+            if value is not None:
+                return value
+    return None
+
+
+def accumulated_usage(usage: Any) -> dict[str, Any]:
+    """Normalize an ``accumulated_usage`` (object or dict) into camelCase keys."""
+    if not usage:
+        return {}
+    return {key: _usage_value(usage, names) for key, names in _USAGE_KEYS.items()}
+
+
 def _usage(result: Any) -> dict[str, Any]:
     metrics = getattr(result, "metrics", None)
     usage = getattr(metrics, "accumulated_usage", None) if metrics else None
-    if not usage:
-        return {}
-    return {
-        "inputTokens": getattr(usage, "inputTokens", None),
-        "outputTokens": getattr(usage, "outputTokens", None),
-        "totalTokens": getattr(usage, "totalTokens", None),
-    }
+    if not usage and metrics is not None:
+        summary = getattr(metrics, "get_summary", None)
+        if callable(summary):
+            try:
+                usage = (summary() or {}).get("accumulated_usage")
+            except Exception:  # noqa: BLE001 - a meter must never break a run
+                usage = None
+    return accumulated_usage(usage)
 
 
 def _content_text(content: Any) -> str:

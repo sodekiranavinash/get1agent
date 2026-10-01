@@ -23,6 +23,11 @@ output "control_plane_invoke_arn" {
   description = "Invoke ARN of the control-plane Lambda (API Gateway integration)"
 }
 
+output "control_plane_function_arn" {
+  value       = try(aws_lambda_function.proxy[0].arn, "")
+  description = "ARN of the control-plane Lambda (direct-invoke IAM for evaluations)"
+}
+
 output "microvm_image_arn" {
   value       = try(aws_lambdamicrovms_image.agent_run[0].arn, "")
   description = "ARN of the agent-run Lambda MicroVM image (streaming proxy)"

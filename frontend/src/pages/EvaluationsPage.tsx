@@ -1,224 +1,190 @@
+import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { ClipboardCheck, Database, Gauge, Plus, Target } from 'lucide-react'
-import { Badge } from '../components/ui/Badge'
-import { Button } from '../components/ui/Button'
-import { Card } from '../components/ui/Card'
+import { Plus } from 'lucide-react'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
-import { Progress } from '../components/ui/progress'
-import { StatCard } from '../components/ui/StatCard'
+import { Skeleton } from '../components/ui/Skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
+import { useApiClient } from '../lib/api'
+import { usePageQuery } from '../hooks/usePageQuery'
+import { invalidateQuery } from '../lib/query'
+import type { KnowledgeBaseList } from '../lib/knowledgeBases'
+import { EVALS_QUERY_KEY, datasetQueryKey, datasetRunsQueryKey, type EvalDataset, type EvalRun } from '../lib/evals'
+import { CompareTab } from '../components/evals/CompareTab'
+import { DatasetsTab } from '../components/evals/DatasetsTab'
+import { DatasetDetailDialog } from '../components/evals/DatasetDetailDialog'
+import { RunsTab } from '../components/evals/RunsTab'
+import { RunDetailDialog } from '../components/evals/RunDetailDialog'
+import { AddCasesDialog, NewDatasetDialog, NewRunDialog } from '../components/evals/EvalDialogs'
 import { fadeUp, stagger } from '../lib/motion'
 
-const kpis = [
-  {
-    label: 'Average score',
-    value: '84%',
-    change: '+4% vs last week',
-    trend: 'up' as const,
-    icon: Target,
-    spark: [72, 75, 78, 79, 82, 83, 84],
-  },
-  {
-    label: 'Pass rate',
-    value: '91%',
-    change: '+2% vs last week',
-    trend: 'up' as const,
-    icon: ClipboardCheck,
-    iconColor: 'text-info',
-    spark: [85, 86, 88, 89, 90, 90, 91],
-  },
-  {
-    label: 'Datasets',
-    value: '6',
-    change: '2 updated',
-    trend: 'neutral' as const,
-    icon: Database,
-    iconColor: 'text-success',
-    spark: [3, 4, 4, 5, 5, 6, 6],
-  },
-  {
-    label: 'Evaluators',
-    value: '9',
-    change: '3 custom',
-    trend: 'neutral' as const,
-    icon: Gauge,
-    iconColor: 'text-warning',
-    spark: [5, 6, 6, 7, 8, 8, 9],
-  },
-]
-
-const runs = [
-  {
-    name: 'support-faq · nightly',
-    dataset: 'support-faq',
-    evaluator: 'answer-correctness',
-    score: 88,
-    status: 'passed' as const,
-  },
-  {
-    name: 'docs-qa · release-42',
-    dataset: 'product-docs-qa',
-    evaluator: 'groundedness',
-    score: 76,
-    status: 'passed' as const,
-  },
-  {
-    name: 'release-notes · weekly',
-    dataset: 'release-notes',
-    evaluator: 'relevance',
-    score: 62,
-    status: 'failed' as const,
-  },
-]
-
-const datasets = [
-  { name: 'support-faq', rows: 320, updated: '2h ago' },
-  { name: 'product-docs-qa', rows: 148, updated: 'Yesterday' },
-  { name: 'release-notes', rows: 64, updated: '3 days ago' },
-]
-
-const evaluators = [
-  { name: 'answer-correctness', type: 'LLM judge' },
-  { name: 'groundedness', type: 'LLM judge' },
-  { name: 'relevance', type: 'Heuristic' },
-  { name: 'exact-match', type: 'Rule' },
-]
+type EvalsData = {
+  datasets: EvalDataset[]
+  runs: EvalRun[]
+  kbs: KnowledgeBaseList['knowledgeBases']
+  agents: { agentId: string; name: string }[]
+}
 
 export function EvaluationsPage() {
+  const api = useApiClient()
+  const { data, isPending, refetch } = usePageQuery<EvalsData>(EVALS_QUERY_KEY, async () => {
+    const [datasets, runs, kbs, agents] = await Promise.all([
+      api.get<{ datasets: EvalDataset[] }>('/v1/evals/datasets'),
+      api.get<{ runs: EvalRun[] }>('/v1/evals/runs'),
+      api.get<KnowledgeBaseList>('/v1/knowledge-bases'),
+      api.get<{ agents: { id: string; name: string }[] }>('/v1/agents'),
+    ])
+    return {
+      datasets: datasets.datasets,
+      runs: runs.runs,
+      kbs: kbs.knowledgeBases,
+      agents: agents.agents.map((agent) => ({ agentId: agent.id, name: agent.name })),
+    }
+  })
+
+  const [tab, setTab] = useState('datasets')
+  const [newDatasetOpen, setNewDatasetOpen] = useState(false)
+  const [addCasesDataset, setAddCasesDataset] = useState<EvalDataset | null>(null)
+  const [runDialogOpen, setRunDialogOpen] = useState(false)
+  const [runDatasetId, setRunDatasetId] = useState<string | undefined>(undefined)
+  const [openRunId, setOpenRunId] = useState<string | null>(null)
+  const [detailDataset, setDetailDataset] = useState<EvalDataset | null>(null)
+
+  function refresh() {
+    invalidateQuery(EVALS_QUERY_KEY)
+    if (detailDataset) {
+      invalidateQuery(datasetQueryKey(detailDataset.datasetId))
+      invalidateQuery(datasetRunsQueryKey(detailDataset.datasetId))
+    }
+    refetch()
+  }
+
+  if (isPending) return <EvaluationsSkeleton />
+
+  const datasets = data?.datasets ?? []
+  const runs = data?.runs ?? []
+  const kbs = data?.kbs ?? []
+  const agents = data?.agents ?? []
+
+  const action =
+    tab === 'datasets'
+      ? { label: 'New dataset', icon: <Plus className="size-3.5" />, onClick: () => setNewDatasetOpen(true) }
+      : tab === 'runs'
+        ? {
+            label: 'New evaluation',
+            icon: <Plus className="size-3.5" />,
+            onClick: () => {
+              setRunDatasetId(datasets[0]?.datasetId)
+              setRunDialogOpen(true)
+            },
+          }
+        : undefined
+
   return (
     <PageShell>
       <PageHeader
         title="Evaluations"
-        description="Score agent outputs against datasets with reusable evaluators."
+        description="Run RAG evaluations against golden datasets and compare runs."
         badge="Evaluate"
-        action={{ label: 'New evaluation', icon: <Plus className="size-3.5" /> }}
+        badgeVariant="info"
+        action={action}
       />
 
       <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-3">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {kpis.map((kpi) => (
-            <motion.div key={kpi.label} variants={fadeUp}>
-              <StatCard {...kpi} />
-            </motion.div>
-          ))}
-        </div>
-
         <motion.div variants={fadeUp}>
-          <Tabs defaultValue="runs">
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList>
-              <TabsTrigger value="runs">Runs</TabsTrigger>
               <TabsTrigger value="datasets">Datasets</TabsTrigger>
-              <TabsTrigger value="evaluators">Evaluators</TabsTrigger>
+              <TabsTrigger value="runs">Runs</TabsTrigger>
+              <TabsTrigger value="compare">Compare</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="runs">
-              <Card padding="none" className="overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px] text-left">
-                    <thead>
-                      <tr className="border-b border-border bg-raised/40">
-                        {['Evaluation', 'Dataset', 'Evaluator', 'Score', 'Status'].map(
-                          (header) => (
-                            <th
-                              key={header}
-                              className="px-4 py-2.5 text-[11px] font-semibold text-muted"
-                            >
-                              {header}
-                            </th>
-                          ),
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {runs.map((run) => (
-                        <tr
-                          key={run.name}
-                          className="transition-colors hover:bg-raised/40"
-                        >
-                          <td className="px-4 py-2.5 text-[13px] font-medium text-foreground">
-                            {run.name}
-                          </td>
-                          <td className="px-4 py-2.5 font-mono text-xs text-muted">
-                            {run.dataset}
-                          </td>
-                          <td className="px-4 py-2.5 text-xs text-muted">
-                            {run.evaluator}
-                          </td>
-                          <td className="px-4 py-2.5">
-                            <div className="flex items-center gap-2">
-                              <Progress value={run.score} className="w-24" />
-                              <span className="text-xs tabular-nums text-foreground">
-                                {run.score}%
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-2.5">
-                            <Badge
-                              variant={run.status === 'passed' ? 'success' : 'warning'}
-                              dot
-                            >
-                              {run.status}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-            </TabsContent>
-
             <TabsContent value="datasets">
-              <Card padding="none" className="overflow-hidden">
-                <div className="divide-y divide-border">
-                  {datasets.map((dataset) => (
-                    <div
-                      key={dataset.name}
-                      className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-raised/40"
-                    >
-                      <span className="flex size-7 items-center justify-center rounded-md border border-border bg-raised text-info">
-                        <Database className="size-3.5" strokeWidth={1.75} />
-                      </span>
-                      <span className="min-w-0 flex-1 font-mono text-[13px] text-foreground">
-                        {dataset.name}
-                      </span>
-                      <span className="text-xs text-muted">{dataset.rows} rows</span>
-                      <span className="w-24 text-right text-xs text-subtle">
-                        {dataset.updated}
-                      </span>
-                      <Button variant="outline" size="sm">
-                        Open
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </Card>
+              <DatasetsTab
+                datasets={datasets}
+                onRefresh={refresh}
+                onOpen={(dataset) => {
+                  invalidateQuery(datasetQueryKey(dataset.datasetId))
+                  invalidateQuery(datasetRunsQueryKey(dataset.datasetId))
+                  setDetailDataset(dataset)
+                }}
+                onAddCases={(dataset) => setAddCasesDataset(dataset)}
+                onRun={(dataset) => {
+                  setRunDatasetId(dataset.datasetId)
+                  setRunDialogOpen(true)
+                }}
+              />
             </TabsContent>
 
-            <TabsContent value="evaluators">
-              <Card padding="none" className="overflow-hidden">
-                <div className="divide-y divide-border">
-                  {evaluators.map((evaluator) => (
-                    <div
-                      key={evaluator.name}
-                      className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-raised/40"
-                    >
-                      <span className="flex size-7 items-center justify-center rounded-md border border-border bg-raised text-accent">
-                        <Gauge className="size-3.5" strokeWidth={1.75} />
-                      </span>
-                      <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
-                        {evaluator.name}
-                      </span>
-                      <Badge>{evaluator.type}</Badge>
-                    </div>
-                  ))}
-                </div>
-              </Card>
+            <TabsContent value="runs">
+              <RunsTab runs={runs} onOpen={setOpenRunId} onRefresh={refresh} />
+            </TabsContent>
+
+            <TabsContent value="compare">
+              <CompareTab runs={runs} />
             </TabsContent>
           </Tabs>
         </motion.div>
       </motion.div>
+
+      <NewDatasetDialog open={newDatasetOpen} onOpenChange={setNewDatasetOpen} onCreated={refresh} />
+      <AddCasesDialog
+        dataset={addCasesDataset}
+        onOpenChange={(open) => {
+          if (!open) setAddCasesDataset(null)
+        }}
+        onAdded={refresh}
+      />
+      <NewRunDialog
+        key={runDatasetId ?? 'none'}
+        open={runDialogOpen}
+        datasets={datasets}
+        initialDatasetId={runDatasetId}
+        knowledgeBases={kbs}
+        agents={agents}
+        onOpenChange={setRunDialogOpen}
+        onStarted={(run) => {
+          refresh()
+          setTab('runs')
+          setOpenRunId(run.runId)
+        }}
+      />
+      <RunDetailDialog
+        key={openRunId ?? 'none'}
+        runId={openRunId}
+        onOpenChange={(open) => !open && setOpenRunId(null)}
+      />
+      <DatasetDetailDialog
+        key={detailDataset?.datasetId ?? 'none'}
+        dataset={detailDataset}
+        onOpenChange={(open) => !open && setDetailDataset(null)}
+        onRun={(dataset) => {
+          setDetailDataset(null)
+          setRunDatasetId(dataset.datasetId)
+          setRunDialogOpen(true)
+        }}
+        onAddCases={(dataset) => {
+          setDetailDataset(null)
+          setAddCasesDataset(dataset)
+        }}
+      />
+    </PageShell>
+  )
+}
+
+function EvaluationsSkeleton() {
+  return (
+    <PageShell>
+      <div className="mb-5 space-y-2">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-4 w-72" />
+      </div>
+      <Skeleton className="mb-3 h-8 w-64" />
+      <div className="space-y-2">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Skeleton key={index} className="h-14 w-full" />
+        ))}
+      </div>
     </PageShell>
   )
 }

@@ -67,7 +67,18 @@ class BuildBodyTests(unittest.TestCase):
     def test_highlights_can_be_disabled(self) -> None:
         body, _ = exa.build_body({"query": "x", "highlights": False, "text": True})
         self.assertNotIn("highlights", body["contents"])
-        self.assertEqual(body["contents"]["text"], True)
+        # Full text is always bounded so a page cannot flood the context.
+        self.assertEqual(
+            body["contents"]["text"], {"maxCharacters": exa.DEFAULT_TEXT_MAX_CHARACTERS}
+        )
+
+    def test_text_length_is_capped(self) -> None:
+        body, _ = exa.build_body(
+            {"query": "x", "text": True, "textMaxCharacters": 999_999}
+        )
+        self.assertEqual(
+            body["contents"]["text"], {"maxCharacters": exa.MAX_TEXT_MAX_CHARACTERS}
+        )
 
     def test_filters_and_dates(self) -> None:
         body, warnings = exa.build_body(

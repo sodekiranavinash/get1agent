@@ -42,6 +42,16 @@ class TrimToolResultsTests(unittest.TestCase):
         self.assertEqual(_text_of(trimmed[3]), "B" * 5000)
         self.assertEqual(_text_of(trimmed[5]), "C" * 5000)
 
+    def test_recent_result_is_capped(self) -> None:
+        # A single huge payload (e.g. a full-text web search) must never reach the
+        # model unbounded, even as the most recent result.
+        messages = _pair("a", "web-search", "A" * 50000)
+        trimmed = context.trim_tool_results(messages, max_chars=100, recent_chars=500)
+        self.assertTrue(_text_of(trimmed[1]).endswith(context.TRUNCATION_MARKER))
+        self.assertLessEqual(
+            len(_text_of(trimmed[1])), 500 + len(context.TRUNCATION_MARKER)
+        )
+
     def test_knowledge_is_exempt(self) -> None:
         messages = (
             _pair("k", "search-user-knowledge-bases", "K" * 5000)

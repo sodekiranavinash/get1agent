@@ -84,6 +84,35 @@ class CleanPlanTests(unittest.TestCase):
         self.assertIsNone(planner._clean_plan({"understanding": "x"}))
         self.assertIsNone(planner._clean_plan(None))
 
+    def test_skill_names_are_not_treated_as_tools(self) -> None:
+        raw = {
+            "subQueries": [
+                {
+                    "query": "compose",
+                    "todos": [
+                        {"title": "Compose the email", "tool": "email-composer"},
+                        {"title": "Look it up", "tool": "email-composer, web-search"},
+                    ],
+                }
+            ]
+        }
+        plan = planner._clean_plan(raw, frozenset({"email-composer"}))
+        self.assertEqual(len(plan["subQueries"]), 1)
+        todos = plan["subQueries"][0]["todos"]
+        self.assertEqual([todo["tool"] for todo in todos], ["web-search"])
+        self.assertEqual(todos[0]["title"], "Look it up")
+
+    def test_sub_query_with_only_a_skill_is_dropped(self) -> None:
+        raw = {
+            "subQueries": [
+                {
+                    "query": "compose",
+                    "todos": [{"title": "Compose the email", "tool": "email-composer"}],
+                }
+            ]
+        }
+        self.assertIsNone(planner._clean_plan(raw, frozenset({"email-composer"})))
+
 
 class ExecutionInputTests(unittest.TestCase):
     def test_folds_steps_with_sub_query_headings(self) -> None:

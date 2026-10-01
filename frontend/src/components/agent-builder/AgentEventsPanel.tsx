@@ -4,18 +4,24 @@ import {
   AlertTriangle,
   ArrowUpRight,
   CheckCircle2,
+  ExternalLink,
   FileText,
   Info,
+  Play,
+  Square,
   XCircle,
   type LucideIcon,
 } from 'lucide-react'
+import { Button } from '../ui/Button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs'
 import { Spinner } from '../ui/Spinner'
 import { RunTimeline } from '../chat/RunTimeline'
+import { RunFeedback } from '../chat/RunFeedback'
 import { useApiClient } from '../../lib/api'
 import type { AgentEvent, AgentEventKind } from '../../lib/agents'
 import type { Conversation } from '../../lib/conversations'
 import type { RunFields } from '../../lib/runState'
+import { traceHref } from '../../lib/trace'
 
 const KIND_META: Record<AgentEventKind, { icon: LucideIcon; className: string }> = {
   info: { icon: Info, className: 'text-muted' },
@@ -138,30 +144,108 @@ function RunsList({
     <ul>
       {runs.map((run) => (
         <li key={run.conversationId} className="border-b border-border/70 last:border-b-0">
-          <Link
-            to={`/chat/conversation/${run.conversationId}?agent=${encodeURIComponent(
-              agentName || run.agentName,
-            )}`}
-            className="flex items-start gap-3 px-4 py-2.5 transition-colors hover:bg-raised/60"
-          >
-            <span className="mt-0.5 shrink-0 rounded-full bg-raised px-1.5 text-[10px] font-semibold tabular-nums text-subtle">
-              #{run.conversationId}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[12.5px] leading-snug text-foreground">
-                {run.title || 'Untitled run'}
-              </p>
-              <p className="mt-0.5 truncate text-[11px] text-muted">
-                {run.lastPreview || (run.kind === 'run' ? 'Test run' : 'Conversation')}
-              </p>
+          <div className="flex items-start gap-3 px-4 py-2.5 transition-colors hover:bg-raised/60">
+            <Link
+              to={`/chat/conversation/${run.conversationId}?agent=${encodeURIComponent(
+                agentName || run.agentName,
+              )}`}
+              className="flex min-w-0 flex-1 items-start gap-3"
+            >
+              <span className="mt-0.5 shrink-0 rounded-full bg-raised px-1.5 text-[10px] font-semibold tabular-nums text-subtle">
+                #{run.conversationId}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[12.5px] leading-snug text-foreground">
+                  {run.title || 'Untitled run'}
+                </p>
+                <p className="mt-0.5 truncate text-[11px] text-muted">
+                  {run.lastPreview || (run.kind === 'run' ? 'Test run' : 'Conversation')}
+                </p>
+              </div>
+            </Link>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <span className="whitespace-nowrap text-[10px] text-subtle">
+                {timeAgo(run.updatedAt)}
+              </span>
+              <div className="flex items-center gap-2">
+                {run.lastRunId ? (
+                  <RunFeedback
+                    runId={run.lastRunId}
+                    feedback={run.feedback}
+                    traceId={run.lastTraceId}
+                    conversationId={run.conversationId}
+                    agentId={agentId}
+                  />
+                ) : null}
+                {traceHref(run.lastTraceUrl) ? (
+                  <a
+                    href={traceHref(run.lastTraceUrl) ?? undefined}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[10px] font-medium text-subtle transition-colors hover:text-accent"
+                  >
+                    Trace
+                    <ExternalLink className="size-2.5" strokeWidth={1.9} />
+                  </a>
+                ) : null}
+              </div>
             </div>
-            <span className="shrink-0 whitespace-nowrap text-[10px] text-subtle">
-              {timeAgo(run.updatedAt)}
-            </span>
-          </Link>
+          </div>
         </li>
       ))}
     </ul>
+  )
+}
+
+/** Run-here composer: the question is typed per run and never saved on the agent. */
+function RunComposer({
+  running,
+  configured,
+  onRun,
+  onStop,
+}: {
+  running: boolean
+  configured: boolean
+  onRun: (question: string) => void
+  onStop: () => void
+}) {
+  const [draft, setDraft] = useState('')
+  const submit = () => {
+    const question = draft.trim()
+    if (!question || running) return
+    onRun(question)
+  }
+
+  return (
+    <div className="border-b border-border/70 p-3">
+      <textarea
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault()
+            submit()
+          }
+        }}
+        rows={2}
+        placeholder="Ask this agent…"
+        disabled={running}
+        className="scrollbar-thin w-full resize-y rounded-lg border border-border bg-canvas px-2.5 py-2 text-[12.5px] leading-relaxed text-foreground outline-none placeholder:text-subtle focus-visible:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent/20 disabled:opacity-60"
+      />
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <Button
+          variant={running ? 'outline' : 'primary'}
+          size="sm"
+          icon={running ? <Square className="size-3.5" /> : <Play className="size-3.5" />}
+          onClick={running ? onStop : submit}
+          disabled={!running && (!configured || !draft.trim())}
+          title={configured ? undefined : 'Set VITE_AGENT_RUN_URL to run'}
+        >
+          {running ? 'Stop' : 'Run'}
+        </Button>
+        <span className="text-[10.5px] text-subtle">Asked each run — not saved</span>
+      </div>
+    </div>
   )
 }
 
@@ -169,6 +253,9 @@ export function AgentEventsPanel({
   events,
   run = null,
   running = false,
+  onRun,
+  onStop,
+  configured = true,
   agentId = '',
   agentName = '',
   conversationId = '',
@@ -177,6 +264,9 @@ export function AgentEventsPanel({
   events: AgentEvent[]
   run?: RunFields | null
   running?: boolean
+  onRun?: (question: string) => void
+  onStop?: () => void
+  configured?: boolean
   agentId?: string
   agentName?: string
   conversationId?: string
@@ -222,11 +312,21 @@ export function AgentEventsPanel({
 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
           <TabsContent value="response">
+            {onRun ? (
+              <RunComposer
+                running={running}
+                configured={configured}
+                onRun={onRun}
+                onStop={onStop ?? (() => {})}
+              />
+            ) : null}
             {run ? (
               <div className="space-y-3 p-3">
                 <RunTimeline
                   plan={run.plan}
                   planning={run.planning}
+                  skills={run.skills}
+                  attachments={run.attachments}
                   status={run.status}
                   startedAt={run.startedAt}
                   endedAt={run.endedAt}

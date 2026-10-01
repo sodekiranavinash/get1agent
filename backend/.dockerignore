@@ -1,0 +1,10 @@
+# Keep the build context small — the agent image only needs agents/ source +
+# the shared packages, never local virtualenvs, bytecode or build artifacts.
+**/.venv/
+**/venv/
+**/__pycache__/
+**/*.pyc
+**/dist/
+agents/tests/
+.github/
+.git/

@@ -16,11 +16,15 @@ on:
         type: boolean
         default: false
       mcp_tools:
-        description: MCP tools (web-search, code-interpreter, mcp-connections)
+        description: MCP tools (web-search, code-interpreter, http-fetch, custom-tools, mcp-connections)
         type: boolean
         default: false
       ingestion_apis:
         description: Ingestion APIs (dispatcher, extract, embed, index, mark-failed, watchdog)
+        type: boolean
+        default: false
+      scheduler:
+        description: Scheduler (scheduled agent/workflow runs)
         type: boolean
         default: false
 

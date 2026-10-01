@@ -31,8 +31,14 @@ def append_turn(
     user_id: str,
     conversation_id: str | int,
     turn: dict[str, Any],
+    *,
+    replace_run_id: str | None = None,
 ) -> None:
-    """Read-modify-write the conversation transcript (one object per chat)."""
+    """Read-modify-write the conversation transcript (one object per chat).
+
+    ``replace_run_id`` rewrites that run's existing turn in place instead of
+    appending — how a human-in-the-loop resume replaces the paused turn.
+    """
     if not config.s3_bucket:
         return
     storage = Storage()
@@ -41,7 +47,17 @@ def append_turn(
     turns = data.get("turns")
     if not isinstance(turns, list):
         turns = []
-    turns.append(turn)
+    replaced = False
+    if replace_run_id:
+        for index, existing in enumerate(turns):
+            if isinstance(existing, dict) and str(existing.get("runId") or "") == str(
+                replace_run_id
+            ):
+                turns[index] = turn
+                replaced = True
+                break
+    if not replaced:
+        turns.append(turn)
     storage.put_json(
         key,
         {
@@ -61,14 +77,49 @@ def persist_turn(
     *,
     run_id: str,
     preview: str = "",
+    trace_id: str | None = None,
+    trace_url: str | None = None,
+    replace_run_id: str | None = None,
 ) -> None:
+    # Only persist for a conversation that actually exists. A stale/unknown id
+    # (e.g. a deleted conversation still in a tab's URL) must not write an
+    # orphan transcript: conversation ids come from one global counter, so a
+    # later conversation could be assigned the same id and appear to inherit
+    # the orphan turns.
     try:
-        append_turn(config, user_id, conversation_id, turn)
+        conversation_number = int(conversation_id)
+    except (TypeError, ValueError) as exc:
+        _warn("Conversation id is not numeric; skipping persistence", exc)
+        return
+    try:
+        if conversations_repo.get_conversation(user_id, conversation_number) is None:
+            _warn(
+                "Skipping persistence for unknown conversation",
+                KeyError(str(conversation_id)),
+            )
+            return
+    except Exception as exc:  # noqa: BLE001 - never fail a run on the check
+        _warn("Conversation lookup failed; skipping persistence", exc)
+        return
+
+    try:
+        append_turn(
+            config,
+            user_id,
+            conversation_number,
+            turn,
+            replace_run_id=replace_run_id,
+        )
     except Exception as exc:  # noqa: BLE001 - never fail a run on persistence
         _warn("Conversation transcript write failed", exc)
     try:
         conversations_repo.record_run(
-            user_id, int(conversation_id), run_id=run_id, preview=preview
+            user_id,
+            conversation_number,
+            run_id=run_id,
+            preview=preview,
+            trace_id=trace_id,
+            trace_url=trace_url,
         )
     except Exception as exc:  # noqa: BLE001
         _warn("Conversation metadata update failed", exc)

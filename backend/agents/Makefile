@@ -16,10 +16,9 @@ build:
 push: build
 	docker push "$(IMAGE_URI)"
 
-# Create the local venv with the container's dependencies (host dev only).
+# Create/refresh the local venv from the committed lockfile (host dev only).
 install:
-	uv venv --python 3.13 "$(VENV)"
-	uv pip install --python "$(PY)" -r "$(CURDIR)/requirements.txt"
+	uv sync --frozen --python 3.13
 
 # Run the AgentCore app locally on :8080 against the local Floci stack.
 # Loads the repo-root .env; overrides the Docker-internal DynamoDB host with the
@@ -30,7 +29,7 @@ run:
 	cd "$(CURDIR)" && PYTHONPATH="$(BACKEND_ROOT)/packages:$(CURDIR)" "$(PY)" main.py
 
 test:
-	@if [ -d tests ]; then uv run --no-project --python 3.13 python -m unittest discover -s tests -t tests -v; else echo "no unit tests for agents"; fi
+	@if [ -d tests ]; then uv run --frozen --python 3.13 python -m unittest discover -s tests -t tests -v; else echo "no unit tests for agents"; fi
 
 clean:
 	rm -rf dist

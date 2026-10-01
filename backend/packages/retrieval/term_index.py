@@ -10,7 +10,9 @@ exponential backoff, so concurrent indexers never lose updates.
 
 from __future__ import annotations
 
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from retrieval.layout import (
@@ -27,6 +29,23 @@ _BASE_BACKOFF_SECONDS = 0.05
 _MAX_BACKOFF_SECONDS = 2.0
 # Cap prefix expansion so one prefix cannot fan out into thousands of GETs.
 MAX_PREFIX_EXPANSION = 50
+# One term object is written per unique token, so a big document means tens of
+# thousands of GET+conditional-PUT round trips. Writing them one at a time is
+# what pushes a large ingestion past the Lambda timeout, so fan them out across
+# a bounded pool. Each token key is unique within a document (and the If-Match
+# retry already handles two documents racing on the same shared term object).
+_WRITE_MAX_WORKERS = max(1, int(os.environ.get("TERM_INDEX_WRITE_MAX_WORKERS", "16")))
+
+
+def _run_parallel(fn: Callable[[Any], Any], items: list[Any]) -> list[Any]:
+    if not items:
+        return []
+    if len(items) == 1 or _WRITE_MAX_WORKERS == 1:
+        return [fn(item) for item in items]
+    with ThreadPoolExecutor(
+        max_workers=min(_WRITE_MAX_WORKERS, len(items))
+    ) as pool:
+        return list(pool.map(fn, items))
 
 
 def _read_modify_write(
@@ -52,50 +71,64 @@ def read_term(storage: Storage, sub: str, token: str) -> dict[str, Any] | None:
     return data
 
 
+def _add_posting(
+    storage: Storage, sub: str, token: str, posting: dict[str, Any]
+) -> None:
+    chunk_id = posting["chunkId"]
+
+    def mutate(data: dict[str, Any]) -> dict[str, Any]:
+        existing = [
+            item
+            for item in (data.get("postings") or [])
+            if item.get("chunkId") != chunk_id
+        ]
+        existing.append(posting)
+        return {"df": len(existing), "postings": existing}
+
+    _read_modify_write(storage, term_key(sub, token), mutate)
+
+
 def add_postings(
     storage: Storage,
     sub: str,
     postings_by_token: dict[str, dict[str, Any]],
 ) -> None:
     """Add one posting per token, replacing any prior posting for the chunk."""
-    for token, posting in postings_by_token.items():
-        chunk_id = posting["chunkId"]
+    _run_parallel(
+        lambda item: _add_posting(storage, sub, item[0], item[1]),
+        list(postings_by_token.items()),
+    )
 
-        def mutate(data: dict[str, Any], token=token, posting=posting) -> dict[str, Any]:
-            existing = [
-                item
-                for item in (data.get("postings") or [])
-                if item.get("chunkId") != chunk_id
-            ]
-            existing.append(posting)
-            return {"df": len(existing), "postings": existing}
 
-        _read_modify_write(storage, term_key(sub, token), mutate)
+def _remove_posting(storage: Storage, sub: str, token: str, doc_id: str) -> None:
+    key = term_key(sub, token)
+    data, etag = storage.get_json_with_etag(key)
+    if not data:
+        return
+    postings = [
+        item
+        for item in (data.get("postings") or [])
+        if item.get("docId") != doc_id
+    ]
+    if len(postings) == len(data.get("postings") or []):
+        return
+    try:
+        storage.put_json_conditional(
+            key, {"df": len(postings), "postings": postings}, etag
+        )
+    except PreconditionFailed:
+        # Best effort: a racing indexer will re-write this term anyway.
+        return
 
 
 def remove_document_postings(
     storage: Storage, sub: str, tokens: list[str], doc_id: str
 ) -> None:
     """Drop every posting for ``doc_id`` (delete / re-index cleanup)."""
-    for token in tokens:
-        key = term_key(sub, token)
-        data, etag = storage.get_json_with_etag(key)
-        if not data:
-            continue
-        postings = [
-            item
-            for item in (data.get("postings") or [])
-            if item.get("docId") != doc_id
-        ]
-        if len(postings) == len(data.get("postings") or []):
-            continue
-        try:
-            storage.put_json_conditional(
-                key, {"df": len(postings), "postings": postings}, etag
-            )
-        except PreconditionFailed:
-            # Best effort: a racing indexer will re-write this term anyway.
-            continue
+    _run_parallel(
+        lambda token: _remove_posting(storage, sub, token, doc_id),
+        list(tokens),
+    )
 
 
 def update_catalog(storage: Storage, sub: str, tokens: list[str]) -> None:

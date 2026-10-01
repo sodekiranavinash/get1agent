@@ -15,6 +15,9 @@ export type AgentStatus = 'draft' | 'verified' | 'published'
 export type AgentVisibility = 'private' | 'public'
 export type AgentSource = 'write' | 'library'
 export type AgentReasoning = 'low' | 'medium' | 'high'
+
+/** How detailed an agent's answer should be. */
+export type AgentAnswerMode = 'summarize' | 'normal' | 'detailed'
 export type AgentOutputFormat = 'markdown' | 'text' | 'json'
 export type AgentNodeKind =
   | 'input'
@@ -28,9 +31,18 @@ export type AgentNodeKind =
 export type AgentServerSelection = {
   id: string
   name: string
-  source: 'builtin' | 'mcp'
+  /** `custom` servers are the user's Playground Python tools. */
+  source: 'builtin' | 'mcp' | 'custom'
   /** `null` means the whole server; a list restricts it to those tools. */
   tools: string[] | null
+}
+
+/** Per-run overrides of what an agent may use (sent from the chat composer). */
+export type RunResourceOverrides = {
+  knowledgeBaseIds?: string[]
+  skillIds?: string[]
+  servers?: AgentServerSelection[]
+  fileIds?: string[]
 }
 
 export type AgentSchedule = {
@@ -55,7 +67,11 @@ export type AgentNodeData = {
   defaultQuestions?: string[]
   prompt?: string
   model?: string
+  /** Run on one of the user's Vault provider secrets instead of the platform. */
+  providerSecretId?: string
   reasoning?: AgentReasoning
+  /** How detailed the answer should be (normal | medium | deep). */
+  answerMode?: AgentAnswerMode
   outputFormat?: AgentOutputFormat
   /** How the final answer should be shaped (shown on the output card). */
   outputInstructions?: string
@@ -107,7 +123,11 @@ export type AgentConfig = {
   version: number
   prompt: string
   model: string
+  /** Vault provider secret id, or "" to run on the platform gateway. */
+  providerSecretId: string
   reasoning: AgentReasoning
+  /** How detailed the answer should be (normal | medium | deep). */
+  answerMode: AgentAnswerMode
   outputFormat: AgentOutputFormat
   /** Normalized input node (query + attached storage files). */
   input: { query: string; fileIds: string[] }
@@ -135,7 +155,9 @@ export type Agent = {
   source: AgentSource
   version: number
   model: string | null
+  providerSecretId: string | null
   reasoning: AgentReasoning | null
+  answerMode: AgentAnswerMode | null
   outputFormat: AgentOutputFormat | null
   defaultQuestions: string[]
   nodeCount: number
@@ -184,7 +206,7 @@ export type AgentDraft = {
 // --- reference data ----------------------------------------------------------
 
 /** Canonical config schema version. Keep in sync with the backend. */
-export const AGENT_CONFIG_VERSION = 2
+export const AGENT_CONFIG_VERSION = 3
 
 // Curated OpenCode Go models (OpenAI-compatible `/chat/completions`), ordered
 // cheapest/fastest first. Keep the ids in sync with SUPPORTED_AGENT_MODELS in
@@ -212,6 +234,44 @@ export function agentModelContextWindow(model?: string | null): number {
 }
 
 export const AGENT_REASONING_LEVELS: AgentReasoning[] = ['low', 'medium', 'high']
+
+export type AgentAnswerModeOption = {
+  value: AgentAnswerMode
+  label: string
+  blurb: string
+}
+
+export const AGENT_ANSWER_MODE_OPTIONS: AgentAnswerModeOption[] = [
+  { value: 'summarize', label: 'Summarize', blurb: 'To the point' },
+  { value: 'normal', label: 'Normal', blurb: 'Key points with brief context' },
+  { value: 'detailed', label: 'Detailed', blurb: 'Section-wise detail' },
+]
+
+export const AGENT_ANSWER_MODES: AgentAnswerMode[] = AGENT_ANSWER_MODE_OPTIONS.map(
+  (option) => option.value,
+)
+
+export const DEFAULT_AGENT_ANSWER_MODE: AgentAnswerMode = 'summarize'
+
+/** Values stored before the modes were renamed. */
+const ANSWER_MODE_ALIASES: Record<string, AgentAnswerMode> = {
+  medium: 'normal',
+  deep: 'detailed',
+}
+
+/** Map a saved (possibly legacy/absent) answer mode onto a supported one. */
+export function resolveAnswerMode(mode?: string | null): AgentAnswerMode {
+  const value = (mode ?? '').trim().toLowerCase()
+  if (AGENT_ANSWER_MODES.includes(value as AgentAnswerMode)) {
+    return value as AgentAnswerMode
+  }
+  return ANSWER_MODE_ALIASES[value] ?? DEFAULT_AGENT_ANSWER_MODE
+}
+
+export function agentAnswerModeLabel(mode?: string | null): string {
+  const value = resolveAnswerMode(mode)
+  return AGENT_ANSWER_MODE_OPTIONS.find((option) => option.value === value)?.label ?? 'Summarize'
+}
 
 export const AGENT_OUTPUT_FORMATS: AgentOutputFormat[] = ['markdown', 'text', 'json']
 
@@ -509,6 +569,7 @@ export const AGENT_TIMEZONES: string[] = (() => {
 export const BUILTIN_AGENT_SERVERS = [
   { id: 'code-interpreter', name: 'Code Interpreter' },
   { id: 'web-search', name: 'Web Search' },
+  { id: 'http-fetch', name: 'HTTP Fetch' },
 ] as const
 
 export function agentModelLabel(model: string | null | undefined): string {
@@ -535,7 +596,8 @@ export function defaultNodeData(kind: AgentNodeKind): AgentNodeData {
         title: NODE_TITLES.agent,
         prompt: '',
         model: DEFAULT_AGENT_MODEL,
-        reasoning: 'medium',
+        reasoning: 'low',
+        answerMode: DEFAULT_AGENT_ANSWER_MODE,
         memoryEnabled: false,
       }
     case 'output':
@@ -703,7 +765,9 @@ export function graphFromConfig(config: AgentConfig): AgentGraph {
             ...node.data,
             prompt: config.prompt,
             model: resolveAgentModel(config.model),
+            providerSecretId: config.providerSecretId ?? '',
             reasoning: config.reasoning,
+            answerMode: resolveAnswerMode(config.answerMode),
             memoryEnabled: config.memory?.enabled ?? false,
           },
         }
@@ -712,7 +776,7 @@ export function graphFromConfig(config: AgentConfig): AgentGraph {
           ...node,
           data: {
             ...node.data,
-            input: config.input?.query ?? '',
+            input: '',
             inputFileIds: config.input?.fileIds ?? [],
             defaultQuestions: config.defaultQuestions ?? [],
           },
@@ -769,10 +833,13 @@ export function configFromGraph(
     version: AGENT_CONFIG_VERSION,
     prompt: agent?.data.prompt ?? '',
     model: agent?.data.model ?? DEFAULT_AGENT_MODEL,
-    reasoning: agent?.data.reasoning ?? 'medium',
+    providerSecretId: agent?.data.providerSecretId ?? '',
+    reasoning: agent?.data.reasoning ?? 'low',
+    answerMode: agent?.data.answerMode ?? DEFAULT_AGENT_ANSWER_MODE,
     outputFormat,
+    // The question is asked at run time (right panel) and never persisted.
     input: {
-      query: input?.data.input ?? '',
+      query: '',
       fileIds: input?.data.inputFileIds ?? [],
     },
     defaultQuestions: input?.data.defaultQuestions ?? [],
@@ -941,6 +1008,16 @@ export function useAgentLibrary() {
     AGENT_LIBRARY_QUERY_KEY,
     () => api.get<AgentLibraryList>('/v1/agents/library'),
     { refetchOnMount: true },
+  )
+}
+
+/** Full config for one agent (the workflow inspector reads its KB/skills/tools). */
+export function useAgentDetail(agentId: string | null) {
+  const api = useApiClient()
+  return useQuery(
+    `agent-detail:${agentId ?? ''}`,
+    () => fetchAgent(api, agentId as string),
+    { enabled: Boolean(agentId) },
   )
 }
 

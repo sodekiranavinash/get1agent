@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -21,6 +23,25 @@ from core.storage import Storage
 
 CHUNKS_FILENAME = "chunks.json"
 EMBEDDINGS_FILENAME = "embeddings.json"
+
+# Parent objects are written one per page/window; a large document is thousands
+# of independent PUTs, so write them concurrently instead of one at a time.
+_WRITE_MAX_WORKERS = max(1, int(os.environ.get("INGESTION_WRITE_MAX_WORKERS", "16")))
+
+
+def _put_many(storage: Storage, objects: list[tuple[str, Any]]) -> None:
+    """Write independent S3 JSON objects concurrently."""
+    if not objects:
+        return
+    if len(objects) == 1 or _WRITE_MAX_WORKERS == 1:
+        for key, value in objects:
+            storage.put_json(key, value)
+        return
+    with ThreadPoolExecutor(
+        max_workers=min(_WRITE_MAX_WORKERS, len(objects))
+    ) as pool:
+        list(pool.map(lambda item: storage.put_json(item[0], item[1]), objects))
+
 
 _IMAGE_CONTENT_TYPES = {
     "png": "image/png",
@@ -504,28 +525,32 @@ def index_document(
     store.upsert(user_id, vectors)
 
     parent_ids: list[str] = []
+    parent_objects: list[tuple[str, dict]] = []
     for parent in parents:
         ordinal = int(parent.get("ordinal", len(parent_ids)))
         parent_id = _parent_id(document_id, ordinal)
         parent_ids.append(parent_id)
-        storage.put_json(
-            layout.parent_key(user_id, parent_id),
-            {
-                "parentId": parent_id,
-                "docId": document_id,
-                "kbId": knowledge_base_id,
-                "userId": user_id,
-                "fileName": file_name,
-                "kbName": kb_name,
-                "contentType": content_type,
-                "ordinal": ordinal,
-                "page": parent.get("page"),
-                "pageEnd": parent.get("pageEnd"),
-                "content": parent["text"],
-                "tokenCount": max(1, len(parent["text"]) // 4),
-                "children": parent_children.get(ordinal, []),
-            },
+        parent_objects.append(
+            (
+                layout.parent_key(user_id, parent_id),
+                {
+                    "parentId": parent_id,
+                    "docId": document_id,
+                    "kbId": knowledge_base_id,
+                    "userId": user_id,
+                    "fileName": file_name,
+                    "kbName": kb_name,
+                    "contentType": content_type,
+                    "ordinal": ordinal,
+                    "page": parent.get("page"),
+                    "pageEnd": parent.get("pageEnd"),
+                    "content": parent["text"],
+                    "tokenCount": max(1, len(parent["text"]) // 4),
+                    "children": parent_children.get(ordinal, []),
+                },
+            )
         )
+    _put_many(storage, parent_objects)
 
     if postings:
         add_postings(storage, user_id, postings)

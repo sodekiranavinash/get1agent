@@ -96,6 +96,13 @@ resource "aws_iam_role_policy" "runtime" {
         Resource = var.mcp_function_arns
       },
       {
+        # Decrypt a user's Vault provider secret when it is the run's model.
+        Sid      = "VaultKms"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt", "kms:DescribeKey"]
+        Resource = var.kms_key_arns
+      },
+      {
         Sid      = "Logs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]

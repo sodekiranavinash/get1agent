@@ -16,6 +16,7 @@ Concurrency is handled two ways:
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -24,6 +25,8 @@ from typing import Any
 _TOKEN_NAMESPACE = uuid.UUID("6f1c2f7a-2f0f-4d0e-9d3f-2b6a9c1e5a10")
 
 DEFAULT_THREAD = "default"
+
+_THREAD_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
 
 # Local (Floci) session registry. AgentCore is not emulated, so session reuse is
 # tracked in-process to mirror the AgentCore/DynamoDB behaviour. It is warm
@@ -47,8 +50,17 @@ def partition_key(sub: str) -> str:
     return f"USER#{sub}"
 
 
-def sort_key(thread: str) -> str:
-    return f"CONV#{thread}"
+def sort_key(thread: str, prefix: str = "CONV#") -> str:
+    return f"{prefix}{thread}"
+
+
+def sanitize_thread(conversation_id: str | None) -> str:
+    """Coerce a caller-supplied conversation id into a safe session key."""
+    raw = str(conversation_id or "").strip()
+    if not raw:
+        return DEFAULT_THREAD
+    cleaned = _THREAD_RE.sub("-", raw)[:64].strip("-")
+    return cleaned or DEFAULT_THREAD
 
 
 def deterministic_token(sub: str, thread: str, now: int, ttl: int) -> str:
@@ -57,9 +69,11 @@ def deterministic_token(sub: str, thread: str, now: int, ttl: int) -> str:
     return str(uuid.uuid5(_TOKEN_NAMESPACE, f"{sub}:{thread}:{bucket}"))
 
 
-def local_resolve(sub: str, thread: str, ttl: int, now: int) -> "SessionRef":
-    """Resolve an in-memory session for ``CODE_INTERPRETER_MODE=local``."""
-    key = f"{sub}:{thread}"
+def local_resolve(
+    sub: str, thread: str, ttl: int, now: int, namespace: str = ""
+) -> "SessionRef":
+    """Resolve an in-memory session for ``*_MODE=local``."""
+    key = f"{namespace}:{sub}:{thread}" if namespace else f"{sub}:{thread}"
     session_id = "local-" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
     expiry = _LOCAL_SESSIONS.get(key)
     if expiry and expiry > now:

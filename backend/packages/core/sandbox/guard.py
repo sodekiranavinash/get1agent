@@ -119,6 +119,12 @@ DENY_MODULES: frozenset[str] = frozenset(
     }
 )
 
+# Submodules of otherwise-blocked packages that are safe to import.
+# ``urllib.parse`` is pure string manipulation (no sockets) — the one piece of
+# ``urllib`` a parser legitimately needs (e.g. ``urljoin`` for relative links).
+# Every other ``urllib`` submodule (``request``/``error``/…) stays blocked.
+ALLOW_MODULES: frozenset[str] = frozenset({"urllib.parse"})
+
 # Calls whose bare name is always blocked.
 DENY_CALLS: frozenset[str] = frozenset({"__import__", "exec", "eval", "compile"})
 
@@ -162,14 +168,17 @@ DENY_ATTRS: tuple[str, ...] = (
     "multiprocessing",
 )
 
-# Download / install / model-fetch markers scanned in string literals and the
-# raw source (so concatenated or f-string URLs are still caught).
+# Download / install / model-fetch markers scanned in the raw source. Network
+# *imports* (``urllib.request``, ``requests``, ``http``, ``socket``) and the
+# runtime socket audit hook already prevent egress, so a bare URL string literal
+# is NOT blocked — a parser may legitimately carry an example or default URL in
+# a docstring. Only explicit download/install commands and model-fetch markers
+# are blocked here.
 _DOWNLOAD_RE = re.compile(
     r"("
     r"pip3?\s+install|python\s+-m\s+pip|conda\s+install|"
     r"from_pretrained|torch\.hub|load_dataset|huggingface|"
-    r"wget\s|curl\s|git\s+clone|"
-    r"https?://|ftp://"
+    r"wget\s|curl\s|git\s+clone"
     r")",
     re.IGNORECASE,
 )
@@ -219,18 +228,19 @@ def _dotted(node: ast.AST) -> str | None:
     return None
 
 
-def _import_roots(tree: ast.AST) -> list[tuple[str, int]]:
-    roots: list[tuple[str, int]] = []
+def _import_names(tree: ast.AST) -> list[tuple[str, int]]:
+    """Full dotted module names imported by the code, with line numbers."""
+    names: list[tuple[str, int]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                roots.append((alias.name.split(".")[0].lower(), node.lineno))
+                names.append((alias.name.lower(), node.lineno))
         elif isinstance(node, ast.ImportFrom):
             if node.level:
                 continue
             if node.module:
-                roots.append((node.module.split(".")[0].lower(), node.lineno))
-    return roots
+                names.append((node.module.lower(), node.lineno))
+    return names
 
 
 def check(
@@ -260,7 +270,10 @@ def check(
         )
 
     deny = deny_set(blocked_extra, allowed_extra)
-    for root, lineno in _import_roots(tree):
+    for name, lineno in _import_names(tree):
+        root = name.split(".")[0]
+        if name in ALLOW_MODULES:
+            continue
         if root in deny:
             return GuardResult(
                 False,
@@ -306,16 +319,27 @@ def prelude(*, blocked_extra: str = "", allowed_extra: str = "") -> str:
     """
     deny = sorted(deny_set(blocked_extra, allowed_extra))
     events = sorted(DENY_AUDIT_EVENTS)
+    allow = sorted(name.lower() for name in ALLOW_MODULES)
+    # Parent packages of an allowed submodule must load too (importing
+    # ``urllib.parse`` first imports ``urllib``), but the submodule itself is
+    # what gets allow-listed, so ``urllib.request`` is still denied.
+    allow_parents = sorted(
+        {name.rsplit(".", 1)[0] for name in allow if "." in name}
+    )
     return (
         "import sys as _g1_sys\n"
         "if not getattr(_g1_sys, '_get1agent_guard', False):\n"
         "    _g1_sys._get1agent_guard = True\n"
         f"    _g1_deny = frozenset({deny!r})\n"
         f"    _g1_events = frozenset({events!r})\n"
+        f"    _g1_allow = frozenset({allow!r})\n"
+        f"    _g1_allow_parents = frozenset({allow_parents!r})\n"
         "    def _g1_hook(_g1_event, _g1_args):\n"
         "        if _g1_event == 'import':\n"
-        "            _g1_name = str(_g1_args[0]) if _g1_args else ''\n"
+        "            _g1_name = str(_g1_args[0]).lower() if _g1_args else ''\n"
         "            _g1_root = _g1_name.split('.')[0]\n"
+        "            if _g1_name in _g1_allow or _g1_name in _g1_allow_parents:\n"
+        "                return\n"
         "            if _g1_root in _g1_deny:\n"
         "                raise PermissionError(\n"
         "                    \"import of '\" + _g1_root + \"' is blocked by policy\"\n"

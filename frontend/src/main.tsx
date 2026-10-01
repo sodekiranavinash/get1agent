@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { Auth0ProviderWithNavigate } from './auth/Auth0ProviderWithNavigate.tsx'
 import { ViewProvider } from './auth/ViewProvider.tsx'
+import { CookiePreferencesProvider } from './components/cookie/CookiePreferencesProvider.tsx'
 import { ThemeProvider } from './theme/ThemeProvider.tsx'
 import { TooltipProvider } from './components/ui/tooltip.tsx'
 import { Toaster } from './components/ui/sonner.tsx'
@@ -16,8 +17,10 @@ createRoot(document.getElementById('root')!).render(
         <TooltipProvider>
           <Auth0ProviderWithNavigate>
             <ViewProvider>
-              <App />
-              <Toaster />
+              <CookiePreferencesProvider>
+                <App />
+                <Toaster />
+              </CookiePreferencesProvider>
             </ViewProvider>
           </Auth0ProviderWithNavigate>
         </TooltipProvider>

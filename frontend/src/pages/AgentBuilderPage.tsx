@@ -24,12 +24,9 @@ import {
 import '@xyflow/react/dist/style.css'
 import {
   Bot,
-  FlaskConical,
   Loader2,
   Pencil,
-  Play,
   Save,
-  Square,
   Trash2,
   UploadCloud,
 } from 'lucide-react'
@@ -38,7 +35,6 @@ import { toast } from 'sonner'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
-import { Dialog } from '../components/ui/Dialog'
 import { Spinner } from '../components/ui/Spinner'
 import { AgentNodeView, type AgentFlowNode } from '../components/agent-builder/AgentNode'
 import {
@@ -49,12 +45,16 @@ import { AgentBuilderProvider } from '../components/agent-builder/AgentBuilderCo
 import { AgentDetailsDialog } from '../components/agent-builder/AgentDetailsDialog'
 import { AgentEventsPanel } from '../components/agent-builder/AgentEventsPanel'
 import { useApiClient, ApiError } from '../lib/api'
+import { useDemoMode } from '../auth/useDemoMode'
+import { IDS } from '../lib/demo/shared'
+import { streamDemoAgentRun } from '../lib/demo/demoRun'
 import { agentRunConfigured, runAgentStream } from '../lib/agentRun'
 import { createRunFields, markRunError, reduceRunEvent, type RunFields } from '../lib/runState'
 import type { Conversation } from '../lib/conversations'
 import { useKnowledgeBases } from '../lib/knowledgeBases'
 import { useAgentSkills } from '../lib/agentSkills'
 import { fetchMcpTools } from '../lib/mcp'
+import { useCustomServerOptions } from '../lib/customTools'
 import {
   BUILTIN_AGENT_SERVERS,
   clearAgentDraft,
@@ -75,7 +75,6 @@ import {
   useMcpConnectionOptions,
   validateAgentDescription,
   validateAgentName,
-  verifyAgent,
   type AgentDetail,
   type AgentEvent,
   type AgentEventInput,
@@ -84,7 +83,6 @@ import {
   type AgentNodeData,
   type AgentServerSelection,
   type AgentStatus,
-  type AgentVerifyResult,
   type AgentVisibility,
   type ConnectionOption,
 } from '../lib/agents'
@@ -162,7 +160,12 @@ export function AgentBuilderPage() {
   const api = useApiClient()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const agentId = searchParams.get('agent')
+  const demo = useDemoMode()
+  // In the read-only demo, open a fully-configured saved agent instead of an
+  // empty draft, so the knowledge / tools / skills cards and History are visible.
+  const agentId = searchParams.get('agent') ?? (demo ? IDS.agentResearch : null)
+  // The demo replays a scripted run, so no run URL is required.
+  const configured = demo || agentRunConfigured()
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -173,15 +176,12 @@ export function AgentBuilderPage() {
 
   const [status, setStatus] = useState<AgentStatus>('draft')
   const [visibility, setVisibility] = useState<AgentVisibility>('private')
-  const [verifiedAt, setVerifiedAt] = useState<string | null>(null)
   const [, setPublishedAt] = useState<string | null>(null)
 
   const [loading, setLoading] = useState(Boolean(agentId))
   const [saving, setSaving] = useState(false)
-  const [verifying, setVerifying] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [dirty, setDirty] = useState(false)
-  const [verifyResult, setVerifyResult] = useState<AgentVerifyResult | null>(null)
   const [confirmPublish, setConfirmPublish] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -212,6 +212,7 @@ export function AgentBuilderPage() {
   const kbs = useKnowledgeBases()
   const skills = useAgentSkills()
   const connectionsQuery = useMcpConnectionOptions()
+  const customToolsQuery = useCustomServerOptions()
   const agentsQuery = useAgents()
 
   const knowledgeBases = useMemo(() => kbs.data?.knowledgeBases ?? [], [kbs.data])
@@ -219,6 +220,10 @@ export function AgentBuilderPage() {
   const connections = useMemo<ConnectionOption[]>(
     () => connectionsQuery.data ?? [],
     [connectionsQuery.data],
+  )
+  const customServers = useMemo(
+    () => customToolsQuery.servers,
+    [customToolsQuery.servers],
   )
 
   const pushEvents = useCallback((inputs: AgentEventInput[]) => {
@@ -295,7 +300,6 @@ export function AgentBuilderPage() {
       setEdges(graph.edges as unknown as Edge[])
       setStatus(detail.status)
       setVisibility(detail.visibility)
-      setVerifiedAt(detail.verifiedAt)
       setPublishedAt(detail.publishedAt)
       snapshotRef.current = JSON.stringify({
         name: detail.name,
@@ -320,7 +324,13 @@ export function AgentBuilderPage() {
           const detail = await fetchAgent(api, agentId)
           if (!active) return
           applyDetail(detail)
-          const draft = loadAgentDraft(agentId)
+          // The demo is read-only and must always show the canonical saved
+          // agent — never a stale local draft that overrides its cards.
+          if (demo) {
+            clearAgentDraft(agentId)
+            clearAgentDraft(null)
+          }
+          const draft = demo ? null : loadAgentDraft(agentId)
           if (draft) {
             setName(draft.name)
             setDescription(draft.description)
@@ -344,7 +354,7 @@ export function AgentBuilderPage() {
         return
       }
 
-      const draft = loadAgentDraft(null)
+      const draft = demo ? null : loadAgentDraft(null)
       const graph = draft ? graphFromConfig(draft.config) : defaultAgentGraph()
       setName(draft?.name ?? '')
       setDescription(draft?.description ?? '')
@@ -352,7 +362,6 @@ export function AgentBuilderPage() {
       setEdges(graph.edges as unknown as Edge[])
       setStatus('draft')
       setVisibility('private')
-      setVerifiedAt(null)
       setPublishedAt(null)
       setEvents([])
       pushEvents([{ kind: 'info', title: draft ? 'Restored unsaved local draft' : 'New agent', scope: 'milestone' }])
@@ -364,7 +373,7 @@ export function AgentBuilderPage() {
     return () => {
       active = false
     }
-  }, [agentId, api, applyDetail, navigate, pushEvents, setEdges, setNodes])
+  }, [agentId, api, applyDetail, demo, navigate, pushEvents, setEdges, setNodes])
 
   // --- autosave (localStorage) ----------------------------------------------
 
@@ -372,12 +381,13 @@ export function AgentBuilderPage() {
     if (!hydratedRef.current) return
     const isDirty = serialized !== snapshotRef.current
     setDirty(isDirty)
-    if (!isDirty) return
+    // The demo never persists drafts, so its cards can't be shadowed later.
+    if (!isDirty || demo) return
     const timer = window.setTimeout(() => {
       saveAgentDraft(agentId, { name, description, config })
     }, 500)
     return () => window.clearTimeout(timer)
-  }, [serialized, agentId, name, description, config])
+  }, [serialized, agentId, name, description, config, demo])
 
   // --- graph editing ---------------------------------------------------------
 
@@ -520,11 +530,20 @@ export function AgentBuilderPage() {
       knowledgeBases,
       skills: skillList,
       connections,
+      customServers,
       updateNodeData,
       onSkillsChange: handleSkillsChange,
       openNodeEditor,
     }),
-    [knowledgeBases, skillList, connections, updateNodeData, handleSkillsChange, openNodeEditor],
+    [
+      knowledgeBases,
+      skillList,
+      connections,
+      customServers,
+      updateNodeData,
+      handleSkillsChange,
+      openNodeEditor,
+    ],
   )
 
   // --- actions ---------------------------------------------------------------
@@ -554,7 +573,6 @@ export function AgentBuilderPage() {
       })
       setStatus(saved.status)
       setVisibility(saved.visibility)
-      setVerifiedAt(saved.verifiedAt)
       setPublishedAt(saved.publishedAt)
       setDetailsErrorRequest(false)
       setDirty(false)
@@ -585,47 +603,6 @@ export function AgentBuilderPage() {
     }
   }, [agentId, api, canSave, config, description, name, navigate, pushEvents])
 
-  const handleVerify = useCallback(async () => {
-    let id = agentId
-    if (!id || dirty) {
-      const saved = await handleSave()
-      if (!saved) return
-      id = saved.id
-    }
-    setVerifying(true)
-    try {
-      const result = await verifyAgent(api, id)
-      setVerifyResult(result)
-      setStatus(result.agent.status)
-      setVisibility(result.agent.visibility)
-      setVerifiedAt(result.agent.verifiedAt)
-      setPublishedAt(result.agent.publishedAt)
-      const warnings: AgentEventInput[] = result.warnings.map((warning) => ({
-        kind: 'warning',
-        title: warning,
-      }))
-      if (result.valid) {
-        toast.success('Test passed — the agent is ready to publish')
-        pushEvents([{ kind: 'success', title: 'Test run passed', scope: 'milestone' }, ...warnings])
-      } else {
-        toast.error(`${result.errors.length} issue${result.errors.length === 1 ? '' : 's'} found`)
-        pushEvents([
-          {
-            kind: 'error',
-            title: `Test run found ${result.errors.length} issue${result.errors.length === 1 ? '' : 's'}`,
-            detail: result.errors[0],
-            scope: 'milestone',
-          },
-          ...warnings,
-        ])
-      }
-    } catch (error) {
-      toast.error(errorMessage(error))
-    } finally {
-      setVerifying(false)
-    }
-  }, [agentId, api, dirty, handleSave, pushEvents])
-
   const handleStopRun = useCallback(() => {
     runAbortRef.current?.abort()
     runAbortRef.current = null
@@ -633,22 +610,24 @@ export function AgentBuilderPage() {
     pushEvents([{ kind: 'warning', title: 'Run stopped', scope: 'milestone' }])
   }, [pushEvents])
 
-  const handleRun = useCallback(async () => {
-    if (!agentRunConfigured()) {
-      toast.error('Agent run URL is not configured (VITE_AGENT_RUN_URL)')
-      return
-    }
-    let id = agentId
-    if (!id || dirty) {
-      const saved = await handleSave()
-      if (!saved) return
-      id = saved.id
-    }
-    const query = (config.input?.query ?? '').trim()
-    if (!query) {
-      toast.error('Add a query on the Input card first')
-      return
-    }
+  const handleRun = useCallback(
+    async (question: string) => {
+      if (!demo && !agentRunConfigured()) {
+        toast.error('Agent run URL is not configured (VITE_AGENT_RUN_URL)')
+        return
+      }
+      const query = question.trim()
+      if (!query) {
+        toast.error('Enter a question to run')
+        return
+      }
+      let id = agentId
+      if (!demo && (!id || dirty)) {
+        const saved = await handleSave()
+        if (!saved) return
+        id = saved.id
+      }
+      if (!id) return
 
     const controller = new AbortController()
     runAbortRef.current = controller
@@ -658,51 +637,60 @@ export function AgentBuilderPage() {
     pushEvents([{ kind: 'info', title: 'Run started', scope: 'milestone' }])
 
     // Each test run is its own conversation (no continuation). Create it first
-    // so the run is persisted and shows up in the History tab.
+    // so the run is persisted and shows up in the History tab. The demo is
+    // read-only: the run is scripted and nothing is persisted.
     let runConversationId: string = crypto.randomUUID()
-    try {
-      const created = await api.post<Conversation>('/v1/conversations', {
-        agentId: id,
-        kind: 'run',
-        title: query,
-      })
-      runConversationId = String(created.conversationId)
-      setRunConversationId(runConversationId)
-    } catch {
-      // Persistence is best-effort: the run still executes with a local id.
+    if (!demo) {
+      try {
+        const created = await api.post<Conversation>('/v1/conversations', {
+          agentId: id,
+          kind: 'run',
+          title: query,
+        })
+        runConversationId = String(created.conversationId)
+        setRunConversationId(runConversationId)
+      } catch {
+        // Persistence is best-effort: the run still executes with a local id.
+      }
+    }
+
+    const onEvent = (event: Parameters<typeof reduceRunEvent>[1]) => {
+      setRun((current) => (current ? reduceRunEvent(current, event) : current))
+      switch (event.type) {
+        case 'tool.start':
+          pushEvents([
+            {
+              kind: 'tool',
+              title: `Tool · ${event.name}`,
+              detail: event.input ? JSON.stringify(event.input) : undefined,
+            },
+          ])
+          break
+        case 'run.completed':
+          pushEvents([{ kind: 'success', title: 'Run completed', scope: 'milestone' }])
+          break
+        case 'run.error':
+          pushEvents([{ kind: 'error', title: 'Run failed', detail: event.message }])
+          break
+        default:
+          break
+      }
     }
 
     try {
-      const token = await getAccessTokenSilently()
-      await runAgentStream({
-        token,
-        agentId: id,
-        input: query,
-        conversationId: runConversationId,
-        signal: controller.signal,
-        onEvent: (event) => {
-          setRun((current) => (current ? reduceRunEvent(current, event) : current))
-          switch (event.type) {
-            case 'tool.start':
-              pushEvents([
-                {
-                  kind: 'tool',
-                  title: `Tool · ${event.name}`,
-                  detail: event.input ? JSON.stringify(event.input) : undefined,
-                },
-              ])
-              break
-            case 'run.completed':
-              pushEvents([{ kind: 'success', title: 'Run completed', scope: 'milestone' }])
-              break
-            case 'run.error':
-              pushEvents([{ kind: 'error', title: 'Run failed', detail: event.message }])
-              break
-            default:
-              break
-          }
-        },
-      })
+      if (demo) {
+        await streamDemoAgentRun(name, onEvent, controller.signal)
+      } else {
+        const token = await getAccessTokenSilently()
+        await runAgentStream({
+          token,
+          agentId: id,
+          input: query,
+          conversationId: runConversationId,
+          signal: controller.signal,
+          onEvent,
+        })
+      }
     } catch (error) {
       if (!controller.signal.aborted) {
         const message = errorMessage(error)
@@ -715,7 +703,9 @@ export function AgentBuilderPage() {
       setRunning(false)
       setHistoryKey((key) => key + 1)
     }
-  }, [agentId, api, config.input?.query, dirty, getAccessTokenSilently, handleSave, pushEvents])
+    },
+    [agentId, api, demo, dirty, getAccessTokenSilently, handleSave, name, pushEvents],
+  )
 
   const handlePublish = useCallback(async () => {
     let id = agentId
@@ -849,40 +839,13 @@ export function AgentBuilderPage() {
             </>
           ) : null}
 
-          <Button
-            variant="outline"
-            size="sm"
-            icon={running ? <Square className="size-3.5" /> : <Play className="size-3.5" />}
-            onClick={running ? handleStopRun : handleRun}
-            disabled={!running && (saving || verifying || !agentRunConfigured())}
-            title={agentRunConfigured() ? 'Run the agent' : 'Set VITE_AGENT_RUN_URL to run'}
-          >
-            {running ? 'Stop' : 'Run'}
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            icon={
-              verifying ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <FlaskConical className="size-3.5" />
-              )
-            }
-            onClick={handleVerify}
-            disabled={verifying || saving || running}
-          >
-            Test run
-          </Button>
-
           <span className="relative inline-flex">
             <Button
               variant="secondary"
               size="sm"
               icon={saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
               onClick={handleSave}
-              disabled={saving || verifying}
+              disabled={saving}
             >
               Save
             </Button>
@@ -907,7 +870,7 @@ export function AgentBuilderPage() {
               size="sm"
               icon={<UploadCloud className="size-3.5" />}
               onClick={() => setConfirmPublish(true)}
-              disabled={!verifiedAt || publishing}
+              disabled={publishing}
             >
               Publish
             </Button>
@@ -959,6 +922,9 @@ export function AgentBuilderPage() {
           events={events}
           run={run}
           running={running}
+          onRun={handleRun}
+          onStop={handleStopRun}
+          configured={configured}
           agentId={agentId ?? ''}
           agentName={name}
           conversationId={runConversationId}
@@ -1001,56 +967,6 @@ export function AgentBuilderPage() {
         onDelete={deleteEdge}
         onClose={() => setEditingEdgeId(null)}
       />
-
-      <Dialog
-        open={Boolean(verifyResult)}
-        onOpenChange={(open) => {
-          if (!open) setVerifyResult(null)
-        }}
-        title={verifyResult?.valid ? 'Test passed' : 'Test found issues'}
-        description={
-          verifyResult?.valid
-            ? 'The configuration is valid and the agent can be published.'
-            : 'Fix these before publishing.'
-        }
-        size="md"
-        footer={
-          <Button variant="secondary" size="sm" onClick={() => setVerifyResult(null)}>
-            Close
-          </Button>
-        }
-      >
-        <div className="space-y-3">
-          {verifyResult?.errors.length ? (
-            <ul className="space-y-1.5">
-              {verifyResult.errors.map((error) => (
-                <li key={error} className="flex gap-2 text-[13px] text-foreground">
-                  <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-accent" />
-                  {error}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {verifyResult?.warnings.length ? (
-            <div>
-              <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-subtle">
-                Warnings
-              </p>
-              <ul className="space-y-1.5">
-                {verifyResult.warnings.map((warning) => (
-                  <li key={warning} className="flex gap-2 text-[13px] text-muted">
-                    <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-warning" />
-                    {warning}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {verifyResult?.valid && verifyResult.warnings.length === 0 ? (
-            <p className="text-[13px] text-muted">No issues found.</p>
-          ) : null}
-        </div>
-      </Dialog>
 
       <ConfirmDialog
         open={confirmPublish}

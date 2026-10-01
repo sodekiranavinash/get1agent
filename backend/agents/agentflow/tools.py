@@ -1,6 +1,6 @@
 """Build Strands tools for an agent from its MCP-server + knowledge selection.
 
-Built-in servers (``web-search``, ``code-interpreter``) and remote servers
+Built-in servers (``web-search``, ``code-interpreter``, ``http-fetch``) and remote servers
 (through the ``mcp-connections`` aggregator) are exposed over the shared
 ``core.mcp_client`` direct-invoke transport. Knowledge retrieval exposes the
 knowledge server's real tools (``get-user-knowledge-bases`` +
@@ -175,11 +175,15 @@ def build_tools(
     user_id: str,
     agent_config: dict[str, Any],
     knowledge_names: list[str],
+    counter: dict[str, int] | None = None,
 ) -> list[Any]:
     tools: list[Any] = []
     # Run-global citation counter: every source across every tool call gets the
     # next number, so the model's inline ``[n]`` matches the UI's source list.
-    counter: dict[str, int] = {"n": 0}
+    # A workflow passes one shared counter so citations stay globally numbered
+    # across every agent node.
+    if counter is None:
+        counter = {"n": 0}
 
     if knowledge_names and config.knowledge_function:
         rerank = bool(agent_config.get("knowledgeRerank"))
@@ -216,6 +220,11 @@ def build_tools(
             function = config.web_search_function
         elif source == "builtin" and server_id == "code-interpreter":
             function = config.code_interpreter_function
+        elif source == "builtin" and server_id == "http-fetch":
+            function = config.http_fetch_function
+        elif source == "custom":
+            # User-defined Playground tools; the server id is the tool namespace.
+            function = config.custom_tools_function
         elif source == "mcp":
             function = config.remote_function
         else:
@@ -224,7 +233,9 @@ def build_tools(
             continue
 
         selected = server.get("tools")
-        prefix = _slug(str(server.get("name") or ""), "")
+        # Custom tools are namespaced by the server slug (== its id); remote
+        # tools by the slug of the connection's display name.
+        prefix = server_id if source == "custom" else _slug(str(server.get("name") or ""), "")
         for spec in _tool_specs(function, user_id):
             tool_name = str(spec.get("name") or "")
             if not tool_name:
@@ -232,7 +243,9 @@ def build_tools(
             if selected is not None:
                 if tool_name not in selected:
                     continue
-            elif source == "mcp" and prefix and not tool_name.startswith(f"{prefix}/"):
+            elif source in ("mcp", "custom") and prefix and not tool_name.startswith(
+                f"{prefix}/"
+            ):
                 continue
             schema = spec.get("inputSchema")
             if not isinstance(schema, dict):

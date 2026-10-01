@@ -6,12 +6,20 @@
  * renders it with `RunTimeline`.
  */
 
-import type { AgentPlanTodo, AgentRunEvent, AgentUsage, RunContext } from './agentRun'
+import type {
+  AgentAttachmentRef,
+  AgentPlanTodo,
+  AgentRunEvent,
+  AgentSkillRef,
+  AgentUsage,
+  RunContext,
+} from './agentRun'
 import {
   formatToolInput,
   stringifyToolData,
   type ChatPlan,
   type ChatPlanTodo,
+  type ChatQuestion,
   type ChatSource,
   type ChatTodoStatus,
   type ChatToolCall,
@@ -21,9 +29,17 @@ import {
 /** The run fields shared by a chat turn and a builder run. */
 export type RunFields = {
   answer: string
+  /** The runtime's run id (set from `run.started`); keys run feedback. */
+  runId?: string
   plan: ChatPlan | null
   /** True while the planner is working, before the plan arrives. */
   planning: boolean
+  /** Present while the run is paused for the user's answer. */
+  humanQuestion?: ChatQuestion
+  /** Skills folded into the system prompt for this run (not tools). */
+  skills: AgentSkillRef[]
+  /** Storage files attached to this run (downloaded + extracted server-side). */
+  attachments?: AgentAttachmentRef[]
   tools: ChatToolCall[]
   /** Citation sources collected across the run's tool calls. */
   sources: ChatSource[]
@@ -32,6 +48,10 @@ export type RunFields = {
   usage?: AgentUsage
   /** Context-window fill for the conversation (used/limit + full flag). */
   context?: RunContext
+  /** Langfuse trace link for this run (signed + expiring when loaded from the API). */
+  traceUrl?: string | null
+  /** Langfuse trace id (for mirroring feedback as a score). */
+  traceId?: string | null
   startedAt: number
   endedAt?: number
 }
@@ -41,6 +61,7 @@ export function createRunFields(startedAt = Date.now()): RunFields {
     answer: '',
     plan: null,
     planning: true,
+    skills: [],
     tools: [],
     sources: [],
     status: 'streaming',
@@ -373,6 +394,12 @@ function applyToolResult<T extends RunFields>(
 /** Fold one runtime event into the run state. */
 export function reduceRunEvent<T extends RunFields>(state: T, event: AgentRunEvent): T {
   switch (event.type) {
+    case 'run.started':
+      return { ...state, runId: event.runId }
+    case 'skills':
+      return { ...state, skills: event.skills ?? [] }
+    case 'attachments':
+      return { ...state, attachments: event.files ?? [] }
     case 'plan.started':
       return { ...state, planning: true }
     case 'plan':
@@ -387,6 +414,41 @@ export function reduceRunEvent<T extends RunFields>(state: T, event: AgentRunEve
       return applyToolStream(state, event)
     case 'tool.result':
       return applyToolResult(state, event)
+    case 'question': {
+      const question: ChatQuestion = {
+        questionId: event.questionId,
+        question: event.question,
+        options: event.options ?? [],
+        allowCustom: event.allowCustom ?? true,
+        ...(event.answer ? { answer: event.answer } : {}),
+      }
+      // Represent the question as a synthetic step in the run's tool history, so
+      // it sits in chronological order instead of floating in the message.
+      const entry: ChatToolCall = {
+        id: question.questionId || crypto.randomUUID(),
+        // Friendly label if the step is rendered on its own.
+        name: 'Question',
+        status: question.answer ? 'success' : 'running',
+        question,
+      }
+      const exists = state.tools.some((tool) => tool.id === entry.id)
+      const tools = exists
+        ? state.tools.map((tool) => (tool.id === entry.id ? { ...tool, ...entry } : tool))
+        : [...state.tools, entry]
+      const plan = exists
+        ? updateTool(state.plan, entry.id, (tool) => ({ ...tool, ...entry }))
+        : attachTool(state.plan ?? fallbackPlan(), entry)
+      return {
+        ...state,
+        // Any text streamed before the question is preamble, not the answer.
+        answer: '',
+        status: 'awaiting_input',
+        planning: false,
+        humanQuestion: question,
+        tools,
+        plan,
+      }
+    }
     case 'run.completed':
       return {
         ...state,
@@ -395,6 +457,12 @@ export function reduceRunEvent<T extends RunFields>(state: T, event: AgentRunEve
         endedAt: Date.now(),
         planning: false,
         plan: completePlan(state.plan),
+      }
+    case 'trace':
+      return {
+        ...state,
+        traceUrl: event.traceUrl ?? state.traceUrl,
+        traceId: event.traceId ?? state.traceId,
       }
     case 'context':
       return {
@@ -435,5 +503,28 @@ export function markRunError<T extends RunFields>(state: T, message: string): T 
     endedAt: Date.now(),
     planning: false,
     plan: failActive(state.plan),
+  }
+}
+
+/** Resume a paused run after the user answered its question. */
+export function beginResume<T extends RunFields>(state: T, answer: string): T {
+  const humanQuestion = state.humanQuestion
+    ? { ...state.humanQuestion, answer }
+    : state.humanQuestion
+  // Settle the synthetic `ask_user` step in the tool history.
+  const answerTool = (tool: ChatToolCall): ChatToolCall =>
+    tool.question
+      ? { ...tool, status: 'success', question: { ...tool.question, answer } }
+      : tool
+  return {
+    ...state,
+    status: 'streaming',
+    error: undefined,
+    endedAt: undefined,
+    humanQuestion,
+    tools: state.tools.map(answerTool),
+    plan: state.plan
+      ? mapTodos(state.plan, (todo) => ({ ...todo, tools: todo.tools.map(answerTool) }))
+      : state.plan,
   }
 }

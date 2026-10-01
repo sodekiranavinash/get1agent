@@ -1,5 +1,6 @@
 import { Navigate, Outlet } from 'react-router-dom'
 import { useView } from './ViewProvider'
+import { useDemoMode } from './useDemoMode'
 
 /**
  * User-view route group. An admin who chose the admin view is redirected to
@@ -8,6 +9,8 @@ import { useView } from './ViewProvider'
  */
 export function RequireUser() {
   const { view } = useView()
+  const demo = useDemoMode()
+  if (demo) return <Outlet />
   if (view === null) return <Navigate to="/select-view" replace />
   if (view !== 'user') return <Navigate to="/admin/mcp-tools" replace />
   return <Outlet />

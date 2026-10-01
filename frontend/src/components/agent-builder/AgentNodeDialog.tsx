@@ -28,6 +28,7 @@ import { getCachedMcpTools, type McpTool } from '../../lib/mcp'
 import { useStorageFiles } from '../../lib/storage'
 import { formatBytes, type KnowledgeBase } from '../../lib/knowledgeBases'
 import {
+  AGENT_ANSWER_MODE_OPTIONS,
   AGENT_MODELS,
   AGENT_OUTPUT_FORMATS,
   AGENT_REASONING_LEVELS,
@@ -64,6 +65,7 @@ import {
   MiniSelect,
 } from './LineField'
 import { MarkdownField } from './MarkdownField'
+import { useVaultProviderSecrets } from '../../lib/vault'
 
 function FieldGroup({ title, children }: { title?: string; children: ReactNode }) {
   return (
@@ -294,7 +296,7 @@ function TimePicker({
   )
 }
 
-function ScheduleFields({
+export function ScheduleFields({
   schedule,
   onChange,
 }: {
@@ -565,6 +567,66 @@ function ToolSelect({
   )
 }
 
+function CustomToolSelect({
+  server,
+  tools,
+  onChange,
+}: {
+  server: AgentServerSelection
+  tools: string[]
+  onChange: (patch: Partial<AgentServerSelection>) => void
+}) {
+  if (tools.length === 0) {
+    return <span className="shrink-0 text-[11px] text-subtle">No tools</span>
+  }
+  const wholeServer = server.tools === null
+  const selected = new Set(server.tools ?? tools)
+  const allChecked = wholeServer || selected.size === tools.length
+  const label = wholeServer ? `All ${tools.length} tools` : `${selected.size}/${tools.length} tools`
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-raised px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:border-border-strong hover:text-foreground data-[state=open]:border-accent data-[state=open]:text-foreground"
+        >
+          {label}
+          <ChevronDown className="size-3" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="scrollbar-thin max-h-72 w-64 overflow-y-auto">
+        <DropdownMenuCheckboxItem
+          checked={allChecked}
+          onSelect={(event) => {
+            event.preventDefault()
+            onChange({ tools: allChecked ? [] : null })
+          }}
+          className="font-semibold"
+        >
+          All tools
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
+        {tools.map((name) => (
+          <DropdownMenuCheckboxItem
+            key={name}
+            checked={wholeServer || selected.has(name)}
+            onSelect={(event) => {
+              event.preventDefault()
+              const next = new Set(wholeServer ? tools : selected)
+              if (next.has(name)) next.delete(name)
+              else next.add(name)
+              onChange({ tools: next.size === tools.length ? null : [...next] })
+            }}
+          >
+            <span className="truncate">{name.split('/').slice(1).join('/') || name}</span>
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 const KB_STATUS_META: Record<string, { wrap: string; dot: string }> = {
   ready: { wrap: 'border-success/25 bg-success-soft text-success', dot: 'bg-success' },
   processing: { wrap: 'border-warning/25 bg-warning-soft text-warning', dot: 'bg-warning' },
@@ -646,7 +708,8 @@ export function AgentNodeDialog({
   loadTools,
   onClose,
 }: Props) {
-  const { knowledgeBases, skills, connections } = useAgentBuilder()
+  const { knowledgeBases, skills, connections, customServers } = useAgentBuilder()
+  const providerSecrets = useVaultProviderSecrets().data
 
   if (!node) {
     return (
@@ -657,6 +720,14 @@ export function AgentNodeDialog({
   }
 
   const data = node.data
+  const activeProvider = providerSecrets.find((entry) => entry.id === data.providerSecretId) ?? null
+  const providerModelOptions = (
+    activeProvider?.models?.length
+      ? activeProvider.models
+      : activeProvider?.defaultModel
+        ? [activeProvider.defaultModel]
+        : []
+  ).map((value) => ({ value, label: value }))
   const patch = (next: Partial<AgentNodeData>) => onUpdateNode(node.id, next)
   const kindMeta = AGENT_KIND_META[data.kind] ?? AGENT_KIND_META.agent
   const KindIcon = kindMeta.icon
@@ -677,21 +748,78 @@ export function AgentNodeDialog({
               />
             </FieldGroup>
             <FieldGroup title="Model">
+              <LineSelect
+                label="Model provider"
+                value={data.providerSecretId ? `provider:${data.providerSecretId}` : 'platform'}
+                onChange={(value) => {
+                  if (value === 'platform') {
+                    patch({ providerSecretId: '', model: AGENT_MODELS[0].id })
+                    return
+                  }
+                  const secretId = value.slice('provider:'.length)
+                  const secret = providerSecrets.find((entry) => entry.id === secretId)
+                  patch({
+                    providerSecretId: secretId,
+                    model: secret?.defaultModel || data.model || '',
+                  })
+                }}
+                options={[
+                  { value: 'platform', label: 'Platform gateway' },
+                  ...providerSecrets.map((secret) => ({
+                    value: `provider:${secret.id}`,
+                    label: secret.label,
+                  })),
+                ]}
+                hint="Run this agent on your own OpenAI-compatible key from the Vault."
+              />
               <div className="grid grid-cols-2 gap-3">
-                <LineSelect
-                  label="Model"
-                  value={data.model ?? AGENT_MODELS[0].id}
-                  onChange={(value) => patch({ model: value })}
-                  options={AGENT_MODELS.map((model) => ({ value: model.id, label: model.label }))}
-                />
+                {data.providerSecretId ? (
+                  providerModelOptions.length > 0 ? (
+                    <LineSelect
+                      label="Model"
+                      value={data.model || providerModelOptions[0].value}
+                      onChange={(value) => patch({ model: value })}
+                      options={providerModelOptions}
+                    />
+                  ) : (
+                    <LineField
+                      label="Model"
+                      value={data.model ?? ''}
+                      onChange={(value) => patch({ model: value })}
+                      placeholder={activeProvider?.defaultModel || 'gpt-4o-mini'}
+                      mono
+                    />
+                  )
+                ) : (
+                  <LineSelect
+                    label="Model"
+                    value={data.model ?? AGENT_MODELS[0].id}
+                    onChange={(value) => patch({ model: value })}
+                    options={AGENT_MODELS.map((model) => ({ value: model.id, label: model.label }))}
+                  />
+                )}
                 <LineSelect
                   label="Reasoning effort"
-                  value={data.reasoning ?? 'medium'}
+                  value={data.reasoning ?? 'low'}
                   onChange={(value) => patch({ reasoning: value as AgentNodeData['reasoning'] })}
                   options={AGENT_REASONING_LEVELS.map((level) => ({
                     value: level,
                     label: level[0].toUpperCase() + level.slice(1),
                   }))}
+                />
+              </div>
+              <div className="mt-3">
+                <LineSelect
+                  label="Answer mode"
+                  value={data.answerMode ?? 'summarize'}
+                  onChange={(value) =>
+                    patch({ answerMode: value as AgentNodeData['answerMode'] })
+                  }
+                  options={AGENT_ANSWER_MODE_OPTIONS.map((option) => ({
+                    value: option.value,
+                    label: `${option.label} — ${option.blurb}`,
+                  }))}
+                  hint="How detailed the answer is: Normal is to the point, Deep is section-wise."
                 />
               </div>
             </FieldGroup>
@@ -702,36 +830,31 @@ export function AgentNodeDialog({
         const questions = data.defaultQuestions ?? []
         return (
           <>
-            <MarkdownField
-              label="Query"
-              value={data.input ?? ''}
-              onChange={(value) => patch({ input: value })}
-              placeholder="Write the question you want the agent to answer…"
-              rows={16}
+            <p className="rounded-lg border border-border bg-canvas/50 px-3 py-2 text-[11.5px] leading-relaxed text-muted">
+              The question is asked when you run the agent (on the right) and is never
+              saved with it.
+            </p>
+            <LineTextArea
+              label="Starter questions (optional)"
+              value={questions.join('\n')}
+              onChange={(value) =>
+                patch({
+                  defaultQuestions: value
+                    .split('\n')
+                    .map((line) => line.trim())
+                    .filter(Boolean)
+                    .slice(0, 8),
+                })
+              }
+              placeholder={'Summarise my resume\nWhat are my strengths?'}
+              rows={4}
+              hint="One per line. Shown on the chat screen so people can start with one tap."
             />
-            <div className="border-t border-border pt-4">
-              <LineTextArea
-                label="Starter questions (optional)"
-                value={questions.join('\n')}
-                onChange={(value) =>
-                  patch({
-                    defaultQuestions: value
-                      .split('\n')
-                      .map((line) => line.trim())
-                      .filter(Boolean)
-                      .slice(0, 8),
-                  })
-                }
-                placeholder={'Summarise my resume\nWhat are my strengths?'}
-                rows={4}
-                hint="One per line. Shown on the chat screen so people can start with one tap."
-              />
-              {questions.length > 0 ? (
-                <p className="mt-1.5 text-[11px] text-subtle">
-                  {questions.length} starter question{questions.length === 1 ? '' : 's'}
-                </p>
-              ) : null}
-            </div>
+            {questions.length > 0 ? (
+              <p className="mt-1.5 text-[11px] text-subtle">
+                {questions.length} starter question{questions.length === 1 ? '' : 's'}
+              </p>
+            ) : null}
             <InputFiles
               selectedIds={data.inputFileIds ?? []}
               onChange={(inputFileIds) => patch({ inputFileIds })}
@@ -874,6 +997,73 @@ export function AgentNodeDialog({
                 )
               })}
             </div>
+
+            {customServers.length > 0 ? (
+              <div className="pt-3">
+                <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-subtle">
+                  Custom tools
+                </p>
+                {customServers.map((server) => {
+                  const entry = selected.find((item) => item.id === server.slug)
+                  const toolNames = server.tools.map((tool) => `${server.slug}/${tool.name}`)
+                  return (
+                    <div
+                      key={server.id}
+                      className="flex items-center gap-3 border-b border-border py-2 last:border-b-0"
+                    >
+                      <button
+                        type="button"
+                        onClick={() =>
+                          patch({
+                            servers: entry
+                              ? selected.filter((item) => item.id !== server.slug)
+                              : [
+                                  ...selected,
+                                  {
+                                    id: server.slug,
+                                    name: server.name,
+                                    source: 'custom',
+                                    tools: null,
+                                  },
+                                ],
+                          })
+                        }
+                        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                      >
+                        <span
+                          className={`flex size-4 shrink-0 items-center justify-center rounded border transition-colors ${
+                            entry ? 'border-accent bg-accent text-white' : 'border-border-strong'
+                          }`}
+                        >
+                          {entry ? <Check className="size-3" strokeWidth={3} /> : null}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] text-foreground">
+                            {server.name}
+                          </span>
+                          <span className="block truncate text-[11px] text-subtle">
+                            {toolNames.length} tool{toolNames.length === 1 ? '' : 's'}
+                          </span>
+                        </span>
+                      </button>
+                      {entry ? (
+                        <CustomToolSelect
+                          server={entry}
+                          tools={toolNames}
+                          onChange={(next) =>
+                            patch({
+                              servers: selected.map((item) =>
+                                item.id === server.slug ? { ...item, ...next } : item,
+                              ),
+                            })
+                          }
+                        />
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : null}
 
             {connections.length > 0 ? (
               <div className="pt-3">

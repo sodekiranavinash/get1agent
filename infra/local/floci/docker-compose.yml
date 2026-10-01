@@ -69,6 +69,36 @@ services:
       GITHUB_MCP_CLIENT_SECRET: ${GITHUB_MCP_CLIENT_SECRET:-}
       MCP_OAUTH_REDIRECT_URI: ${MCP_OAUTH_REDIRECT_URI:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      # HMAC secret for signed, expiring public trace links (user-api).
+      TRACE_LINK_SECRET: ${TRACE_LINK_SECRET:-}
+      # Mirrors run feedback to Langfuse as a score (user-api).
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-https://cloud.langfuse.com}
+      # Best-effort cache (Upstash Redis REST) for embeddings + search.
+      CACHE_BACKEND: ${CACHE_BACKEND:-redis}
+      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
+      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      CACHE_SEARCH_TTL_SECONDS: ${CACHE_SEARCH_TTL_SECONDS:-300}
+      CACHE_EMBEDDING_TTL_SECONDS: ${CACHE_EMBEDDING_TTL_SECONDS:-2592000}
+      # Semantic cache (Upstash Vector, per-user namespace).
+      UPSTASH_VECTOR_REST_URL: ${UPSTASH_VECTOR_REST_URL:-}
+      UPSTASH_VECTOR_REST_TOKEN: ${UPSTASH_VECTOR_REST_TOKEN:-}
+      SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED:-true}
+      SEMANTIC_CACHE_THRESHOLD: ${SEMANTIC_CACHE_THRESHOLD:-0.95}
+      SEMANTIC_CACHE_TTL_SECONDS: ${SEMANTIC_CACHE_TTL_SECONDS:-600}
+      # Single-flight locks to dedupe concurrent identical work.
+      SINGLE_FLIGHT_ENABLED: ${SINGLE_FLIGHT_ENABLED:-true}
+      SINGLE_FLIGHT_LOCK_SECONDS: ${SINGLE_FLIGHT_LOCK_SECONDS:-20}
+      SINGLE_FLIGHT_WAIT_SECONDS: ${SINGLE_FLIGHT_WAIT_SECONDS:-6}
+      # Playground custom-tool code generation (user-api). Reuses the OpenCode
+      # Go key the agent runtime uses; empty means "not configured".
+      OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
+      OPENCODE_BASE_URL: ${OPENCODE_BASE_URL:-https://opencode.ai/zen/go/v1}
+      CUSTOM_TOOLS_GENERATOR_MODEL: ${CUSTOM_TOOLS_GENERATOR_MODEL:-deepseek-v4-flash-vision-exp}
+      CUSTOM_TOOLS_GENERATE_MAX_TOKENS: ${CUSTOM_TOOLS_GENERATE_MAX_TOKENS:-32000}
+      CUSTOM_TOOLS_GENERATE_TIMEOUT_SECONDS: ${CUSTOM_TOOLS_GENERATE_TIMEOUT_SECONDS:-25}
+      CUSTOM_TOOLS_GENERATE_ASYNC_TIMEOUT_SECONDS: ${CUSTOM_TOOLS_GENERATE_ASYNC_TIMEOUT_SECONDS:-240}
     ports:
       - "${FLOCI_PORT:-4566}:4566"
     volumes:

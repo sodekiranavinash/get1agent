@@ -216,6 +216,18 @@ def delete_agent(sub: str, agent_id: str) -> dict[str, Any] | None:
     return existing
 
 
+def mark_run(sub: str, agent_id: str, *, run_at: str) -> None:
+    """Best-effort ``lastRunAt`` stamp (called after a run)."""
+    existing = get_agent(sub, agent_id)
+    if existing is None:
+        return
+    table().update_item(
+        Key={"pk": existing["pk"], "sk": existing["sk"]},
+        UpdateExpression="SET lastRunAt = :run, updatedAt = :updated",
+        ExpressionAttributeValues={":run": run_at, ":updated": now_iso()},
+    )
+
+
 def count_agents(sub: str) -> int:
     response = table().query(
         IndexName="byUser",

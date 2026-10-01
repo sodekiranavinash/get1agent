@@ -4,14 +4,17 @@ import {
   Braces,
   Check,
   ChevronRight,
+  HelpCircle,
   Loader2,
+  Paperclip,
   Search,
+  Sparkles,
   Square,
   Terminal,
   Wrench,
   XCircle,
 } from 'lucide-react'
-import type { AgentUsage } from '../../lib/agentRun'
+import type { AgentAttachmentRef, AgentSkillRef, AgentUsage } from '../../lib/agentRun'
 import {
   formatDuration,
   formatUsage,
@@ -22,6 +25,10 @@ import {
   type ChatToolStatus,
   type ChatTurnStatus,
 } from '../../lib/chat'
+import { HumanPrompt } from './HumanPrompt'
+
+/** Answer a paused human-in-the-loop question from its step in the timeline. */
+type AnswerHandler = (questionId: string, answer: string) => void
 
 const EASE = [0.22, 1, 0.36, 1] as const
 
@@ -43,6 +50,7 @@ const TURN_META: Record<
   done: { label: 'Completed', tone: TONES.success, icon: Check },
   error: { label: 'Failed', tone: TONES.danger, icon: XCircle },
   stopped: { label: 'Stopped', tone: TONES.warning, icon: Square },
+  awaiting_input: { label: 'Waiting for you', tone: TONES.warning, icon: HelpCircle },
 }
 
 const TOOL_META: Record<
@@ -155,10 +163,24 @@ function ToolField({
   )
 }
 
-function ToolCall({ tool }: { tool: ChatToolCall }) {
-  const meta = TOOL_META[tool.status]
+function ToolCall({ tool, onAnswer }: { tool: ChatToolCall; onAnswer?: AnswerHandler }) {
   // Collapse automatically when the call finishes; a manual toggle wins.
   const [override, setOverride] = useState<boolean | null>(null)
+
+  // The synthetic `ask_user` step is the human-in-the-loop question: rendered as
+  // the question card (interactive while pending, settled once answered).
+  if (tool.question) {
+    const question = tool.question
+    return (
+      <HumanPrompt
+        question={question}
+        disabled={tool.status !== 'running'}
+        onSubmit={(answer) => onAnswer?.(question.questionId, answer)}
+      />
+    )
+  }
+
+  const meta = TOOL_META[tool.status]
   const open = override ?? tool.status !== 'success'
 
   const hasInput = Boolean(tool.input)
@@ -217,7 +239,17 @@ function involvesToolCall(todo: ChatPlanTodo): boolean {
   return todo.tools.length > 0
 }
 
-function TodoRow({ todo, index, last }: { todo: ChatPlanTodo; index: number; last: boolean }) {
+function TodoRow({
+  todo,
+  index,
+  last,
+  onAnswer,
+}: {
+  todo: ChatPlanTodo
+  index: number
+  last: boolean
+  onAnswer?: AnswerHandler
+}) {
   return (
     <li className="relative flex gap-3">
       <div className="relative flex w-5 shrink-0 justify-center">
@@ -239,7 +271,7 @@ function TodoRow({ todo, index, last }: { todo: ChatPlanTodo; index: number; las
         {todo.tools.length > 0 ? (
           <div className="mt-2 space-y-1.5">
             {todo.tools.map((tool) => (
-              <ToolCall key={tool.id} tool={tool} />
+              <ToolCall key={tool.id} tool={tool} onAnswer={onAnswer} />
             ))}
           </div>
         ) : null}
@@ -252,7 +284,13 @@ function TodoRow({ todo, index, last }: { todo: ChatPlanTodo; index: number; las
  * A sub-query is a labelled group of tool steps. It is deliberately styled
  * differently from the numbered todo rows so the two levels never blur.
  */
-function SubQueryGroup({ subQuery }: { subQuery: ChatSubQuery }) {
+function SubQueryGroup({
+  subQuery,
+  onAnswer,
+}: {
+  subQuery: ChatSubQuery
+  onAnswer?: AnswerHandler
+}) {
   const visible = subQuery.todos.filter(involvesToolCall)
   const done = visible.filter((todo) => todo.status === 'done').length
   // Only the group currently being worked on is expanded; the rest stay closed.
@@ -284,7 +322,13 @@ function SubQueryGroup({ subQuery }: { subQuery: ChatSubQuery }) {
         {visible.length > 0 ? (
           <ol className="border-t border-border/60 px-3 py-3">
             {visible.map((todo, index) => (
-              <TodoRow key={todo.id} todo={todo} index={index} last={index === last} />
+              <TodoRow
+                key={todo.id}
+                todo={todo}
+                index={index}
+                last={index === last}
+                onAnswer={onAnswer}
+              />
             ))}
           </ol>
         ) : null}
@@ -296,29 +340,40 @@ function SubQueryGroup({ subQuery }: { subQuery: ChatSubQuery }) {
 export function RunTimeline({
   plan,
   planning,
+  skills = [],
+  attachments = [],
   status,
   startedAt,
   endedAt,
   usage,
   answer = '',
+  onAnswer,
 }: {
   plan: ChatPlan | null
   planning: boolean
+  /** Skills folded into the system prompt for this run (not tools). */
+  skills?: AgentSkillRef[]
+  /** Storage files attached to this run. */
+  attachments?: AgentAttachmentRef[]
   status: ChatTurnStatus
   startedAt: number
   endedAt?: number
   usage?: AgentUsage
   answer?: string
+  /** Answer a human-in-the-loop question shown in the timeline. */
+  onAnswer?: AnswerHandler
 }) {
   const meta = TURN_META[status]
   const duration = formatDuration(startedAt, endedAt)
   const tokens = formatUsage(usage)
-  // Open while the run streams; collapse as soon as the answer starts arriving
-  // (or the run settles). A manual toggle wins.
+  // Open while the run streams, and while a human-in-the-loop question is
+  // pending (so the card is visible); collapse once the answer starts arriving
+  // or the run settles. A manual toggle wins.
   const [override, setOverride] = useState<boolean | null>(null)
-  const open = override ?? (status === 'streaming' && !answer)
+  const open =
+    override ?? ((status === 'streaming' && !answer) || status === 'awaiting_input')
 
-  if (!plan && !planning) return null
+  if (!plan && !planning && skills.length === 0 && attachments.length === 0) return null
 
   const subQueries = (plan?.subQueries ?? [])
     .map((subQuery) => ({ ...subQuery, todos: subQuery.todos.filter(involvesToolCall) }))
@@ -343,6 +398,15 @@ export function RunTimeline({
             {doneCount}/{todos.length}
           </span>
         ) : null}
+        {skills.length > 0 ? (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-violet-soft px-1.5 py-0.5 text-[10px] font-semibold text-violet"
+            title={skills.map((skill) => skill.name).join(', ')}
+          >
+            <Sparkles className="size-2.5" />
+            {skills.length} {skills.length === 1 ? 'skill' : 'skills'}
+          </span>
+        ) : null}
         <span className="ml-auto flex items-center gap-2 text-[10.5px] text-subtle">
           {duration ? <span className="tabular-nums">{duration}</span> : null}
           {tokens ? <span className="tabular-nums">{tokens}</span> : null}
@@ -350,11 +414,43 @@ export function RunTimeline({
         <Chevron open={open} />
       </button>
 
-      {subQueries.length > 0 ? (
+      {subQueries.length > 0 || skills.length > 0 || attachments.length > 0 ? (
         <Collapse open={open}>
           <div className="space-y-2 border-t border-border/70 bg-canvas/30 p-2.5">
+            {skills.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border/70 bg-surface/60 px-2.5 py-2">
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-[0.1em] text-subtle uppercase">
+                  <Sparkles className="size-3" />
+                  Skills
+                </span>
+                {skills.map((skill) => (
+                  <span
+                    key={skill.id ?? skill.name}
+                    className="inline-flex items-center rounded-full border border-violet/25 bg-violet-soft px-2 py-0.5 text-[10.5px] font-medium text-violet"
+                  >
+                    {skill.name}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {attachments.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border/70 bg-surface/60 px-2.5 py-2">
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-[0.1em] text-subtle uppercase">
+                  <Paperclip className="size-3" />
+                  Files
+                </span>
+                {attachments.map((file) => (
+                  <span
+                    key={file.id ?? file.fileName}
+                    className="inline-flex items-center rounded-full border border-info/25 bg-info-soft px-2 py-0.5 text-[10.5px] font-medium text-info"
+                  >
+                    {file.fileName}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             {subQueries.map((subQuery) => (
-              <SubQueryGroup key={subQuery.id} subQuery={subQuery} />
+              <SubQueryGroup key={subQuery.id} subQuery={subQuery} onAnswer={onAnswer} />
             ))}
           </div>
         </Collapse>

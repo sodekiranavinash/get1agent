@@ -1,0 +1,82 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 2 /Kids [4 0 R 6 0 R] >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 489 >>
+stream
+BT
+/F1 11 Tf
+14 TL
+60 760 Td
+(Support handbook - Escalation policy) Tj
+T*
+() Tj
+T*
+(Priority levels) Tj
+T*
+(  P1  outage or data loss       first response 30 min, 24/7) Tj
+T*
+(  P2  degraded service          first response 4 hours) Tj
+T*
+(  P3  how-to or cosmetic        first response 1 business day) Tj
+T*
+() Tj
+T*
+(SSO lockout) Tj
+T*
+(  Unlink the identity binding in Admin > Users before) Tj
+T*
+(  resetting the password, otherwise the reset link will) Tj
+T*
+(  not be accepted.) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 236 >>
+stream
+BT
+/F1 11 Tf
+14 TL
+60 760 Td
+(Managed users) Tj
+T*
+() Tj
+T*
+(  A managed user cannot reset their own password.) Tj
+T*
+(  An admin resets it from Admin > Users > Reset password.) Tj
+T*
+(  The emailed link expires after 60 minutes.) Tj
+ET
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000197 00000 n 
+0000000323 00000 n 
+0000000863 00000 n 
+0000000989 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+1276
+%%EOF

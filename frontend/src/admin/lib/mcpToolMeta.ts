@@ -1,4 +1,13 @@
-import { Code2, Globe, List, Search, Wrench, type LucideIcon } from 'lucide-react'
+import {
+  Code2,
+  Download,
+  FileText,
+  Globe,
+  List,
+  Search,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react'
 
 /** Friendly labels for the MCP tools shown across the admin tester. */
 const TOOL_LABELS: Record<string, string> = {
@@ -6,6 +15,9 @@ const TOOL_LABELS: Record<string, string> = {
   'search-user-knowledge-bases': 'Search knowledge bases',
   'code-interpreter': 'Code interpreter',
   'web-search': 'Web search',
+  'http-fetch': 'HTTP fetch',
+  'list-storage-files': 'List stored files',
+  'read-storage-file': 'Read stored file',
 }
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
@@ -13,6 +25,9 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   'search-user-knowledge-bases': Search,
   'code-interpreter': Code2,
   'web-search': Globe,
+  'http-fetch': Download,
+  'list-storage-files': List,
+  'read-storage-file': FileText,
 }
 
 export function toolLabel(name: string): string {

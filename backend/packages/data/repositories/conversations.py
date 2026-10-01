@@ -33,6 +33,11 @@ KIND_CHAT = "chat"
 KIND_RUN = "run"
 KINDS = (KIND_CHAT, KIND_RUN)
 
+# What the conversation is with: a single agent or a workflow.
+TARGET_AGENT = "agent"
+TARGET_WORKFLOW = "workflow"
+TARGETS = (TARGET_AGENT, TARGET_WORKFLOW)
+
 
 def next_conversation_id() -> int:
     """Mint the next global conversation id (atomic ADD on the counter item)."""
@@ -54,6 +59,7 @@ def _new_item(
     kind: str,
     title: str,
     created_at: str,
+    target_type: str = TARGET_AGENT,
 ) -> dict[str, Any]:
     return {
         "pk": user_pk(user_id),
@@ -63,6 +69,7 @@ def _new_item(
         "userId": user_id,
         "agentId": agent_id,
         "agentName": agent_name,
+        "targetType": target_type,
         "kind": kind,
         "title": title,
         "lastPreview": "",
@@ -84,6 +91,7 @@ def create_conversation(
     agent_name: str,
     kind: str = KIND_CHAT,
     title: str = "",
+    target_type: str = TARGET_AGENT,
 ) -> dict[str, Any]:
     conversation_id = next_conversation_id()
     item = _new_item(
@@ -94,6 +102,7 @@ def create_conversation(
         kind=kind,
         title=title,
         created_at=now_iso(),
+        target_type=target_type,
     )
     table().put_item(Item=item, ConditionExpression="attribute_not_exists(pk)")
     return item
@@ -166,24 +175,38 @@ def record_run(
     *,
     run_id: str,
     preview: str = "",
+    trace_id: str | None = None,
+    trace_url: str | None = None,
 ) -> None:
     """Bump counters + recency after a run (best-effort; called by the runtime)."""
     timestamp = now_iso()
+    sets = [
+        "updatedAt = :ts",
+        "lastRunId = :run",
+        "lastPreview = :preview",
+        "gsi1sk = :g1",
+        "gsi2sk = :g2",
+    ]
+    values: dict[str, Any] = {
+        ":ts": timestamp,
+        ":run": run_id,
+        ":preview": preview[:280],
+        ":g1": chat_agent_sk(timestamp, conversation_id),
+        ":g2": chat_by_user_sk(timestamp, conversation_id),
+        ":one": 1,
+    }
+    if trace_id:
+        sets.append("lastTraceId = :trace")
+        values[":trace"] = trace_id
+    if trace_url:
+        sets.append("lastTraceUrl = :traceurl")
+        values[":traceurl"] = trace_url
     table().update_item(
         Key={"pk": user_pk(user_id), "sk": chat_sk(conversation_id)},
         UpdateExpression=(
-            "SET updatedAt = :ts, lastRunId = :run, lastPreview = :preview, "
-            "gsi1sk = :g1, gsi2sk = :g2 "
-            "ADD messageCount :one, runCount :one"
+            "SET " + ", ".join(sets) + " ADD messageCount :one, runCount :one"
         ),
-        ExpressionAttributeValues={
-            ":ts": timestamp,
-            ":run": run_id,
-            ":preview": preview[:280],
-            ":g1": chat_agent_sk(timestamp, conversation_id),
-            ":g2": chat_by_user_sk(timestamp, conversation_id),
-            ":one": 1,
-        },
+        ExpressionAttributeValues=values,
         ConditionExpression="attribute_exists(pk)",
     )
 

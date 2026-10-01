@@ -8,6 +8,8 @@ locals {
   mcp_tester_zip           = abspath("${path.module}/../../../../backend/services/mcp-tester/dist/function.zip")
   code_interpreter_zip     = abspath("${path.module}/../../../../backend/services/code-interpreter/dist/function.zip")
   web_search_zip           = abspath("${path.module}/../../../../backend/services/web-search/dist/function.zip")
+  http_fetch_zip           = abspath("${path.module}/../../../../backend/services/http-fetch/dist/function.zip")
+  custom_tools_zip         = abspath("${path.module}/../../../../backend/services/custom-tools/dist/function.zip")
   mcp_connections_zip      = abspath("${path.module}/../../../../backend/services/mcp-connections/dist/function.zip")
   ingestion_dispatcher_zip = abspath("${path.module}/../../../../backend/services/ingestion-dispatcher/dist/function.zip")
   ingestion_extract_zip    = abspath("${path.module}/../../../../backend/services/ingestion-extract/dist/function.zip")
@@ -17,6 +19,7 @@ locals {
   ingestion_watchdog_zip   = abspath("${path.module}/../../../../backend/services/ingestion-watchdog/dist/function.zip")
   agent_run_zip            = abspath("${path.module}/../../../../backend/services/agent-run/dist/function.zip")
   agent_run_microvm_zip    = abspath("${path.module}/../../../../backend/services/agent-run/dist/microvm.zip")
+  scheduler_zip            = abspath("${path.module}/../../../../backend/services/scheduler/dist/function.zip")
 }
 
 check "layer_base_zip_exists" {
@@ -72,6 +75,20 @@ check "web_search_zip_exists" {
   assert {
     condition     = !var.enable_backend_lambdas || fileexists(local.web_search_zip)
     error_message = "web-search zip not found at ${local.web_search_zip}. Run: make -C backend/services/web-search package"
+  }
+}
+
+check "http_fetch_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.http_fetch_zip)
+    error_message = "http-fetch zip not found at ${local.http_fetch_zip}. Run: make -C backend/services/http-fetch package"
+  }
+}
+
+check "custom_tools_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.custom_tools_zip)
+    error_message = "custom-tools zip not found at ${local.custom_tools_zip}. Run: make -C backend/services/custom-tools package"
   }
 }
 
@@ -184,11 +201,26 @@ module "user_api" {
   layer_arns       = [module.layer_base[0].arn]
 
   memory_size = 512
-  timeout     = 30
+  timeout     = 300
 
   s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
   s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
   dynamodb_table_arns   = [module.database[0].table_arn]
+  # Vault: encrypts each user's stored secrets with a dedicated KMS key.
+  kms_key_arns = [module.vault_kms[0].key_arn]
+
+  # The Playground runs tests in and generates tool code with custom-tools; the
+  # evaluation lab retrieves through knowledge-mcp and can run agents via the
+  # agent-run control plane (direct invoke, service auth).
+  lambda_invoke_arns = concat(
+    [
+      module.custom_tools[0].function_arn,
+      module.knowledge_mcp[0].function_arn,
+    ],
+    var.enable_backend_lambdas && var.enable_agent_runtime ? [
+      module.agent_runtime[0].control_plane_function_arn,
+    ] : [],
+  )
 
   environment = {
     DYNAMODB_TABLE          = module.database[0].table_name
@@ -201,13 +233,75 @@ module "user_api" {
     VOYAGE_API_BASE_URL     = var.voyage_api_base_url
     VOYAGE_TEXT_MODEL       = var.voyage_text_model
     VOYAGE_MULTIMODAL_MODEL = var.voyage_multimodal_model
+    # Custom-tools (Playground): run tests + generate tool code.
+    CUSTOM_TOOLS_FUNCTION        = module.custom_tools[0].function_name
+    CUSTOM_TOOLS_GENERATOR_MODEL = "deepseek-v4-flash-vision-exp"
+    OPENCODE_API_KEY             = var.opencode_api_key
+    OPENCODE_BASE_URL            = var.opencode_base_url
+    # The Playground turn route generates in a background invocation of this
+    # same function, so it can outlive the 30s API Gateway integration cap.
+    CUSTOM_TOOLS_GENERATE_MAX_TOKENS            = "32000"
+    CUSTOM_TOOLS_GENERATE_TIMEOUT_SECONDS       = "25"
+    CUSTOM_TOOLS_GENERATE_ASYNC_TIMEOUT_SECONDS = "240"
+    # Evaluation lab: retrieve through knowledge-mcp (direct invoke) and
+    # answer/judge through the OpenCode Go gateway (same key as above).
+    KNOWLEDGE_MCP_FUNCTION = module.knowledge_mcp[0].function_name
+    EVAL_ANSWER_MODEL      = "deepseek-v4-flash-vision-exp"
+    EVAL_JUDGE_MODEL       = "deepseek-v4-flash-vision-exp"
+    EVAL_MAX_CASES_PER_RUN = "20"
+    # Langfuse: signed trace links, score mirroring, and the Langfuse-native
+    # evaluation lab (traces page, datasets, annotation queues).
+    LANGFUSE_PUBLIC_KEY = var.langfuse_public_key
+    LANGFUSE_SECRET_KEY = var.langfuse_secret_key
+    LANGFUSE_BASE_URL   = var.langfuse_host
+    TRACE_LINK_SECRET   = var.trace_link_secret
+    # Evaluation lab: run agents server-side via Auth0 client-credentials
+    # (service auth) + a direct invoke of the agent-run control plane.
+    AGENT_RUN_FUNCTION = (
+      var.enable_backend_lambdas && var.enable_agent_runtime
+      ? module.agent_runtime[0].control_plane_function_name
+      : ""
+    )
+    AGENT_SERVICE_CLIENT_ID     = var.agent_service_client_id
+    AGENT_SERVICE_CLIENT_SECRET = var.agent_service_client_secret
+    AUTH0_AUDIENCE              = var.auth0_audience
+    AUTH0_TOKEN_URL = (
+      var.auth0_token_url != ""
+      ? var.auth0_token_url
+      : "https://${var.auth0_domain}/oauth/token"
+    )
+    # Vault: secrets are encrypted with its own KMS key (operator-blind at the
+    # API surface — plaintext is never returned by list/detail routes).
+    VAULT_KMS_KEY_ARN          = module.vault_kms[0].key_arn
+    VAULT_TEST_TIMEOUT_SECONDS = "15"
+    VAULT_ALLOW_PRIVATE_URLS   = "false"
   }
 
   depends_on = [
     module.knowledge_storage,
     module.database,
     module.vectors,
+    module.custom_tools,
+    module.knowledge_mcp,
+    module.vault_kms,
   ]
+}
+
+# The Playground's background generation invokes user-api itself.
+resource "aws_iam_role_policy" "user_api_self_invoke" {
+  count = var.enable_backend_lambdas ? 1 : 0
+  name  = "get1agent-prod-user-api-self-invoke"
+  role  = one(module.user_api[*].role_name)
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "SelfInvoke"
+      Effect   = "Allow"
+      Action   = ["lambda:InvokeFunction"]
+      Resource = one(module.user_api[*].function_arn)
+    }]
+  })
 }
 
 module "knowledge_mcp" {
@@ -240,15 +334,30 @@ module "knowledge_mcp" {
     VOYAGE_API_BASE_URL     = var.voyage_api_base_url
     VOYAGE_TEXT_MODEL       = var.voyage_text_model
     VOYAGE_MULTIMODAL_MODEL = var.voyage_multimodal_model
-    # Rerank is opt-in per request and falls back to RRF order when unreachable.
-    VOYAGE_RERANK_MODEL = var.voyage_rerank_model
-    RERANK_MODE         = "voyage"
+    # Best-effort cache for query embeddings + search results (Upstash Redis).
+    CACHE_BACKEND               = "redis"
+    UPSTASH_REDIS_REST_URL      = var.upstash_redis_rest_url
+    UPSTASH_REDIS_REST_TOKEN    = var.upstash_redis_rest_token
+    CACHE_SEARCH_TTL_SECONDS    = "300"
+    CACHE_EMBEDDING_TTL_SECONDS = "2592000"
+    # Semantic cache (Upstash Vector, per-user namespace).
+    UPSTASH_VECTOR_REST_URL    = var.upstash_vector_rest_url
+    UPSTASH_VECTOR_REST_TOKEN  = var.upstash_vector_rest_token
+    SEMANTIC_CACHE_ENABLED     = "true"
+    SEMANTIC_CACHE_THRESHOLD   = "0.95"
+    SEMANTIC_CACHE_TTL_SECONDS = "600"
+    # Per-user rate limits + single-flight locks.
+    # Single-flight locks (dedupe concurrent identical searches).
+    SINGLE_FLIGHT_ENABLED      = "true"
+    SINGLE_FLIGHT_LOCK_SECONDS = "20"
+    SINGLE_FLIGHT_WAIT_SECONDS = "6"
   }
 
   depends_on = [
     module.knowledge_storage,
     module.database,
     module.vectors,
+    module.custom_tools,
   ]
 }
 
@@ -273,6 +382,7 @@ module "mcp_tester" {
     module.knowledge_mcp[0].function_arn,
     module.web_search[0].function_arn,
     module.code_interpreter[0].function_arn,
+    module.http_fetch[0].function_arn,
   ]
 
   environment = {
@@ -281,6 +391,7 @@ module "mcp_tester" {
       module.knowledge_mcp[0].function_name,
       module.web_search[0].function_name,
       module.code_interpreter[0].function_name,
+      module.http_fetch[0].function_name,
     ])
   }
 
@@ -289,6 +400,7 @@ module "mcp_tester" {
     module.knowledge_mcp,
     module.web_search,
     module.code_interpreter,
+    module.http_fetch,
   ]
 }
 
@@ -350,6 +462,43 @@ module "web_search" {
 
 }
 
+module "http_fetch" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_function"
+
+  name             = "get1agent-prod-http-fetch"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.http_fetch_zip
+  source_code_hash = filebase64sha256(local.http_fetch_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_base[0].arn, module.layer_genai[0].arn]
+
+  memory_size = 512
+  timeout     = var.http_fetch_timeout_seconds
+
+  s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
+  dynamodb_table_arns = [module.database[0].table_arn]
+
+  environment = {
+    DYNAMODB_TABLE             = module.database[0].table_name
+    S3_BUCKET                  = module.knowledge_storage[0].bucket_name
+    S3_REGION                  = var.aws_region
+    HTTP_FETCH_ALLOWED_DOMAINS = var.http_fetch_allowed_domains
+  }
+
+  depends_on = [module.database, module.knowledge_storage]
+}
+
+module "vault_kms" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/kms"
+
+  name        = "get1agent-prod-vault"
+  description = "Encrypts per-user Vault secrets at rest"
+  tags        = { Service = "vault" }
+}
+
 module "mcp_connections_kms" {
   count  = var.enable_backend_lambdas ? 1 : 0
   source = "../../modules/kms"
@@ -376,13 +525,19 @@ module "mcp_connections" {
 
   s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
   dynamodb_table_arns = [module.database[0].table_arn]
-  kms_key_arns        = [module.mcp_connections_kms[0].key_arn]
+  # The MCP aggregator resolves ``{{vault:name}}`` API keys, so it needs the
+  # Vault key too.
+  kms_key_arns = [
+    module.mcp_connections_kms[0].key_arn,
+    module.vault_kms[0].key_arn,
+  ]
 
   environment = {
     DYNAMODB_TABLE              = module.database[0].table_name
     S3_BUCKET                   = module.knowledge_storage[0].bucket_name
     S3_REGION                   = var.aws_region
     MCP_CONNECTIONS_KMS_KEY_ARN = module.mcp_connections_kms[0].key_arn
+    VAULT_KMS_KEY_ARN           = module.vault_kms[0].key_arn
     MCP_OAUTH_REDIRECT_URI      = var.mcp_oauth_redirect_uri != "" ? var.mcp_oauth_redirect_uri : "https://${var.api_hostname}/v1/mcp/oauth/callback"
     FRONTEND_URL                = var.frontend_url
     GITHUB_MCP_CLIENT_ID        = var.GITHUB_MCP_CLIENT_ID
@@ -393,7 +548,48 @@ module "mcp_connections" {
     module.knowledge_storage,
     module.database,
     module.mcp_connections_kms,
+    module.vault_kms,
   ]
+}
+
+module "custom_tools" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_function"
+
+  name             = "get1agent-prod-custom-tools"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.custom_tools_zip
+  source_code_hash = filebase64sha256(local.custom_tools_zip)
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = [module.layer_base[0].arn, module.layer_genai[0].arn]
+
+  memory_size = 1024
+  timeout     = 180
+
+  bedrock_agentcore_arns = [
+    "arn:aws:bedrock-agentcore:${var.aws_region}:aws:code-interpreter/*",
+  ]
+  s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
+  dynamodb_table_arns = [module.database[0].table_arn]
+
+  environment = {
+    CUSTOM_TOOLS_MODE                    = "agentcore"
+    CUSTOM_TOOLS_IDENTIFIER              = "aws.codeinterpreter.v1"
+    CUSTOM_TOOLS_REGION                  = var.aws_region
+    CUSTOM_TOOLS_SESSIONS_TABLE          = module.database[0].table_name
+    DYNAMODB_TABLE                       = module.database[0].table_name
+    S3_BUCKET                            = module.knowledge_storage[0].bucket_name
+    S3_REGION                            = var.aws_region
+    CUSTOM_TOOLS_SESSION_TIMEOUT_SECONDS = "900"
+    CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS    = "60"
+    CUSTOM_TOOLS_MAX_SESSIONS_PER_USER   = "1"
+    CUSTOM_TOOLS_MAX_CODE_BYTES          = "65536"
+    CUSTOM_TOOLS_MAX_OUTPUT_CHARS        = "50000"
+    CUSTOM_TOOLS_MAX_RESULT_CHARS        = "20000"
+  }
+
+  depends_on = [module.database, module.knowledge_storage]
 }
 
 module "ingestion_extract" {
@@ -408,8 +604,14 @@ module "ingestion_extract" {
   runtime          = local.backend_python_runtime
   layer_arns       = [module.layer_extra_tools[0].arn]
 
-  memory_size = 1024
-  timeout     = 600
+  # Parsing + chunking is CPU- and memory-bound; Lambda scales CPU with memory,
+  # and a large PDF needs the headroom to hold extracted text + images.
+  # 3008 MB is the account's Lambda memory ceiling (4096 is rejected).
+  memory_size = 3008
+  # 900s is the Lambda hard ceiling. The state machine timeout (3600s) still
+  # bounds the whole execution, so a genuinely oversized doc fails cleanly via
+  # MarkFailed rather than being cut mid-stage.
+  timeout = 900
 
   s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
   dynamodb_table_arns = [module.database[0].table_arn]
@@ -435,8 +637,11 @@ module "ingestion_embed" {
   runtime          = local.backend_python_runtime
   layer_arns       = []
 
-  memory_size = 1024
-  timeout     = 600
+  # Staged vectors are held in memory (a large doc's embeddings.json can be tens
+  # of MB), so give the stage room and the CPU that comes with it.
+  # 3008 MB is the account's Lambda memory ceiling (4096 is rejected).
+  memory_size = 3008
+  timeout     = 900
 
   s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
   dynamodb_table_arns = [module.database[0].table_arn]
@@ -450,6 +655,11 @@ module "ingestion_embed" {
     VOYAGE_API_BASE_URL     = var.voyage_api_base_url
     VOYAGE_TEXT_MODEL       = var.voyage_text_model
     VOYAGE_MULTIMODAL_MODEL = var.voyage_multimodal_model
+    # Best-effort embedding cache (Upstash Redis) so re-ingestion is cheap.
+    CACHE_BACKEND               = "redis"
+    UPSTASH_REDIS_REST_URL      = var.upstash_redis_rest_url
+    UPSTASH_REDIS_REST_TOKEN    = var.upstash_redis_rest_token
+    CACHE_EMBEDDING_TTL_SECONDS = "2592000"
   }
 
   depends_on = [module.knowledge_storage, module.database]
@@ -467,8 +677,11 @@ module "ingestion_index" {
   runtime          = local.backend_python_runtime
   layer_arns       = []
 
-  memory_size = 1024
-  timeout     = 600
+  # The index stage loads both staged artifacts and writes one object per parent
+  # and per unique term; it is the heaviest stage memory-wise.
+  # 3008 MB is the account's Lambda memory ceiling (4096 is rejected).
+  memory_size = 3008
+  timeout     = 900
 
   s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
   s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
@@ -485,6 +698,23 @@ module "ingestion_index" {
     VOYAGE_API_BASE_URL     = var.voyage_api_base_url
     VOYAGE_TEXT_MODEL       = var.voyage_text_model
     VOYAGE_MULTIMODAL_MODEL = var.voyage_multimodal_model
+    # Best-effort cache for query embeddings + search results (Upstash Redis).
+    CACHE_BACKEND               = "redis"
+    UPSTASH_REDIS_REST_URL      = var.upstash_redis_rest_url
+    UPSTASH_REDIS_REST_TOKEN    = var.upstash_redis_rest_token
+    CACHE_SEARCH_TTL_SECONDS    = "300"
+    CACHE_EMBEDDING_TTL_SECONDS = "2592000"
+    # Semantic cache (Upstash Vector, per-user namespace).
+    UPSTASH_VECTOR_REST_URL    = var.upstash_vector_rest_url
+    UPSTASH_VECTOR_REST_TOKEN  = var.upstash_vector_rest_token
+    SEMANTIC_CACHE_ENABLED     = "true"
+    SEMANTIC_CACHE_THRESHOLD   = "0.95"
+    SEMANTIC_CACHE_TTL_SECONDS = "600"
+    # Per-user rate limits + single-flight locks.
+    # Single-flight locks (dedupe concurrent identical searches).
+    SINGLE_FLIGHT_ENABLED      = "true"
+    SINGLE_FLIGHT_LOCK_SECONDS = "20"
+    SINGLE_FLIGHT_WAIT_SECONDS = "6"
   }
 
   depends_on = [
@@ -560,6 +790,68 @@ module "ingestion" {
   tags = { Service = "ingestion" }
 }
 
+# Scheduled agent/workflow runs. A single Lambda polled once a minute finds due
+# schedules on the sparse GSI3 and runs them (agents + workflows alike).
+module "scheduler" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_function"
+
+  name             = "get1agent-prod-scheduler"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.scheduler_zip
+  source_code_hash = try(filebase64sha256(local.scheduler_zip), "")
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  # tzdata, so zoneinfo can resolve a schedule's timezone.
+  layer_arns = [module.layer_base[0].arn]
+
+  memory_size = 256
+  timeout     = 900
+
+  dynamodb_table_arns = [module.database[0].table_arn]
+  lambda_invoke_arns = (
+    var.enable_agent_runtime ? [module.agent_runtime[0].control_plane_function_arn] : []
+  )
+
+  environment = {
+    DYNAMODB_TABLE              = module.database[0].table_name
+    AGENT_RUN_FUNCTION          = var.enable_agent_runtime ? module.agent_runtime[0].control_plane_function_name : ""
+    AGENT_SERVICE_CLIENT_ID     = var.agent_service_client_id
+    AGENT_SERVICE_CLIENT_SECRET = var.agent_service_client_secret
+    AUTH0_AUDIENCE              = var.auth0_audience
+    AUTH0_TOKEN_URL = (
+      var.auth0_token_url != ""
+      ? var.auth0_token_url
+      : "https://${var.auth0_domain}/oauth/token"
+    )
+  }
+
+  depends_on = [module.database]
+}
+
+resource "aws_cloudwatch_event_rule" "scheduler" {
+  count               = var.enable_backend_lambdas ? 1 : 0
+  name                = "get1agent-prod-scheduler"
+  description         = "Fires due scheduled agent/workflow runs"
+  schedule_expression = "rate(1 minute)"
+}
+
+resource "aws_cloudwatch_event_target" "scheduler" {
+  count     = var.enable_backend_lambdas ? 1 : 0
+  rule      = aws_cloudwatch_event_rule.scheduler[0].name
+  target_id = "scheduler"
+  arn       = module.scheduler[0].function_arn
+}
+
+resource "aws_lambda_permission" "scheduler" {
+  count         = var.enable_backend_lambdas ? 1 : 0
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = module.scheduler[0].function_arn
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.scheduler[0].arn
+}
+
 module "ingestion_dispatcher" {
   count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
   source = "../../modules/lambda_function"
@@ -612,39 +904,68 @@ module "agent_runtime" {
   dynamodb_table_arns   = [module.database[0].table_arn]
   s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
   s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
+  # The runtime decrypts a user's Vault provider secret when it is the model.
+  kms_key_arns = [module.vault_kms[0].key_arn]
   mcp_function_arns = [
     module.knowledge_mcp[0].function_arn,
     module.web_search[0].function_arn,
     module.code_interpreter[0].function_arn,
+    module.http_fetch[0].function_arn,
     module.mcp_connections[0].function_arn,
+    module.custom_tools[0].function_arn,
   ]
 
   jwt_discovery_url    = "https://${var.auth0_domain}/.well-known/openid-configuration"
   jwt_allowed_audience = [var.auth0_audience]
   allowed_origins      = var.agent_run_allowed_origins
 
-  runtime_environment = {
-    OPENCODE_API_KEY              = var.opencode_api_key
-    OPENCODE_BASE_URL             = var.opencode_base_url
-    DYNAMODB_TABLE                = module.database[0].table_name
-    S3_BUCKET                     = module.knowledge_storage[0].bucket_name
-    S3_REGION                     = var.aws_region
-    VECTOR_STORE                  = "s3vectors"
-    S3_VECTOR_BUCKET              = module.vectors[0].vector_bucket_name
-    EMBED_MODE                    = "voyage"
-    VOYAGE_API_KEY                = var.voyage_api_key
-    VOYAGE_API_BASE_URL           = var.voyage_api_base_url
-    VOYAGE_TEXT_MODEL             = var.voyage_text_model
-    VOYAGE_MULTIMODAL_MODEL       = var.voyage_multimodal_model
-    KNOWLEDGE_MCP_FUNCTION        = module.knowledge_mcp[0].function_name
-    WEB_SEARCH_MCP_FUNCTION       = module.web_search[0].function_name
-    CODE_INTERPRETER_MCP_FUNCTION = module.code_interpreter[0].function_name
-    REMOTE_MCP_FUNCTION           = module.mcp_connections[0].function_name
-    AGENT_SESSION_PREFIX          = "agent-sessions/"
-    AGENT_MAX_TURNS               = "40"
-    AWS_REGION                    = var.aws_region
-    AWS_DEFAULT_REGION            = var.aws_region
-  }
+  runtime_environment = merge(
+    {
+      OPENCODE_API_KEY              = var.opencode_api_key
+      OPENCODE_BASE_URL             = var.opencode_base_url
+      DYNAMODB_TABLE                = module.database[0].table_name
+      S3_BUCKET                     = module.knowledge_storage[0].bucket_name
+      S3_REGION                     = var.aws_region
+      VECTOR_STORE                  = "s3vectors"
+      S3_VECTOR_BUCKET              = module.vectors[0].vector_bucket_name
+      EMBED_MODE                    = "voyage"
+      VOYAGE_API_KEY                = var.voyage_api_key
+      VOYAGE_API_BASE_URL           = var.voyage_api_base_url
+      VOYAGE_TEXT_MODEL             = var.voyage_text_model
+      VOYAGE_MULTIMODAL_MODEL       = var.voyage_multimodal_model
+      KNOWLEDGE_MCP_FUNCTION        = module.knowledge_mcp[0].function_name
+      WEB_SEARCH_MCP_FUNCTION       = module.web_search[0].function_name
+      CODE_INTERPRETER_MCP_FUNCTION = module.code_interpreter[0].function_name
+      HTTP_FETCH_MCP_FUNCTION       = module.http_fetch[0].function_name
+      REMOTE_MCP_FUNCTION           = module.mcp_connections[0].function_name
+      CUSTOM_TOOLS_MCP_FUNCTION     = module.custom_tools[0].function_name
+      # Trust the eval worker's Auth0 M2M token (sub == <id>@clients) so it can
+      # run agents server-side with the target userId from the payload.
+      SERVICE_AUTH_CLIENT_ID = var.agent_service_client_id
+      # Best-effort cache for memory/query embeddings (Upstash Redis).
+      CACHE_BACKEND               = "redis"
+      UPSTASH_REDIS_REST_URL      = var.upstash_redis_rest_url
+      UPSTASH_REDIS_REST_TOKEN    = var.upstash_redis_rest_token
+      CACHE_EMBEDDING_TTL_SECONDS = "2592000"
+      AGENT_SESSION_PREFIX        = "agent-sessions/"
+      AGENT_MAX_TURNS             = "40"
+      # Vault: an agent may run on the user's own provider secret.
+      VAULT_KMS_KEY_ARN  = module.vault_kms[0].key_arn
+      AWS_REGION         = var.aws_region
+      AWS_DEFAULT_REGION = var.aws_region
+    },
+    # Langfuse owns the runtime's tracing: AgentCore's ADOT exporter is turned
+    # off so spans are not double-exported. `LANGFUSE_BASE_URL` is what makes
+    # Strands emit Langfuse-friendly span attributes (it looks for "langfuse").
+    var.enable_langfuse && var.langfuse_public_key != "" && var.langfuse_secret_key != "" ? {
+      DISABLE_ADOT_OBSERVABILITY   = "true"
+      LANGFUSE_PUBLIC_KEY          = var.langfuse_public_key
+      LANGFUSE_SECRET_KEY          = var.langfuse_secret_key
+      LANGFUSE_BASE_URL            = var.langfuse_host
+      LANGFUSE_TRACING_ENVIRONMENT = "prod"
+      OTEL_SERVICE_NAME            = "get1agent-agent-worker"
+    } : {},
+  )
 
   depends_on = [
     module.database,
@@ -653,7 +974,10 @@ module "agent_runtime" {
     module.knowledge_mcp,
     module.web_search,
     module.code_interpreter,
+    module.http_fetch,
     module.mcp_connections,
+    module.custom_tools,
+    module.vault_kms,
   ]
 }
 

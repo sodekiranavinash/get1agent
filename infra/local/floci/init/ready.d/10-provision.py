@@ -41,6 +41,7 @@ QUEUE_NAME = "get1agent-local-ingestion-docs"
 DLQ_NAME = "get1agent-local-ingestion-dlq"
 RULE_NAME = "get1agent-local-ingestion-s3-object-created"
 WATCHDOG_RULE_NAME = "get1agent-local-ingestion-watchdog"
+SCHEDULER_RULE_NAME = "get1agent-local-scheduler"
 STATE_MACHINE_NAME = "get1agent-local-ingestion"
 # Local embedding backend (real vectors, no Bedrock).
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
@@ -82,7 +83,10 @@ FUNCTIONS = {
     "mcp_tester": "get1agent-local-mcp-tester",
     "code_interpreter": "get1agent-local-code-interpreter",
     "web_search": "get1agent-local-web-search",
+    "http_fetch": "get1agent-local-http-fetch",
     "mcp_connections": "get1agent-local-mcp-connections",
+    "custom_tools": "get1agent-local-custom-tools",
+    "scheduler": "get1agent-local-scheduler",
 }
 
 # Mirrors infra/terraform/envs/prod/api_gateway.tf.
@@ -100,6 +104,23 @@ ROUTES = {
         ("POST", "/v1/knowledge-bases/{id}/documents/inline"),
         ("POST", "/v1/knowledge-bases/{id}/documents/{docId}/complete"),
         ("DELETE", "/v1/knowledge-bases/{id}/documents/{docId}"),
+        ("GET", "/v1/custom-tools"),
+        ("POST", "/v1/custom-tools"),
+        ("POST", "/v1/custom-tools/generate"),
+        ("POST", "/v1/custom-tools/test"),
+        ("GET", "/v1/custom-tools/{id}"),
+        ("PUT", "/v1/custom-tools/{id}"),
+        ("DELETE", "/v1/custom-tools/{id}"),
+        ("POST", "/v1/custom-tools/{id}/tools"),
+        ("GET", "/v1/custom-tools/{id}/tools/{toolId}"),
+        ("PUT", "/v1/custom-tools/{id}/tools/{toolId}"),
+        ("DELETE", "/v1/custom-tools/{id}/tools/{toolId}"),
+        ("GET", "/v1/custom-tools/sessions"),
+        ("POST", "/v1/custom-tools/sessions"),
+        ("GET", "/v1/custom-tools/sessions/{id}"),
+        ("PATCH", "/v1/custom-tools/sessions/{id}"),
+        ("DELETE", "/v1/custom-tools/sessions/{id}"),
+        ("POST", "/v1/custom-tools/sessions/{id}/turn"),
         ("GET", "/v1/agent-skills"),
         ("POST", "/v1/agent-skills"),
         ("GET", "/v1/agent-skills/mcp-servers"),
@@ -126,12 +147,67 @@ ROUTES = {
         ("POST", "/v1/storage/presign"),
         ("POST", "/v1/storage/files/{fileId}/complete"),
         ("DELETE", "/v1/storage/files/{fileId}"),
+        ("GET", "/v1/support/messages"),
+        ("POST", "/v1/support/messages"),
+        ("GET", "/v1/support/messages/{id}"),
+        ("POST", "/v1/support/messages/{id}/reply"),
+        ("GET", "/v1/security/reports"),
+        ("POST", "/v1/security/reports"),
+        ("GET", "/v1/vault/providers"),
+        ("GET", "/v1/vault/secrets"),
+        ("POST", "/v1/vault/secrets"),
+        ("POST", "/v1/vault/test"),
+        ("POST", "/v1/vault/models"),
+        ("GET", "/v1/vault/secrets/{id}"),
+        ("PUT", "/v1/vault/secrets/{id}"),
+        ("DELETE", "/v1/vault/secrets/{id}"),
+        ("POST", "/v1/vault/secrets/{id}/test"),
+        ("POST", "/v1/vault/secrets/{id}/reveal"),
         ("GET", "/v1/agents/{id}/runs"),
+        ("GET", "/v1/workflows"),
+        ("POST", "/v1/workflows"),
+        ("GET", "/v1/workflows/{id}"),
+        ("PUT", "/v1/workflows/{id}"),
+        ("DELETE", "/v1/workflows/{id}"),
+        ("POST", "/v1/workflows/{id}/verify"),
+        ("GET", "/v1/workflows/{id}/runs"),
         ("GET", "/v1/conversations"),
         ("POST", "/v1/conversations"),
         ("GET", "/v1/conversations/{id}"),
         ("PATCH", "/v1/conversations/{id}"),
         ("DELETE", "/v1/conversations/{id}"),
+        ("GET", "/v1/traces/{token}"),
+        ("PUT", "/v1/feedback/{runId}"),
+        ("GET", "/v1/evals/datasets"),
+        ("POST", "/v1/evals/datasets"),
+        ("GET", "/v1/evals/datasets/{id}"),
+        ("PUT", "/v1/evals/datasets/{id}"),
+        ("DELETE", "/v1/evals/datasets/{id}"),
+        ("GET", "/v1/evals/datasets/{id}/cases"),
+        ("POST", "/v1/evals/datasets/{id}/cases"),
+        ("DELETE", "/v1/evals/datasets/{id}/cases/{caseId}"),
+        ("GET", "/v1/evals/datasets/{id}/runs"),
+        ("GET", "/v1/evals/runs"),
+        ("POST", "/v1/evals/runs"),
+        ("GET", "/v1/evals/runs/{id}"),
+        ("DELETE", "/v1/evals/runs/{id}"),
+        ("GET", "/v1/evals/runs/{id}/cases"),
+        ("GET", "/v1/evals/runs/{id}/cases/{caseId}"),
+        ("GET", "/v1/lab/traces"),
+        ("POST", "/v1/lab/traces/{traceId}/dataset"),
+        ("POST", "/v1/lab/traces/{traceId}/queue"),
+        ("GET", "/v1/lab/datasets"),
+        ("POST", "/v1/lab/datasets"),
+        ("GET", "/v1/lab/queues"),
+        ("POST", "/v1/lab/queues"),
+        ("GET", "/v1/lab/score-configs"),
+        ("POST", "/v1/lab/score-configs"),
+        ("GET", "/v1/lab/traces/{traceId}"),
+        ("GET", "/v1/lab/queues/{queueId}/items"),
+        ("POST", "/v1/lab/queues/{queueId}/items/{itemId}"),
+        ("GET", "/v1/lab/metrics"),
+        ("POST", "/v1/lab/playground/run"),
+        ("POST", "/v1/lab/playground/judge"),
     ],
     "knowledge_mcp": [
         ("POST", "/mcp"),
@@ -142,9 +218,25 @@ ROUTES = {
     "code_interpreter": [
         ("POST", "/mcp/code-interpreter"),
     ],
+    "http_fetch": [
+        ("POST", "/mcp/http-fetch"),
+    ],
+    "custom_tools": [
+        ("POST", "/mcp/custom-tools"),
+    ],
     "mcp_tester": [
         ("GET", "/v1/admin/mcp/tools"),
         ("POST", "/v1/admin/mcp/call"),
+        ("GET", "/v1/admin/users"),
+        ("POST", "/v1/admin/users/{userId}/credits"),
+        ("POST", "/v1/admin/users/{userId}/reset"),
+        ("GET", "/v1/admin/support"),
+        ("GET", "/v1/admin/support/{userId}/{ticketId}"),
+        ("POST", "/v1/admin/support/{userId}/{ticketId}/reply"),
+        ("POST", "/v1/admin/support/{userId}/{ticketId}/status"),
+        ("GET", "/v1/admin/security-reports"),
+        ("GET", "/v1/admin/security-reports/{userId}/{reportId}"),
+        ("POST", "/v1/admin/security-reports/{userId}/{reportId}/status"),
     ],
     "mcp_connections": [
         ("GET", "/v1/mcp/catalog"),
@@ -166,7 +258,10 @@ ROUTES = {
 }
 
 # Routes that must be reachable without a JWT (browser OAuth redirects).
-PUBLIC_ROUTES = {("GET", "/v1/mcp/oauth/callback")}
+PUBLIC_ROUTES = {
+    ("GET", "/v1/mcp/oauth/callback"),
+    ("GET", "/v1/traces/{token}"),
+}
 
 
 def log(message: str) -> None:
@@ -354,6 +449,32 @@ def ensure_watchdog_rule(events, function_arn: str) -> None:
         log(f"created EventBridge schedule {WATCHDOG_RULE_NAME} -> watchdog")
     except ClientError as exc:
         log(f"skipped watchdog schedule ({exc.response['Error']['Code']})")
+
+
+def ensure_scheduler_rule(events, function_arn: str) -> None:
+    # The scheduler runs every minute. Floci fires `rate()` rules continuously,
+    # and AgentCore is not emulated locally, so it stays off unless explicitly
+    # enabled (the function is still created for parity).
+    if os.environ.get("ENABLE_LOCAL_SCHEDULER", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
+        log("skipped scheduler rule (set ENABLE_LOCAL_SCHEDULER=true to enable)")
+        return
+    try:
+        events.put_rule(
+            Name=SCHEDULER_RULE_NAME,
+            ScheduleExpression="rate(1 minute)",
+            State="ENABLED",
+        )
+        events.put_targets(
+            Rule=SCHEDULER_RULE_NAME,
+            Targets=[{"Id": "scheduler", "Arn": function_arn}],
+        )
+        log(f"created EventBridge schedule {SCHEDULER_RULE_NAME} -> scheduler")
+    except ClientError as exc:
+        log(f"skipped scheduler rule ({exc.response['Error']['Code']})")
 
 
 # --- lambda ------------------------------------------------------------------
@@ -559,6 +680,7 @@ def main() -> int:
         f"{ROOT}/backend/services/mcp-tester/dist/function.zip",
         f"{ROOT}/backend/services/web-search/dist/function.zip",
         f"{ROOT}/backend/services/code-interpreter/dist/function.zip",
+        f"{ROOT}/backend/services/http-fetch/dist/function.zip",
         f"{ROOT}/backend/services/mcp-connections/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-dispatcher/dist/function.zip",
         f"{ROOT}/backend/services/ingestion-extract/dist/function.zip",
@@ -619,6 +741,28 @@ def main() -> int:
         "VOYAGE_TEXT_MODEL": VOYAGE_TEXT_MODEL,
         "VOYAGE_MULTIMODAL_MODEL": VOYAGE_MULTIMODAL_MODEL,
         "VECTOR_STORE": "local",
+        # Best-effort cache for embeddings + search (Upstash Redis over REST).
+        "CACHE_BACKEND": os.environ.get("CACHE_BACKEND", "redis"),
+        "UPSTASH_REDIS_REST_URL": os.environ.get("UPSTASH_REDIS_REST_URL", ""),
+        "UPSTASH_REDIS_REST_TOKEN": os.environ.get("UPSTASH_REDIS_REST_TOKEN", ""),
+        "CACHE_SEARCH_TTL_SECONDS": os.environ.get("CACHE_SEARCH_TTL_SECONDS", "300"),
+        "CACHE_EMBEDDING_TTL_SECONDS": os.environ.get(
+            "CACHE_EMBEDDING_TTL_SECONDS", "2592000"
+        ),
+        # Semantic cache (Upstash Vector, per-user namespace).
+        "UPSTASH_VECTOR_REST_URL": os.environ.get("UPSTASH_VECTOR_REST_URL", ""),
+        "UPSTASH_VECTOR_REST_TOKEN": os.environ.get("UPSTASH_VECTOR_REST_TOKEN", ""),
+        "SEMANTIC_CACHE_ENABLED": os.environ.get("SEMANTIC_CACHE_ENABLED", "true"),
+        "SEMANTIC_CACHE_THRESHOLD": os.environ.get("SEMANTIC_CACHE_THRESHOLD", "0.95"),
+        "SEMANTIC_CACHE_TTL_SECONDS": os.environ.get("SEMANTIC_CACHE_TTL_SECONDS", "600"),
+        # Single-flight locks (Upstash Redis) to dedupe concurrent identical work.
+        "SINGLE_FLIGHT_ENABLED": os.environ.get("SINGLE_FLIGHT_ENABLED", "true"),
+        "SINGLE_FLIGHT_LOCK_SECONDS": os.environ.get(
+            "SINGLE_FLIGHT_LOCK_SECONDS", "20"
+        ),
+        "SINGLE_FLIGHT_WAIT_SECONDS": os.environ.get(
+            "SINGLE_FLIGHT_WAIT_SECONDS", "6"
+        ),
         "AWS_REGION": REGION,
         "AWS_DEFAULT_REGION": REGION,
     }
@@ -697,6 +841,11 @@ def main() -> int:
         "alias/get1agent-local-mcp-connections",
         "Encrypts per-user MCP OAuth tokens and client secrets at rest",
     )
+    vault_kms_key_arn = ensure_kms_key(
+        kms,
+        "alias/get1agent-local-vault",
+        "Encrypts per-user Vault secrets at rest",
+    )
     api_env = {
         **ddb_env,
         "S3_BUCKET": BUCKET,
@@ -707,6 +856,55 @@ def main() -> int:
         "VOYAGE_API_BASE_URL": VOYAGE_API_BASE_URL,
         "VOYAGE_TEXT_MODEL": VOYAGE_TEXT_MODEL,
         "VOYAGE_MULTIMODAL_MODEL": VOYAGE_MULTIMODAL_MODEL,
+        "TRACE_LINK_SECRET": os.environ.get("TRACE_LINK_SECRET", ""),
+        # Evaluation lab: run agents server-side via service auth. Locally the
+        # AgentCore runtime is not emulated, so agent-task runs are unavailable.
+        "AGENT_RUN_FUNCTION": os.environ.get("AGENT_RUN_FUNCTION", ""),
+        "AGENT_SERVICE_CLIENT_ID": os.environ.get("AGENT_SERVICE_CLIENT_ID", ""),
+        "AGENT_SERVICE_CLIENT_SECRET": os.environ.get("AGENT_SERVICE_CLIENT_SECRET", ""),
+        "AUTH0_AUDIENCE": os.environ.get("AUTH0_AUDIENCE", AUTH0_AUDIENCE),
+        "AUTH0_TOKEN_URL": os.environ.get(
+            "AUTH0_TOKEN_URL", f"{AUTH0_ISSUER.rstrip('/')}/oauth/token"
+        ),
+        "LANGFUSE_PUBLIC_KEY": os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
+        "LANGFUSE_SECRET_KEY": os.environ.get("LANGFUSE_SECRET_KEY", ""),
+        "LANGFUSE_BASE_URL": os.environ.get("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
+        # Playground: run tests in + generate tool code with the custom-tools Lambda.
+        "CUSTOM_TOOLS_FUNCTION": FUNCTIONS["custom_tools"],
+        "CUSTOM_TOOLS_GENERATOR_MODEL": os.environ.get(
+            "CUSTOM_TOOLS_GENERATOR_MODEL", "deepseek-v4-flash-vision-exp"
+        ),
+        "OPENCODE_API_KEY": os.environ.get("OPENCODE_API_KEY", ""),
+        "OPENCODE_BASE_URL": os.environ.get(
+            "OPENCODE_BASE_URL", "https://opencode.ai/zen/go/v1"
+        ),
+        "CUSTOM_TOOLS_GENERATE_MAX_TOKENS": os.environ.get(
+            "CUSTOM_TOOLS_GENERATE_MAX_TOKENS", "32000"
+        ),
+        "CUSTOM_TOOLS_GENERATE_TIMEOUT_SECONDS": os.environ.get(
+            "CUSTOM_TOOLS_GENERATE_TIMEOUT_SECONDS", "25"
+        ),
+        # Generation runs as a background invocation of user-api itself, so it
+        # is not bound by the API Gateway integration cap.
+        "CUSTOM_TOOLS_GENERATE_ASYNC_TIMEOUT_SECONDS": os.environ.get(
+            "CUSTOM_TOOLS_GENERATE_ASYNC_TIMEOUT_SECONDS", "240"
+        ),
+        "USER_API_FUNCTION_NAME": FUNCTIONS["user_api"],
+        # Vault: encrypt per-user secrets, and allow testing a local provider
+        # (e.g. Ollama at http://localhost:11434) under Floci only.
+        "VAULT_KMS_KEY_ARN": vault_kms_key_arn,
+        "VAULT_TEST_TIMEOUT_SECONDS": os.environ.get("VAULT_TEST_TIMEOUT_SECONDS", "15"),
+        "VAULT_ALLOW_PRIVATE_URLS": os.environ.get("VAULT_ALLOW_PRIVATE_URLS", "true"),
+        # Evaluation lab: retrieve through knowledge-mcp (direct invoke) and
+        # answer/judge through the OpenCode Go gateway (same key as above).
+        "KNOWLEDGE_MCP_FUNCTION": FUNCTIONS["knowledge_mcp"],
+        "EVAL_ANSWER_MODEL": os.environ.get(
+            "EVAL_ANSWER_MODEL", "deepseek-v4-flash-vision-exp"
+        ),
+        "EVAL_JUDGE_MODEL": os.environ.get(
+            "EVAL_JUDGE_MODEL", "deepseek-v4-flash-vision-exp"
+        ),
+        "EVAL_MAX_CASES_PER_RUN": os.environ.get("EVAL_MAX_CASES_PER_RUN", "20"),
         "AWS_REGION": REGION,
         "AWS_DEFAULT_REGION": REGION,
     }
@@ -717,9 +915,38 @@ def main() -> int:
         handler="handler.lambda_handler",
         layers=[base_layer_arn],
         environment=api_env,
-        timeout=30,
+        timeout=300,
         memory=512,
     )
+    # Scheduled agent/workflow runs. AgentCore is not emulated, so a scheduled
+    # run cannot actually execute locally; the function exists (and its
+    # EventBridge rule is off by default) for parity with production.
+    scheduler_arn = ensure_function(
+        lm,
+        FUNCTIONS["scheduler"],
+        f"{ROOT}/backend/services/scheduler/dist/function.zip",
+        handler="handler.lambda_handler",
+        layers=[base_layer_arn],
+        environment={
+            "DYNAMODB_TABLE": DYNAMODB_TABLE,
+            "DYNAMODB_ENDPOINT_URL": DYNAMODB_ENDPOINT_URL,
+            "AGENT_RUN_FUNCTION": os.environ.get("AGENT_RUN_FUNCTION", ""),
+            "AGENT_SERVICE_CLIENT_ID": os.environ.get("AGENT_SERVICE_CLIENT_ID", ""),
+            "AGENT_SERVICE_CLIENT_SECRET": os.environ.get(
+                "AGENT_SERVICE_CLIENT_SECRET", ""
+            ),
+            "AUTH0_AUDIENCE": os.environ.get("AUTH0_AUDIENCE", AUTH0_AUDIENCE),
+            "AUTH0_TOKEN_URL": os.environ.get(
+                "AUTH0_TOKEN_URL", f"{AUTH0_ISSUER.rstrip('/')}/oauth/token"
+            ),
+            "AWS_REGION": REGION,
+            "AWS_DEFAULT_REGION": REGION,
+        },
+        timeout=900,
+        memory=256,
+    )
+    ensure_scheduler_rule(events, scheduler_arn)
+
     mcp_arn = ensure_function(
         lm,
         FUNCTIONS["knowledge_mcp"],
@@ -755,6 +982,33 @@ def main() -> int:
         timeout=240,
         memory=1024,
     )
+    # User-defined Python tools (Playground). AgentCore is not emulated, so the
+    # tool source runs through the shared guarded local subprocess, like
+    # code-interpreter above.
+    custom_tools_arn = ensure_function(
+        lm,
+        FUNCTIONS["custom_tools"],
+        f"{ROOT}/backend/services/custom-tools/dist/function.zip",
+        handler="handler.lambda_handler",
+        layers=[base_layer_arn, genai_layer_arn],
+        environment={
+            "CUSTOM_TOOLS_MODE": "local",
+            "CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS": "60",
+            "CUSTOM_TOOLS_SESSION_TIMEOUT_SECONDS": "900",
+            "CUSTOM_TOOLS_MAX_SESSIONS_PER_USER": "1",
+            "CUSTOM_TOOLS_MAX_CODE_BYTES": "65536",
+            "CUSTOM_TOOLS_MAX_OUTPUT_CHARS": "50000",
+            "CUSTOM_TOOLS_MAX_RESULT_CHARS": "20000",
+            "DYNAMODB_TABLE": DYNAMODB_TABLE,
+            "DYNAMODB_ENDPOINT_URL": DYNAMODB_ENDPOINT_URL,
+            "S3_BUCKET": BUCKET,
+            "S3_REGION": REGION,
+            "AWS_REGION": REGION,
+            "AWS_DEFAULT_REGION": REGION,
+        },
+        timeout=180,
+        memory=1024,
+    )
     # Exa is a public HTTPS API, so the local tool calls it directly with the
     # host EXA_API_KEY (no emulation branch).
     web_search_arn = ensure_function(
@@ -774,6 +1028,29 @@ def main() -> int:
         timeout=60,
         memory=512,
     )
+    # Trusted web fetch + user storage access. Runs outside a VPC and reaches
+    # public HTTPS directly (with a per-request SSRF guard); stores results in
+    # the user's S3 storage area, so it needs the table + bucket.
+    http_fetch_arn = ensure_function(
+        lm,
+        FUNCTIONS["http_fetch"],
+        f"{ROOT}/backend/services/http-fetch/dist/function.zip",
+        handler="handler.lambda_handler",
+        layers=[base_layer_arn, genai_layer_arn],
+        environment={
+            "DYNAMODB_TABLE": DYNAMODB_TABLE,
+            "DYNAMODB_ENDPOINT_URL": DYNAMODB_ENDPOINT_URL,
+            "S3_BUCKET": BUCKET,
+            "S3_REGION": REGION,
+            "HTTP_FETCH_ALLOWED_DOMAINS": os.environ.get(
+                "HTTP_FETCH_ALLOWED_DOMAINS", ""
+            ),
+            "AWS_REGION": REGION,
+            "AWS_DEFAULT_REGION": REGION,
+        },
+        timeout=60,
+        memory=512,
+    )
     mcp_tester_arn = ensure_function(
         lm,
         FUNCTIONS["mcp_tester"],
@@ -787,6 +1064,7 @@ def main() -> int:
                     FUNCTIONS["knowledge_mcp"],
                     FUNCTIONS["web_search"],
                     FUNCTIONS["code_interpreter"],
+                    FUNCTIONS["http_fetch"],
                 ]
             ),
             "AWS_REGION": REGION,
@@ -827,6 +1105,8 @@ def main() -> int:
             "knowledge_mcp": mcp_arn,
             "web_search": web_search_arn,
             "code_interpreter": code_interpreter_arn,
+            "http_fetch": http_fetch_arn,
+            "custom_tools": custom_tools_arn,
             "mcp_tester": mcp_tester_arn,
             "mcp_connections": mcp_connections_arn,
         },

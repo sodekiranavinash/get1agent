@@ -33,8 +33,8 @@ function CommandDialog({
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="dialog-overlay fixed inset-0 z-50 bg-black/55 backdrop-blur-[2px]" />
-        <div className="fixed inset-0 z-50 flex justify-center p-4 pt-[12vh]">
-          <DialogPrimitive.Content className="relative w-full max-w-lg overflow-hidden rounded-xl border border-border bg-surface shadow-panel focus:outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95">
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[10vh]">
+          <DialogPrimitive.Content className="relative flex max-h-[calc(100vh-12vh)] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-panel focus:outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95">
             <DialogPrimitive.Title className="sr-only">Command palette</DialogPrimitive.Title>
             <DialogPrimitive.Description className="sr-only">
               Search pages and actions
@@ -74,7 +74,7 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        'scrollbar-thin max-h-[340px] scroll-py-1 overflow-x-hidden overflow-y-auto p-1.5',
+        'scrollbar-thin max-h-[min(62vh,560px)] scroll-py-1 overflow-x-hidden overflow-y-auto p-1.5',
         className,
       )}
       {...props}

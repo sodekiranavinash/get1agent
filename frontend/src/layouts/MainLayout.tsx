@@ -1,6 +1,6 @@
 import { Suspense, type ReactNode } from 'react'
-import { Outlet } from 'react-router-dom'
-import { AppFooter } from '../components/layout/AppFooter'
+import { Outlet, useLocation } from 'react-router-dom'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import { TopBar } from '../components/layout/TopBar'
 import { SidebarProvider, useSidebar } from '../components/layout/SidebarProvider'
 import { Sidebar } from './Sidebar'
@@ -15,13 +15,23 @@ function RouteGate({ children }: { children: ReactNode }) {
   return <Suspense fallback={null}>{children}</Suspense>
 }
 
-function MainLayoutContent() {
+/**
+ * The error boundary's reset key. It is the top-level section, not the full
+ * pathname: a sub-route change (e.g. `/chat` → `/chat/conversation/12`) must not
+ * remount the page and wipe its in-flight state.
+ */
+function routeKey(pathname: string): string {
+  return pathname.split('/').filter(Boolean)[0] ?? ''
+}
+
+function MainLayoutContent({ children }: { children?: ReactNode }) {
   const { effectiveCollapsed } = useSidebar()
+  const location = useLocation()
 
   return (
     <div className="h-screen overflow-hidden bg-canvas text-foreground">
       <aside
-        className={`fixed inset-y-0 left-0 z-20 overflow-hidden border-r border-border bg-surface transition-[width] duration-200 ease-out ${
+        className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-border bg-canvas transition-[width] duration-200 ease-out ${
           effectiveCollapsed ? 'w-[60px]' : 'w-[240px]'
         }`}
       >
@@ -35,22 +45,24 @@ function MainLayoutContent() {
       >
         <TopBar />
         {/* No route transition animation: the next page mounts immediately
-            instead of waiting for the previous one to fade out. */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            instead of waiting for the previous one to fade out. The bottom
+            padding reserves space for the fixed footer. */}
+        <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-y-auto pb-14">
           <RouteGate>
-            <Outlet />
+            <ErrorBoundary key={routeKey(location.pathname)}>
+              {children ?? <Outlet />}
+            </ErrorBoundary>
           </RouteGate>
         </div>
-        <AppFooter />
       </main>
     </div>
   )
 }
 
-export function MainLayout() {
+export function MainLayout({ children }: { children?: ReactNode }) {
   return (
     <SidebarProvider>
-      <MainLayoutContent />
+      <MainLayoutContent>{children}</MainLayoutContent>
     </SidebarProvider>
   )
 }

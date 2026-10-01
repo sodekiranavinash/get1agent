@@ -38,6 +38,12 @@ DEFAULT_TOOLS: list[dict[str, str]] = [
         "description": "Search the web for current information and citations.",
         "source": "builtin",
     },
+    {
+        "name": "http-fetch",
+        "label": "HTTP Fetch",
+        "description": "Call a public URL/API and read stored files from the user's storage.",
+        "source": "builtin",
+    },
 ]
 
 # Tool identifiers are lowercase and may be namespaced for MCP servers, e.g.

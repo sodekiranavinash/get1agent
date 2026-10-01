@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MessageSquare, Plus, Trash2, X } from 'lucide-react'
+import { MessageSquare, Network, Plus, Trash2, X } from 'lucide-react'
 import { useApiClient } from '../../lib/api'
 import type { Conversation } from '../../lib/conversations'
 import { Spinner } from '../ui/Spinner'
@@ -122,8 +122,13 @@ export function ConversationSidebar({
                     >
                       {conversation.title || 'Untitled'}
                     </p>
-                    <p className="mt-0.5 truncate text-[11px] text-subtle">
-                      {conversation.agentName || 'Agent'} · {timeAgo(conversation.updatedAt)}
+                    <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-subtle">
+                      {conversation.targetType === 'workflow' ? (
+                        <Network className="size-3 shrink-0" />
+                      ) : null}
+                      <span className="truncate">
+                        {conversation.agentName || 'Agent'} · {timeAgo(conversation.updatedAt)}
+                      </span>
                     </p>
                   </button>
                   <button

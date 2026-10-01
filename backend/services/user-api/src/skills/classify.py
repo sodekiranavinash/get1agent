@@ -21,7 +21,14 @@ _CODE_WORDS = re.compile(
 )
 _WEB_WORDS = re.compile(
     r"\b(web[ _-]?search|search the web|web search|browse the web|crawl the web|"
-    r"web fetch|fetch the (?:url|page|webpage)|google search|internet search)\b",
+    r"google search|internet search)\b",
+    re.IGNORECASE,
+)
+# Fetching a specific URL/API is the http-fetch tool, not web search.
+_API_WORDS = re.compile(
+    r"\b(api|endpoint|http[ _-]?(?:request|fetch|call)|rest api|"
+    r"fetch the (?:url|page|webpage)|call the (?:api|endpoint)|"
+    r"download the file|read the stored file)\b",
     re.IGNORECASE,
 )
 
@@ -33,12 +40,15 @@ def classify_skill(markdown: str) -> dict[str, object]:
     text = markdown or ""
     needs_code = bool(_CODE_FENCE.search(text) or _CODE_WORDS.search(text))
     needs_web = bool(_WEB_WORDS.search(text))
+    needs_api = bool(_API_WORDS.search(text))
 
     suggested: list[str] = []
     if needs_code:
         suggested.append("code-interpreter")
     if needs_web:
         suggested.append("web-search")
+    if needs_api:
+        suggested.append("http-fetch")
 
     return {
         "kind": "tool" if suggested else "prompt",

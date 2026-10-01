@@ -108,6 +108,9 @@ Registry: `backend/registry.json` — lists **layers** and **apps**
 | `knowledge-mcp` | `POST /mcp` | `base`, `genai` | Knowledge MCP tools + hybrid retrieval |
 | `web-search` | `POST /mcp/web-search` | `base`, `genai` | Exa web search |
 | `code-interpreter` | `POST /mcp/code-interpreter` | `base`, `genai` | AgentCore code sandbox |
+| `http-fetch` | `POST /mcp/http-fetch` | `base`, `genai` | SSRF-guarded fetch + user storage access |
+| `custom-tools` | `POST /mcp/custom-tools` | `base`, `genai` | Playground user-defined tools |
+| `mcp-connections` | `/v1/mcp/*`, `POST /mcp/remote` | `base`, `genai` | Remote MCP OAuth broker + aggregator |
 | `mcp-tester` | `/v1/admin/mcp/*` | — | Admin MCP client |
 | `ingestion-extract` | (Step Functions) | `extra-tools` | extract + chunk |
 | `ingestion-*` | (SQS / Step Functions) | — | embed → index (+ mark-failed, watchdog, dispatcher) |
@@ -142,7 +145,7 @@ GitHub Actions: **Backend** workflow — pick one or more **groups** to deploy h
 | `user-apis` | `user-api` |
 | `knowledge-mcp` | `knowledge-mcp` |
 | `admin-apis` | `mcp-tester` |
-| `mcp-tools` | `web-search`, `code-interpreter` |
+| `mcp-tools` | `web-search`, `code-interpreter`, `http-fetch`, `custom-tools`, `mcp-connections` |
 | `ingestion-apis` | `ingestion-dispatcher`, `ingestion-extract`, `ingestion-embed`, `ingestion-index`, `ingestion-mark-failed`, `ingestion-watchdog` |
 
 Groups come from the `group` field in `backend/services/registry.json`. The CLI

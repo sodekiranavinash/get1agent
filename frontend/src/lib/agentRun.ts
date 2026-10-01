@@ -9,6 +9,7 @@
  */
 
 import { API_BASE_URL } from './api'
+import type { RunResourceOverrides } from './agents'
 
 export type AgentUsage = Record<string, number | null>
 
@@ -66,8 +67,23 @@ export type AgentSource = {
   image?: string
 }
 
+/** A skill folded into the agent's system prompt (not a tool). */
+export type AgentSkillRef = {
+  id?: string
+  name: string
+}
+
+/** A storage file attached to a run (downloaded and extracted server-side). */
+export type AgentAttachmentRef = {
+  id?: string
+  fileName: string
+  chars?: number
+}
+
 export type AgentRunEvent =
   | { type: 'run.started'; runId: string; agentId: string; sessionId: string }
+  | { type: 'skills'; skills?: AgentSkillRef[] }
+  | { type: 'attachments'; files?: AgentAttachmentRef[] }
   | { type: 'plan.started' }
   | {
       type: 'plan'
@@ -86,7 +102,18 @@ export type AgentRunEvent =
       input?: unknown
       sources?: AgentSource[]
     }
+  | {
+      /** Human-in-the-loop: the run paused for the user's answer. */
+      type: 'question'
+      questionId: string
+      question: string
+      options?: string[]
+      allowCustom?: boolean
+      /** Present when a resumed turn is replayed from the transcript. */
+      answer?: string
+    }
   | { type: 'run.completed'; stopReason?: string; usage?: AgentUsage }
+  | { type: 'trace'; traceId?: string | null; traceUrl?: string | null }
   | {
       type: 'context'
       usedTokens: number
@@ -147,12 +174,43 @@ type RunParams = {
   conversationId: string
   /** Per-run model override; falls back to the agent's saved model. */
   model?: string
+  /**
+   * Vault provider secret to run on. An empty string forces the platform
+   * gateway (overriding a provider saved on the agent); `undefined` inherits it.
+   */
+  providerSecretId?: string
+  /** Per-run answer depth override (summarize | normal | detailed). */
+  answerMode?: string
+  /** Per-run reasoning effort override (low | medium | high). */
+  reasoning?: string
+  /** Per-run overrides of attached KBs / skills / MCP servers / files. */
+  overrides?: RunResourceOverrides
+  /**
+   * Chat-only human-in-the-loop. `true` lets the agent pause and ask the user
+   * (auto-approve off); `false` makes it assume instead. Omitted everywhere else.
+   */
+  humanInLoop?: boolean
+  /** Answers to a paused run's questions; resumes the same run. */
+  interruptResponses?: { interruptId: string; response: string }[]
+  /** The pending question, replayed into the resumed turn's transcript. */
+  pendingQuestion?: PendingQuestion
+  /** The paused turn's run id, so the resume replaces it instead of appending. */
+  resumeRunId?: string
   onEvent: (event: AgentRunEvent) => void
   signal?: AbortSignal
 }
 
+/** A human-in-the-loop question, with the user's answer once provided. */
+export type PendingQuestion = {
+  questionId: string
+  question: string
+  options?: string[]
+  allowCustom?: boolean
+  answer?: string
+}
+
 /** Incremental SSE frame parser; invokes `onEvent` for each `data:` frame. */
-function makeFrameParser(onEvent: (event: AgentRunEvent) => void): (chunk: string) => void {
+export function makeFrameParser<T>(onEvent: (event: T) => void): (chunk: string) => void {
   let buffer = ''
   return (chunk) => {
     buffer += chunk
@@ -162,7 +220,7 @@ function makeFrameParser(onEvent: (event: AgentRunEvent) => void): (chunk: strin
       const line = frame.split('\n').find((entry) => entry.startsWith('data:'))
       if (!line) continue
       try {
-        onEvent(JSON.parse(line.slice(5).trim()) as AgentRunEvent)
+        onEvent(JSON.parse(line.slice(5).trim()) as T)
       } catch {
         // Ignore keep-alives / partial frames.
       }
@@ -170,12 +228,33 @@ function makeFrameParser(onEvent: (event: AgentRunEvent) => void): (chunk: strin
   }
 }
 
-function runPayload(params: RunParams) {
+/** A run request body the runtime understands (agent or workflow). */
+export type RunPayload = Record<string, unknown>
+
+/** Transport-agnostic stream request shared by agents and workflows. */
+export type StreamRequest<T> = {
+  token: string
+  payload: RunPayload
+  onEvent: (event: T) => void
+  signal?: AbortSignal
+}
+
+export function agentRunPayload(params: RunParams): RunPayload {
   return {
     agentId: params.agentId,
     input: params.input,
     conversationId: params.conversationId,
     ...(params.model ? { model: params.model } : {}),
+    ...(params.providerSecretId !== undefined
+      ? { providerSecretId: params.providerSecretId }
+      : {}),
+    ...(params.answerMode ? { answerMode: params.answerMode } : {}),
+    ...(params.reasoning ? { reasoning: params.reasoning } : {}),
+    ...(params.humanInLoop !== undefined ? { humanInLoop: params.humanInLoop } : {}),
+    ...(params.interruptResponses ? { interruptResponses: params.interruptResponses } : {}),
+    ...(params.pendingQuestion ? { pendingQuestion: params.pendingQuestion } : {}),
+    ...(params.resumeRunId ? { resumeRunId: params.resumeRunId } : {}),
+    ...(params.overrides ?? {}),
   }
 }
 
@@ -187,9 +266,9 @@ function runPayload(params: RunParams) {
  * travels in the `lambda-microvms.authentication.*` WebSocket subprotocol.
  * The Auth0 token is sent in the first message and forwarded to AgentCore.
  */
-async function runViaMicrovm(params: RunParams): Promise<void> {
-  const session = await microvmSession(params.token)
-  const parse = makeFrameParser(params.onEvent)
+async function streamViaMicrovm<T>(request: StreamRequest<T>): Promise<void> {
+  const session = await microvmSession(request.token)
+  const parse = makeFrameParser(request.onEvent)
 
   await new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(`wss://${session.endpoint}/invocations`, [
@@ -199,10 +278,10 @@ async function runViaMicrovm(params: RunParams): Promise<void> {
     ])
     let settled = false
     const abort = () => socket.close()
-    params.signal?.addEventListener('abort', abort)
+    request.signal?.addEventListener('abort', abort)
 
     socket.onopen = () => {
-      socket.send(JSON.stringify({ token: params.token, payload: runPayload(params) }))
+      socket.send(JSON.stringify({ token: request.token, payload: request.payload }))
     }
     socket.onmessage = (event) => {
       if (typeof event.data === 'string') parse(event.data)
@@ -214,7 +293,7 @@ async function runViaMicrovm(params: RunParams): Promise<void> {
       }
     }
     socket.onclose = () => {
-      params.signal?.removeEventListener('abort', abort)
+      request.signal?.removeEventListener('abort', abort)
       if (!settled) {
         settled = true
         resolve()
@@ -223,31 +302,39 @@ async function runViaMicrovm(params: RunParams): Promise<void> {
   })
 }
 
-export async function runAgentStream(params: RunParams): Promise<void> {
+/**
+ * Stream one invocation to the runtime (agent or workflow). Shared by
+ * `runAgentStream` and `runWorkflowStream` so the transport lives in one place.
+ */
+export async function streamInvocation<T>(request: StreamRequest<T>): Promise<void> {
   if (USE_MICROVM) {
-    await runViaMicrovm(params)
+    await streamViaMicrovm(request)
     return
   }
   if (!RUN_URL) throw new Error('Agent run URL is not configured')
-  const sessionId = params.conversationId.length >= 33 ? params.conversationId : `${params.conversationId}-${'0'.repeat(33)}`.slice(0, 64)
+  const conversationId = String(request.payload.conversationId ?? '')
+  const sessionId =
+    conversationId.length >= 33
+      ? conversationId
+      : `${conversationId}-${'0'.repeat(33)}`.slice(0, 64)
 
   const response = await fetch(`${RUN_URL}/invocations`, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${params.token}`,
+      authorization: `Bearer ${request.token}`,
       'content-type': 'application/json',
       accept: 'text/event-stream',
       'x-agent-session': sessionId,
     },
-    body: JSON.stringify(runPayload(params)),
-    signal: params.signal,
+    body: JSON.stringify(request.payload),
+    signal: request.signal,
   })
 
   if (!response.ok || !response.body) {
     throw new Error(`Agent run failed (${response.status})`)
   }
 
-  const parse = makeFrameParser(params.onEvent)
+  const parse = makeFrameParser(request.onEvent)
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   for (;;) {
@@ -255,4 +342,13 @@ export async function runAgentStream(params: RunParams): Promise<void> {
     if (done) break
     parse(decoder.decode(value, { stream: true }))
   }
+}
+
+export async function runAgentStream(params: RunParams): Promise<void> {
+  await streamInvocation<AgentRunEvent>({
+    token: params.token,
+    payload: agentRunPayload(params),
+    onEvent: params.onEvent,
+    signal: params.signal,
+  })
 }

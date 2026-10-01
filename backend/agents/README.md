@@ -12,7 +12,7 @@ backend/agents/
     config.py      identity.py   events.py   store.py   models.py
     prompts.py     tools.py      memory.py   sessions.py   run.py
   tests/           # stdlib unittest
-  Dockerfile  Makefile  requirements.txt
+  Dockerfile  Makefile  pyproject.toml  uv.lock
 ```
 
 Multi-agent **workflow** orchestration (ordered pipeline + swarm) will be added
@@ -40,13 +40,14 @@ as a sibling package and dispatched from `main.py`.
 | `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT_URL` | sessions + local vector store |
 | `VECTOR_STORE`, `S3_VECTOR_BUCKET` | memory vector index |
 | `EMBED_MODE`, `VOYAGE_API_KEY` | memory embeddings |
-| `KNOWLEDGE_MCP_FUNCTION`, `WEB_SEARCH_MCP_FUNCTION`, `CODE_INTERPRETER_MCP_FUNCTION`, `REMOTE_MCP_FUNCTION` | MCP server Lambda names |
+| `KNOWLEDGE_MCP_FUNCTION`, `WEB_SEARCH_MCP_FUNCTION`, `CODE_INTERPRETER_MCP_FUNCTION`, `REMOTE_MCP_FUNCTION`, `CUSTOM_TOOLS_MCP_FUNCTION` | MCP server Lambda names |
 | `AGENT_SESSION_PREFIX`, `AGENT_MAX_TURNS` | session prefix + turn ceiling |
+| `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | Langfuse tracing (optional; no-op without keys) |
 
 ## Local
 
 ```bash
-# one-time: create backend/agents/.venv with the container deps
+# one-time: create backend/agents/.venv from uv.lock (uv sync --frozen)
 make -C backend/agents install
 
 # from repo root, with the Floci stack up and .env populated

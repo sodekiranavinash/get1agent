@@ -27,6 +27,15 @@ INDEX_PREFIX = "index"
 STORAGE_PREFIX = "storage"
 # Chat/builder conversation transcripts (one JSON per conversation).
 CONVERSATION_PREFIX = "conversations"
+# User-defined custom MCP tool sources (one .py per tool). Not under `raw/`, so
+# the EventBridge ingestion rule never fires for these.
+CUSTOM_PREFIX = "custom"
+# Playground build-chat transcripts (one JSON per session). Not under `raw/`, so
+# the EventBridge ingestion rule never fires for these.
+PLAYGROUND_PREFIX = "playground"
+# Evaluation-lab per-case artifacts (retrieved contexts, generated answer, judge
+# reasoning). Not under `raw/`, so the EventBridge ingestion rule never fires.
+EVAL_PREFIX = "evals"
 
 TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
@@ -60,6 +69,29 @@ def storage_key(sub: str, file_id: str, file_name: str) -> str:
 def conversation_key(sub: str, conversation_id: int | str) -> str:
     """S3 key for a conversation transcript (all turns, one JSON object)."""
     return f"{CONVERSATION_PREFIX}/{sub}/{conversation_id}.json"
+
+
+def custom_tool_key(sub: str, server_slug: str, tool_name: str) -> str:
+    """S3 key for a user-defined tool's Python source."""
+    return f"{CUSTOM_PREFIX}/{sub}/{server_slug}/{tool_name}.py"
+
+
+def custom_prefix(sub: str) -> str:
+    return f"{CUSTOM_PREFIX}/{sub}/"
+
+
+def playground_key(sub: str, session_id: str) -> str:
+    """S3 key for a Playground build-chat transcript (all messages, one JSON)."""
+    return f"{PLAYGROUND_PREFIX}/{sub}/{session_id}.json"
+
+
+def eval_case_key(sub: str, run_id: str, case_id: str) -> str:
+    """S3 key for one eval case's full artifact (contexts, answer, reasoning)."""
+    return f"{EVAL_PREFIX}/{sub}/{run_id}/{case_id}.json"
+
+
+def eval_prefix(sub: str, run_id: str) -> str:
+    return f"{EVAL_PREFIX}/{sub}/{run_id}/"
 
 
 def derived_prefix(sub: str, kb_id: str, doc_id: str) -> str:

@@ -54,8 +54,10 @@ Rules:
 - A single todo may use SEVERAL tool calls. Group related lookups into one todo
   instead of splitting them into one todo per tool call.
 - Every todo MUST name at least one tool. `tool` is a comma-separated list of the
-  exact tool names that todo uses. Never create a todo that uses no tool — if a
-  step needs no tool, it is not a todo and must be omitted.
+  exact tool names from the "Available tools" list. Never invent a tool name.
+- Skills (listed under "Skills") are guidance, NOT tools. Never put a skill name
+  in `tool`. A step that only applies a skill (writing, composing, summarizing)
+  uses no tool and must be omitted entirely.
 - Do NOT repeat the same tool with near-duplicate queries.
 - The todos are executed strictly in order, one at a time: order them so each
   step is a prerequisite of the next.
@@ -87,7 +89,9 @@ def _extract_json(text: str) -> dict[str, Any] | None:
     return None
 
 
-def _clean_todos(entries: Any) -> list[dict[str, str]]:
+def _clean_todos(
+    entries: Any, skill_names: frozenset[str] = frozenset()
+) -> list[dict[str, str]]:
     if not isinstance(entries, list):
         return []
     todos: list[dict[str, str]] = []
@@ -100,6 +104,16 @@ def _clean_todos(entries: Any) -> list[dict[str, str]]:
         if not title:
             continue
         tool = str(entry.get("tool") or "").strip()[:100]
+        # The planner sometimes mistakes a skill for a tool and names it here. A
+        # skill has no tool invocation, so strip any skill names from the list and
+        # drop the todo when nothing real remains.
+        if tool and skill_names:
+            names = [
+                name.strip()
+                for name in tool.split(",")
+                if name.strip() and name.strip().lower() not in skill_names
+            ]
+            tool = ", ".join(names)[:100]
         # A step that uses no tool is reasoning, not an action — omit it so the
         # UI never shows a todo without a tool call.
         if not tool:
@@ -116,7 +130,9 @@ def _clean_todos(entries: Any) -> list[dict[str, str]]:
     return todos
 
 
-def _clean_plan(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+def _clean_plan(
+    raw: dict[str, Any] | None, skill_names: frozenset[str] = frozenset()
+) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
 
@@ -131,7 +147,7 @@ def _clean_plan(raw: dict[str, Any] | None) -> dict[str, Any] | None:
             if not isinstance(entry, dict):
                 continue
             query = str(entry.get("query") or entry.get("text") or "").strip()[:300]
-            todos = _clean_todos(entry.get("todos"))
+            todos = _clean_todos(entry.get("todos"), skill_names)
             # Drop sub-queries that contain no tool step.
             if not todos:
                 continue
@@ -141,7 +157,7 @@ def _clean_plan(raw: dict[str, Any] | None) -> dict[str, Any] | None:
 
     # Backward compatibility: a flat todo list becomes one sub-query.
     if not sub_queries:
-        todos = _clean_todos(raw.get("todos"))
+        todos = _clean_todos(raw.get("todos"), skill_names)
         if todos:
             sub_queries.append(
                 {"id": "1", "query": understanding or "Plan", "todos": todos}
@@ -171,7 +187,8 @@ def _planner_prompt(
         lines.append("Knowledge bases: " + ", ".join(knowledge_names))
     if skills:
         lines.append(
-            "Skills: " + ", ".join(str(s.get("name") or "") for s in skills if s.get("name"))
+            "Skills (guidance only, not tools — never use a skill name as a tool): "
+            + ", ".join(str(s.get("name") or "") for s in skills if s.get("name"))
         )
     lines.append("")
     lines.append("Return the plan JSON now.")
@@ -204,6 +221,7 @@ def build_plan(
         session_id,
     )
     planner = Agent(
+        name="planner",
         model=model,
         system_prompt=_SYSTEM_PROMPT,
         messages=list(history or []),
@@ -216,8 +234,13 @@ def build_plan(
         knowledge_names,
         skills,
     )
+    skill_names = frozenset(
+        str(skill.get("name") or "").strip().lower()
+        for skill in skills
+        if skill.get("name")
+    )
     result = planner(prompt)
-    return _clean_plan(_extract_json(str(result)))
+    return _clean_plan(_extract_json(str(result)), skill_names)
 
 
 def execution_input(user_input: str, plan: dict[str, Any]) -> str:

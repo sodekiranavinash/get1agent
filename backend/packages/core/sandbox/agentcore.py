@@ -10,13 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from botocore.config import Config
-from botocore.exceptions import (
-    ClientError,
-    ConnectionError as BotoConnectionError,
-    ReadTimeoutError,
-)
-
+# boto3/botocore are imported lazily so this module (and the shared sandbox
+# package) stays importable in dependency-light contexts such as unit tests.
 DEFAULT_IDENTIFIER = "aws.codeinterpreter.v1"
 
 # Session/identifier errors that mean "the mapping is stale, start a new one".
@@ -48,6 +43,7 @@ class ExecutionTimeout(AgentCoreError):
 
 def client(region: str | None, read_timeout: int) -> Any:
     import boto3
+    from botocore.config import Config
 
     return boto3.client(
         "bedrock-agentcore",
@@ -68,6 +64,8 @@ def start_session(
     ttl: int,
     client_token: str,
 ) -> str:
+    from botocore.exceptions import ClientError
+
     try:
         response = client.start_code_interpreter_session(
             codeInterpreterIdentifier=identifier,
@@ -84,6 +82,8 @@ def start_session(
 
 
 def stop_session(client: Any, identifier: str, session_id: str) -> None:
+    from botocore.exceptions import ClientError
+
     try:
         client.stop_code_interpreter_session(
             codeInterpreterIdentifier=identifier,
@@ -97,6 +97,8 @@ def stop_session(client: Any, identifier: str, session_id: str) -> None:
 
 
 def get_session(client: Any, identifier: str, session_id: str) -> dict[str, Any]:
+    from botocore.exceptions import ClientError
+
     try:
         return client.get_code_interpreter_session(
             codeInterpreterIdentifier=identifier,
@@ -122,6 +124,12 @@ def execute(
     ``ExecutionTimeout`` when the internal deadline is exceeded.
     """
     import time
+
+    from botocore.exceptions import (
+        ClientError,
+        ConnectionError as BotoConnectionError,
+        ReadTimeoutError,
+    )
 
     started = time.monotonic()
     try:
@@ -167,7 +175,7 @@ def execute(
         raise _wrap(exc) from exc
 
 
-def _wrap(exc: ClientError) -> AgentCoreError:
+def _wrap(exc: Any) -> AgentCoreError:
     error = exc.response.get("Error", {})
     code = str(error.get("Code") or "")
     message = str(error.get("Message") or "AgentCore request failed")

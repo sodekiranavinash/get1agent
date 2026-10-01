@@ -222,8 +222,13 @@ def test_agents(fake_storage, monkeypatch):
         expect=400,
     )
 
-    # Publishing before a successful test is rejected.
-    _call("POST", f"/v1/agents/{agent_id}/publish", {}, expect=409)
+    # Publishing is ungated: no test/verify prerequisite.
+    early = _call("POST", f"/v1/agents/{agent_id}/publish", {})
+    assert early["visibility"] == "public" and early["status"] == "published"
+
+    # Unpublishing returns it to the workspace as private.
+    _call("POST", f"/v1/agents/{agent_id}/unpublish", {})
+    assert _call("GET", f"/v1/agents/{agent_id}")["visibility"] == "private"
 
     verified = _call("POST", f"/v1/agents/{agent_id}/verify", {})
     assert verified["valid"] is True

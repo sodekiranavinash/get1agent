@@ -1,5 +1,13 @@
 import type { AgentOutputFormat } from './agents'
-import type { AgentSource, AgentUsage, RunContext } from './agentRun'
+import type {
+  AgentAttachmentRef,
+  AgentSkillRef,
+  AgentSource,
+  AgentUsage,
+  RunContext,
+} from './agentRun'
+import type { Feedback } from './feedback'
+import type { WorkflowRunFields } from './workflowRun'
 
 /** A single tool invocation inside an assistant turn. */
 export type ChatToolStatus = 'running' | 'success' | 'error'
@@ -14,6 +22,8 @@ export type ChatToolCall = {
   output?: string
   /** Citation sources extracted from the tool result. */
   sources?: ChatSource[]
+  /** Set on the synthetic `ask_user` step: the human-in-the-loop question. */
+  question?: ChatQuestion
 }
 
 /** A citation source (a web page or a knowledge-base document/page). */
@@ -47,11 +57,23 @@ export type ChatPlan = {
   subQueries: ChatSubQuery[]
 }
 
-export type ChatTurnStatus = 'streaming' | 'done' | 'error' | 'stopped'
+export type ChatTurnStatus = 'streaming' | 'done' | 'error' | 'stopped' | 'awaiting_input'
+
+/** A human-in-the-loop question the agent paused on, and the user's answer. */
+export type ChatQuestion = {
+  questionId: string
+  question: string
+  options: string[]
+  allowCustom: boolean
+  /** The user's answer, once provided (kept so a replayed turn shows it). */
+  answer?: string
+}
 
 /** One user question plus the assistant's streamed run and final answer. */
 export type ChatTurn = {
   id: string
+  /** The runtime's run id (from `run.started`); keys run feedback. */
+  runId?: string
   question: string
   answer: string
   tools: ChatToolCall[]
@@ -60,11 +82,23 @@ export type ChatTurn = {
   plan: ChatPlan | null
   /** True while the planner is working, before the plan arrives. */
   planning: boolean
+  /** Present when the agent paused to ask the user a clarifying question. */
+  humanQuestion?: ChatQuestion
+  /** Skills folded into the system prompt for this run (not tools). */
+  skills: AgentSkillRef[]
+  /** Storage files attached to this run (downloaded + extracted server-side). */
+  attachments?: AgentAttachmentRef[]
   status: ChatTurnStatus
   error?: string
   usage?: AgentUsage
   /** Context-window fill for the conversation after this turn. */
   context?: RunContext
+  /** Langfuse trace link for this run (signed + expiring when loaded from the API). */
+  traceUrl?: string | null
+  /** Langfuse trace id (for mirroring feedback as a score). */
+  traceId?: string | null
+  /** The user's feedback for this run, if any. */
+  feedback?: Feedback | null
   outputFormat: AgentOutputFormat
   agentId: string
   agentName: string
@@ -72,6 +106,10 @@ export type ChatTurn = {
   at: string
   startedAt: number
   endedAt?: number
+  /** A single agent (default) or a workflow composed of agents. */
+  targetType?: 'agent' | 'workflow'
+  /** Present when ``targetType`` is ``workflow`` — the multi-agent run state. */
+  workflow?: WorkflowRunFields
 }
 
 export function formatUsage(usage?: AgentUsage): string | null {

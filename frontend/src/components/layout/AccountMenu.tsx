@@ -3,12 +3,16 @@ import { Link } from 'react-router-dom'
 import {
   ArrowLeftRight,
   ChevronsUpDown,
+  LogIn,
   LogOut,
   Settings,
 } from 'lucide-react'
 import { AUTH_PATHS } from '../../auth/authUrls'
 import { getUserProfile } from '../../auth/userProfile'
 import { useView } from '../../auth/ViewProvider'
+import { exitDemoMode } from '../../auth/demo'
+import { googleLoginOptions } from '../../auth/login'
+import { useDemoMode } from '../../auth/useDemoMode'
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar'
 import {
   DropdownMenu,
@@ -26,10 +30,13 @@ type AccountMenuProps = {
 
 /** Account card shown at the right of the top bar. */
 export function AccountMenu({ settingsPath = '/settings' }: AccountMenuProps) {
-  const { user } = useAuth0()
+  const { user, loginWithRedirect } = useAuth0()
   const { view, canSwitch, chooseView } = useView()
+  const demo = useDemoMode()
   const profile = getUserProfile(user)
-  const displayName = [profile.firstName, profile.lastName].filter(Boolean).join(' ')
+  const displayName = demo
+    ? 'Demo visitor'
+    : [profile.firstName, profile.lastName].filter(Boolean).join(' ')
 
   return (
     <DropdownMenu>
@@ -82,12 +89,24 @@ export function AccountMenu({ settingsPath = '/settings' }: AccountMenuProps) {
             </Link>
           </DropdownMenuItem>
         ) : null}
-        <DropdownMenuItem asChild variant="destructive">
-          <Link to={AUTH_PATHS.logout}>
-            <LogOut className="size-3.5" />
-            Log out
-          </Link>
-        </DropdownMenuItem>
+        {demo ? (
+          <DropdownMenuItem
+            onSelect={() => {
+              exitDemoMode()
+              void loginWithRedirect(googleLoginOptions('/'))
+            }}
+          >
+            <LogIn className="size-3.5" />
+            Sign in
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem asChild variant="destructive">
+            <Link to={AUTH_PATHS.logout}>
+              <LogOut className="size-3.5" />
+              Log out
+            </Link>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

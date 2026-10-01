@@ -291,11 +291,9 @@ def _voyage_embed_images(
     ]
 
 
-def embed_texts(
-    texts: list[str], config: IngestionConfig, *, input_type: str = "document"
+def _embed_uncached(
+    texts: list[str], config: IngestionConfig, input_type: str
 ) -> list[list[float]]:
-    if not texts:
-        return []
     if config.embed_mode == "bedrock":
         client = _bedrock_client(config.bedrock_region)
         return _run_parallel(
@@ -309,6 +307,45 @@ def embed_texts(
     if config.embed_mode == "voyage":
         return _voyage_embed_texts(texts, config, input_type)
     return _ollama_embed(texts, config)
+
+
+def embed_texts(
+    texts: list[str], config: IngestionConfig, *, input_type: str = "document"
+) -> list[list[float]]:
+    """Embed texts, reusing cached vectors for identical (model, input_type, text).
+
+    Embeddings are deterministic, so the cache is keyed by a hash of the text and
+    is global per model. Best-effort: any cache failure falls back to embedding.
+    """
+    if not texts:
+        return []
+    try:
+        from core import cache
+    except Exception:  # noqa: BLE001 - retrieval must not hard-depend on core
+        cache = None  # type: ignore[assignment]
+    if cache is None or not cache.enabled():
+        return _embed_uncached(texts, config, input_type)
+
+    keys = [
+        cache.cache_key(
+            "emb", config.embed_mode, config.text_embed_model, input_type, text
+        )
+        for text in texts
+    ]
+    vectors = cache.get_many(keys)
+    missing = [index for index, value in enumerate(vectors) if value is None]
+    if missing:
+        fresh = _embed_uncached(
+            [texts[index] for index in missing], config, input_type
+        )
+        ttl = cache.ttl("embedding", 2_592_000)  # 30 days
+        cache.set_many(
+            [(keys[index], fresh[position]) for position, index in enumerate(missing)],
+            ttl,
+        )
+        for position, index in enumerate(missing):
+            vectors[index] = fresh[position]
+    return vectors
 
 
 def embed_images(images: list[bytes], config: IngestionConfig) -> list[list[float]]:

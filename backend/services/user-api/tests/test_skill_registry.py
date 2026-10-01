@@ -34,6 +34,11 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(result["kind"], "tool")
         self.assertIn("web-search", result["suggestedServers"])
 
+    def test_api_fetch_is_tool_based(self) -> None:
+        result = classify.classify_skill("Call the REST API endpoint and fetch the page.")
+        self.assertEqual(result["kind"], "tool")
+        self.assertIn("http-fetch", result["suggestedServers"])
+
     def test_referenced_files(self) -> None:
         refs = classify.referenced_files(
             "See [details](references/details.md) and [site](https://example.com)."

@@ -18,14 +18,23 @@ import os
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
+from agentflow.observability import init_tracing
 from agentflow.run import run_agent_stream
+from workflow.run import run_workflow_stream
+
+# Must run before BedrockAgentCoreApp() so the AgentCore baggage span processor
+# (and every Strands tracer) registers on the Langfuse tracer provider.
+init_tracing()
 
 app = BedrockAgentCoreApp()
 
 
 @app.entrypoint
 async def invoke(payload, context=None):
-    async for event in run_agent_stream(payload, context):
+    # A workflow run carries a ``workflowId``; everything else is a single agent.
+    is_workflow = isinstance(payload, dict) and str(payload.get("workflowId") or "").strip()
+    stream = run_workflow_stream(payload, context) if is_workflow else run_agent_stream(payload, context)
+    async for event in stream:
         yield event
 
 
