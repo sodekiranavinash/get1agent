@@ -211,13 +211,16 @@ module "user_api" {
 
   # The Playground runs tests in and generates tool code with custom-tools; the
   # evaluation lab retrieves through knowledge-mcp and can run agents via the
-  # agent-run control plane (direct invoke, service auth).
+  # agent-run control plane (direct invoke, service auth). The control-plane
+  # Lambda only exists once the agent worker image has been pushed (mirrors the
+  # api_gateway `agent_run_session` route gate), so its ARN is only added then —
+  # otherwise it resolves to "" and produces an invalid IAM policy Resource.
   lambda_invoke_arns = concat(
     [
       module.custom_tools[0].function_arn,
       module.knowledge_mcp[0].function_arn,
     ],
-    var.enable_backend_lambdas && var.enable_agent_runtime ? [
+    var.enable_backend_lambdas && var.enable_agent_runtime && var.agent_worker_image_uri != "" ? [
       module.agent_runtime[0].control_plane_function_arn,
     ] : [],
   )
@@ -809,8 +812,12 @@ module "scheduler" {
   timeout     = 900
 
   dynamodb_table_arns = [module.database[0].table_arn]
+  # Same gate as user_api/api_gateway: the control-plane Lambda only exists once
+  # the agent worker image is pushed.
   lambda_invoke_arns = (
-    var.enable_agent_runtime ? [module.agent_runtime[0].control_plane_function_arn] : []
+    var.enable_agent_runtime && var.agent_worker_image_uri != ""
+    ? [module.agent_runtime[0].control_plane_function_arn]
+    : []
   )
 
   environment = {

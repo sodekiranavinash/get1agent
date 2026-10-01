@@ -148,11 +148,7 @@ resource "aws_iam_role_policy" "bedrock_rerank" {
 }
 
 resource "aws_iam_role_policy" "lambda_invoke" {
-  # Callers may pass an always-present list whose entries are only populated once
-  # an optional dependency exists (e.g. the agent-run control plane when the
-  # runtime image has not been pushed yet). Drop empties so a gated resource
-  # never yields an IAM policy with an empty Resource.
-  count = length(compact(var.lambda_invoke_arns)) > 0 ? 1 : 0
+  count = length(var.lambda_invoke_arns) > 0 ? 1 : 0
   name  = "${var.name}-lambda-invoke"
   role  = aws_iam_role.lambda.id
 
@@ -162,7 +158,7 @@ resource "aws_iam_role_policy" "lambda_invoke" {
       Sid      = "InvokeFunctions"
       Effect   = "Allow"
       Action   = ["lambda:InvokeFunction"]
-      Resource = compact(var.lambda_invoke_arns)
+      Resource = var.lambda_invoke_arns
     }]
   })
 }
