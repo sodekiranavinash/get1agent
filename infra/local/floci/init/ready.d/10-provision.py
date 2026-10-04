@@ -1161,8 +1161,8 @@ def main() -> int:
             )
             or "http://get1agent.execute-api.localhost.floci.io:4566/v1/mcp/oauth/callback",
             "FRONTEND_URL": os.environ.get("FRONTEND_URL") or "http://localhost:5173",
-            "GITHUB_MCP_CLIENT_ID": os.environ.get("GITHUB_MCP_CLIENT_ID", ""),
-            "GITHUB_MCP_CLIENT_SECRET": os.environ.get("GITHUB_MCP_CLIENT_SECRET", ""),
+            "MCP_GITHUB_CLIENT_ID": os.environ.get("MCP_GITHUB_CLIENT_ID", ""),
+            "MCP_GITHUB_CLIENT_SECRET": os.environ.get("MCP_GITHUB_CLIENT_SECRET", ""),
         },
         timeout=30,
         memory=512,
