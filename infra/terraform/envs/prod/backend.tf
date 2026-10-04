@@ -1,13 +1,13 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  backend_python_runtime   = "python3.14"
+  backend_python_runtime = "python3.14"
   # layer_base_zip           = abspath("${path.module}/../../../../backend/services/dependency-layers/base/dist/layer.zip")
   # layer_genai_zip          = abspath("${path.module}/../../../../backend/services/dependency-layers/genai/dist/layer.zip")
   # layer_extra_tools_zip    = abspath("${path.module}/../../../../backend/services/dependency-layers/extra-tools/dist/layer.zip")
   user_api_zip             = abspath("${path.module}/../../../../backend/services/apis/user-api/dist/function.zip")
   knowledge_mcp_zip        = abspath("${path.module}/../../../../backend/services/mcp/knowledge-mcp/dist/function.zip")
-  admin_console_zip       = abspath("${path.module}/../../../../backend/services/admin/admin-console/dist/function.zip")
+  admin_console_zip        = abspath("${path.module}/../../../../backend/services/admin/admin-console/dist/function.zip")
   code_interpreter_zip     = abspath("${path.module}/../../../../backend/services/mcp/code-interpreter/dist/function.zip")
   http_fetch_zip           = abspath("${path.module}/../../../../backend/services/mcp/http-fetch/dist/function.zip")
   custom_tools_zip         = abspath("${path.module}/../../../../backend/services/mcp/custom-tools/dist/function.zip")
@@ -1034,8 +1034,8 @@ module "admin_console" {
       module.http_fetch[0].function_name,
     ])
     MCP_GATEWAY_URL = length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_url : ""
-    MCP_TRANSPORT = "gateway"
-    BEDROCK_REGION = var.aws_region
+    MCP_TRANSPORT   = "gateway"
+    BEDROCK_REGION  = var.aws_region
     # Platform status routes (/v1/admin/platform/*): Identity, Registry,
     # Browser, Optimization and the Bedrock cost/latency levers.
     AGENT_WORKLOAD_IDENTITY_ARN = local.workload_identity_arn
@@ -1272,7 +1272,7 @@ module "ingestion_extract" {
   runtime          = local.backend_python_runtime
   # Document-parsing deps (pymupdf, python-docx, openpyxl) are bundled into this
   # app's zip — there are no Lambda layers.
-  layer_arns       = []
+  layer_arns = []
 
   # Parsing + chunking is CPU- and memory-bound; Lambda scales CPU with memory,
   # and a large PDF needs the headroom to hold extracted text + images.
@@ -1570,8 +1570,8 @@ module "agent_runtime" {
   max_lifetime_seconds = 1500
   # Long-running streaming proxy (Lambda MicroVM, up to 8 hours). The run is
   # aborted at 25 min, matching the AgentCore `max_lifetime` above.
-  microvm_zip             = local.agent_run_microvm_zip
-  artifact_bucket         = module.knowledge_storage[0].bucket_name
+  microvm_zip     = local.agent_run_microvm_zip
+  artifact_bucket = module.knowledge_storage[0].bucket_name
   # Content-addressed so a rebuilt zip produces a new image version in place
   # (rather than a forced replace that collides on the stable image name).
   microvm_artifact_key    = "microvms/agent-run-${substr(filesha256(local.agent_run_microvm_zip), 0, 16)}.zip"
