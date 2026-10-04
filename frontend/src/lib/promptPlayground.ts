@@ -1,4 +1,4 @@
-/** Prompt Playground helpers: parse a Langfuse observation into editable messages. */
+/** Prompt Playground helpers: turn stored messages into editable prompt messages. */
 
 export const PLAYGROUND_MODELS = [
   'deepseek-v4-flash-vision-exp',

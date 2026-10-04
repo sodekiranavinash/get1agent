@@ -63,7 +63,7 @@ export function SupportPage() {
     <PageShell>
       <PageHeader
         title="Support"
-        description="Send a message to the OneAgent team and follow the replies in one place."
+        description="Send a message to the OneAgent (powered by get1agent.com) team and follow the replies in one place."
         badge="Help"
         badgeVariant="info"
       />
@@ -81,7 +81,7 @@ export function SupportPage() {
               ? 'The read-only demo cannot send messages. Sign in to your workspace to reach the team.'
               : 'You need to be signed in so we can reply to you in this workspace.'}
           </p>
-          <Link to="/login" className="mt-3 inline-block no-underline">
+          <Link to="/" className="mt-3 inline-block no-underline">
             <Button size="sm">Sign in</Button>
           </Link>
         </div>

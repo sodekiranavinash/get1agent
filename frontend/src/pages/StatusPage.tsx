@@ -68,7 +68,7 @@ export function StatusPage() {
     <PageShell>
       <PageHeader
         title="System status"
-        description="Live availability across the OneAgent platform."
+        description="Live availability across the OneAgent (powered by get1agent.com) platform."
         badge="Status"
         badgeVariant="success"
       />

@@ -436,11 +436,11 @@ export function KnowledgeBasesPage() {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border px-4 py-2.5 text-[11px] text-muted">
             <span title={TEXT_EMBED_MODEL} className="inline-flex items-center gap-1.5">
               <Boxes className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />
-              Text · Voyage 4 Large · {EMBEDDING_DIM}-d
+              Text · Titan Text Embeddings V2 · {EMBEDDING_DIM}-d
             </span>
             <span title={IMAGE_EMBED_MODEL} className="inline-flex items-center gap-1.5">
               <ImageIcon className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />
-              Image · Voyage Multimodal 3.5 · {EMBEDDING_DIM}-d
+              Image · Titan Multimodal G1 · {EMBEDDING_DIM}-d
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Scissors className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />

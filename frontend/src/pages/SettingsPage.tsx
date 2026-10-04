@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   AlertCircle,
@@ -10,6 +11,7 @@ import {
   MailWarning,
   Moon,
   Palette,
+  ShieldCheck,
   Sun,
 } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
@@ -485,6 +487,29 @@ export function SettingsPage() {
               checked={form.creditThresholdAlerts}
               onChange={(checked) => patch({ creditThresholdAlerts: checked })}
             />
+          </div>
+        </Card>
+
+        <Card padding="none" className="overflow-hidden lg:col-span-2">
+          <PanelHeader
+            icon={<ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.75} />}
+            title="Privacy & data"
+            description="Manage consent, download your data, raise a request or delete your account."
+          />
+          <div className="flex flex-wrap items-center gap-3 p-4">
+            <Link
+              to="/privacy/rights"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border-strong px-3 text-[13px] font-medium text-foreground transition-colors hover:border-accent/50 hover:text-accent"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Privacy &amp; data rights
+            </Link>
+            <Link
+              to="/privacy"
+              className="text-[13px] font-medium text-accent hover:underline"
+            >
+              Read the privacy notice
+            </Link>
           </div>
         </Card>
       </motion.div>

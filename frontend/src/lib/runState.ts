@@ -48,9 +48,9 @@ export type RunFields = {
   usage?: AgentUsage
   /** Context-window fill for the conversation (used/limit + full flag). */
   context?: RunContext
-  /** Langfuse trace link for this run (signed + expiring when loaded from the API). */
+  /** AWS (CloudWatch) trace link for this run (signed + expiring when loaded from the API). */
   traceUrl?: string | null
-  /** Langfuse trace id (for mirroring feedback as a score). */
+  /** AWS trace id (for attaching run feedback). */
   traceId?: string | null
   startedAt: number
   endedAt?: number

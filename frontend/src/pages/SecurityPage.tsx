@@ -23,7 +23,7 @@ const SECTIONS = [
   {
     title: 'Reporting a vulnerability',
     paragraphs: [
-      'If you believe you have found a security issue in OneAgent, please tell us before disclosing it publicly so we can investigate and fix it. Use the form above and include a description, reproduction steps and any supporting material.',
+      'If you believe you have found a security issue in OneAgent (powered by get1agent.com), please tell us before disclosing it publicly so we can investigate and fix it. Use the form above and include a description, reproduction steps and any supporting material.',
     ],
     bullets: [
       'Include the affected URL or page and the impact you believe it has.',
@@ -32,14 +32,10 @@ const SECTIONS = [
     ],
   },
   {
-    title: 'What to expect',
+    title: 'How reports are handled',
     paragraphs: [
-      'We aim to acknowledge every report within one business day and to keep you updated as we triage, fix and verify the issue. Reports are one-way: you send them, the security team reads them. If you need a back-and-forth, use Support instead.',
-    ],
-    bullets: [
-      'Acknowledgement of your report within one business day.',
-      'An initial assessment and severity rating shortly after.',
-      'Notification when a fix is deployed, with credit if you would like it.',
+      'OneAgent is a free product, so reports are reviewed on a best-effort basis — we cannot promise a response time. Thank you for helping us keep it secure.',
+      'Reports are one-way: you send them, the security team reads them. If you need a back-and-forth, use Support instead.',
     ],
   },
   {
@@ -222,14 +218,14 @@ export function SecurityPage() {
               : 'Security reports must come from a signed-in account so we can attribute and follow up on them.'}
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <Link to="/login" className="no-underline">
+            <Link to="/" className="no-underline">
               <Button size="sm">Sign in</Button>
             </Link>
             <a
-              href="mailto:security@get1agent.com"
+              href="mailto:techwithkiranavinash@gmail.com"
               className="text-[13px] font-medium text-accent hover:underline"
             >
-              or email security@get1agent.com
+              or email techwithkiranavinash@gmail.com
             </a>
           </div>
         </div>

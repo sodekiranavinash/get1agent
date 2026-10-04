@@ -1,19 +1,22 @@
 /**
- * Google-only sign-in.
+ * Google sign-in helpers.
  *
- * `loginWithRedirect` with an explicit `connection` skips the Auth0 Universal
- * Login screen entirely and goes straight to that provider. We force the Google
- * social connection so there is no Auth0 username/password signup or login.
+ * The provider-first flow pins the Auth0 Google social connection so Auth0's
+ * Universal Login page is skipped and the Google account chooser is shown
+ * directly. No extra Google client id is needed on the frontend — Google OAuth
+ * is configured on the Auth0 connection.
  *
- * Override with `VITE_AUTH0_CONNECTION` if the Auth0 connection id differs.
+ * Override the connection id with `VITE_AUTH_CONNECTION` if it differs.
  */
-export const AUTH0_GOOGLE_CONNECTION =
-  (import.meta.env.VITE_AUTH0_CONNECTION as string | undefined)?.trim() ||
+export const AUTH_GOOGLE_CONNECTION =
+  (import.meta.env.VITE_AUTH_CONNECTION as string | undefined)?.trim() ||
   'google-oauth2'
 
-export function googleLoginOptions(returnTo = '/') {
+export function googleLoginOptions(returnTo = '/dashboard') {
   return {
-    authorizationParams: { connection: AUTH0_GOOGLE_CONNECTION },
+    authorizationParams: {
+      connection: AUTH_GOOGLE_CONNECTION,
+    },
     appState: { returnTo },
   }
 }

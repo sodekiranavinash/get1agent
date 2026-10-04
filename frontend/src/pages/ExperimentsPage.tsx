@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   Check,
   GitCompareArrows,
   Loader2,
   Play,
+  Plus,
   Redo2,
   Save,
+  Server,
   Trash2,
   Undo2,
   X,
@@ -108,6 +111,13 @@ export function ExperimentsPage() {
   const servers = useMemo(() => data?.servers ?? [], [data])
   const sessions = useMemo(() => sessionsQuery.data?.sessions ?? [], [sessionsQuery.data])
   const refetchSessions = sessionsQuery.refetch
+
+  // Deep link from the MCP Tools page ("Edit in Builder"): ?server=<id>&tool=<id>.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [initialParams] = useState(() => searchParams)
+  const hasDeepLink = Boolean(
+    initialParams.get('server') || initialParams.get('tool'),
+  )
 
   // --- binding (one active server + tool) ---
   const [serverId, setServerId] = useState<string | null>(null)
@@ -288,6 +298,48 @@ export function ExperimentsPage() {
     },
     [api, hydrateEditor],
   )
+
+  const openServer = useCallback(
+    (server: CustomServer) => {
+      setServerId(server.id)
+      setToolId(null)
+      setNewServerName('')
+      setToolName('')
+      setDescription('')
+      setCode(DEFAULT_CODE)
+      resetHistory(DEFAULT_CODE)
+      setInputSchemaText(EMPTY_SCHEMA_TEXT)
+      setOutputSchemaText(EMPTY_SCHEMA_TEXT)
+      setTestResult(null)
+      setPending(null)
+      setPendingDraft('')
+      setTab('Code')
+      setSessionId(null)
+      setMessages([])
+    },
+    [resetHistory],
+  )
+
+  // Open the server/tool requested by the URL once the list has loaded.
+  const deepLinkedRef = useRef(false)
+  useEffect(() => {
+    if (deepLinkedRef.current || !hasDeepLink || servers.length === 0) return
+    const serverParam = initialParams.get('server')
+    const toolParam = initialParams.get('tool')
+    const server =
+      (toolParam
+        ? servers.find((entry) => entry.tools.some((tool) => tool.id === toolParam))
+        : undefined) ?? servers.find((entry) => entry.id === serverParam)
+    if (!server) return
+    deepLinkedRef.current = true
+    const tool = toolParam
+      ? server.tools.find((entry) => entry.id === toolParam)
+      : server.tools[0]
+    if (tool) void openTool(server, tool)
+    else openServer(server)
+    // Consume the params so a later manual navigation is never overridden.
+    setSearchParams({}, { replace: true })
+  }, [hasDeepLink, initialParams, servers, openTool, openServer, setSearchParams])
 
   const handleSend = useCallback(
     async (text: string) => {
@@ -502,7 +554,7 @@ export function ExperimentsPage() {
         invalidatePlaygroundSessions()
         refetch()
         refetchSessions()
-        toast.success(toolId ? 'Tool updated' : 'Tool saved')
+        toast.success(toolId ? 'Tool updated' : 'Tool added to your MCP server')
         return
       }
       let targetServerId = serverId
@@ -539,7 +591,7 @@ export function ExperimentsPage() {
       invalidatePlaygroundSessions()
       refetch()
       refetchSessions()
-      toast.success(toolId ? 'Tool updated' : 'Tool saved')
+      toast.success(toolId ? 'Tool updated' : 'Tool added to your MCP server')
     } catch (err) {
       toast.error(errorMessage(err))
     } finally {
@@ -595,6 +647,9 @@ export function ExperimentsPage() {
 
   const switcherLabel = toolName.trim() || sessions.find((s) => s.id === sessionId)?.title || 'New build'
   const activeTool = servers.flatMap((server) => server.tools).find((tool) => tool.id === toolId)
+  const activeServer = serverId
+    ? servers.find((server) => server.id === serverId) ?? null
+    : null
   const pendingStats = pending ? lineDiffStats(pending.baseCode, pendingDraft || pending.code) : null
 
   // Demo: auto-run a build on landing, so the visitor sees a change card (and
@@ -605,7 +660,7 @@ export function ExperimentsPage() {
   }, [handleSend])
   const autoStartedRef = useRef(false)
   useEffect(() => {
-    if (!demo || autoStartedRef.current) return
+    if (!demo || autoStartedRef.current || hasDeepLink) return
     const server = servers[0]
     const tool = server?.tools?.[0]
     if (!tool) return
@@ -616,15 +671,15 @@ export function ExperimentsPage() {
         void handleSendRef.current('Add a sentence count to this tool.')
       }, 800)
     })()
-  }, [demo, servers, openTool])
+  }, [demo, servers, openTool, hasDeepLink])
 
   if (isPending) {
     return (
       <PageShell>
         <PageHeader
           title="MCP Builder"
-          description="Build an MCP tool by chatting; review every change as a diff."
-          badge="Custom tools"
+          description="Build an MCP server and its tools by chatting; review every change as a diff."
+          badge="MCP servers"
         />
         <div className="flex flex-1 items-center justify-center py-24">
           <Spinner size="lg" label="Loading your tools…" />
@@ -638,8 +693,8 @@ export function ExperimentsPage() {
       <PageShell>
         <PageHeader
           title="MCP Builder"
-          description="Build an MCP tool by chatting; review every change as a diff."
-          badge="Custom tools"
+          description="Build an MCP server and its tools by chatting; review every change as a diff."
+          badge="MCP servers"
         />
         <ErrorState error={error} onRetry={refetch} />
       </PageShell>
@@ -650,8 +705,8 @@ export function ExperimentsPage() {
     <PageShell>
       <PageHeader
         title="MCP Builder"
-        description="Describe a tool, refine it by chatting. Every AI change appears as a diff you accept or reject."
-        badge="Custom tools"
+        description="Build an MCP server and the tools it exposes. Describe a tool and refine it by chatting — every AI change is a diff you accept or reject."
+        badge="MCP servers"
         secondaryAction={{
           label: 'Test',
           icon: <Play className="size-3.5" />,
@@ -665,38 +720,86 @@ export function ExperimentsPage() {
         }}
       />
 
-      <div className="flex flex-wrap items-center gap-2 pb-4">
-        <PlaygroundSwitcher
-          label={switcherLabel}
-          sessions={sessions}
-          servers={servers}
-          activeSessionId={sessionId}
-          activeToolId={toolId}
-          onNew={newBuild}
-          onOpenSession={openSession}
-          onOpenTool={openTool}
-        />
+      {/* One compact workspace bar: the MCP server, the tools it holds, and the
+          tool currently open for editing. */}
+      <Card padding="none" className="mb-4 overflow-hidden">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+          <PlaygroundSwitcher
+            label={switcherLabel}
+            sessions={sessions}
+            servers={servers}
+            activeSessionId={sessionId}
+            activeToolId={toolId}
+            onNew={newBuild}
+            onOpenSession={openSession}
+            onOpenTool={openTool}
+          />
 
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          <label className="flex min-w-[180px] items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5">
-            <span className="shrink-0 text-[10px] font-semibold tracking-[0.08em] text-subtle uppercase">
-              Server
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-raised/40 px-2.5 py-1.5">
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent">
+              <Server className="size-3.5" strokeWidth={1.75} />
             </span>
-            {serverId ? (
-              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">
-                {servers.find((server) => server.id === serverId)?.name ?? '—'}
+            <span className="shrink-0 text-[10px] font-semibold tracking-[0.08em] text-subtle uppercase">
+              MCP server
+            </span>
+            {activeServer ? (
+              <span className="min-w-0 max-w-[220px] truncate font-mono text-[12.5px] font-medium text-foreground">
+                {activeServer.name}
               </span>
             ) : (
               <input
                 value={newServerName}
                 onChange={(event) => setNewServerName(event.target.value)}
-                placeholder="my-tools"
-                className="min-w-0 flex-1 bg-transparent font-mono text-[12px] text-foreground outline-none placeholder:text-subtle"
+                placeholder="name your server"
+                className="w-44 min-w-0 bg-transparent font-mono text-[12.5px] text-foreground outline-none placeholder:text-subtle"
               />
             )}
-          </label>
+            <span className="shrink-0 rounded-md bg-surface px-1.5 py-0.5 text-[10.5px] font-medium text-muted">
+              {activeServer
+                ? `${activeServer.tools.length} ${activeServer.tools.length === 1 ? 'tool' : 'tools'}`
+                : 'new'}
+            </span>
+          </div>
 
-          <label className="flex min-w-[180px] items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+            {activeServer ? (
+              <>
+                {activeServer.tools.map((tool) => {
+                  const active = tool.id === toolId
+                  return (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      onClick={() => void openTool(activeServer, tool)}
+                      className={`rounded-md border px-2 py-0.5 font-mono text-[11px] transition-colors ${
+                        active
+                          ? 'border-accent/30 bg-accent-soft text-accent'
+                          : 'border-border bg-surface text-muted hover:border-border-strong hover:text-foreground'
+                      }`}
+                    >
+                      {tool.name}
+                    </button>
+                  )
+                })}
+                <button
+                  type="button"
+                  onClick={() => openServer(activeServer)}
+                  className="inline-flex items-center gap-1 rounded-md border border-dashed border-border px-2 py-0.5 text-[11px] text-subtle transition-colors hover:border-accent/40 hover:text-accent"
+                >
+                  <Plus className="size-3" />
+                  New tool
+                </button>
+              </>
+            ) : (
+              <span className="text-[11px] text-subtle">
+                Tools you add live inside this server.
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 border-t border-border bg-canvas/40 px-2.5 py-2">
+          <label className="flex min-w-[200px] flex-1 items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-within:bg-surface">
             <span className="shrink-0 text-[10px] font-semibold tracking-[0.08em] text-subtle uppercase">
               Tool
             </span>
@@ -704,11 +807,11 @@ export function ExperimentsPage() {
               value={toolName}
               onChange={(event) => setToolName(event.target.value)}
               placeholder="convert-temperature"
-              className="min-w-0 flex-1 bg-transparent font-mono text-[12px] text-foreground outline-none placeholder:text-subtle"
+              className="min-w-0 flex-1 bg-transparent font-mono text-[12.5px] text-foreground outline-none placeholder:text-subtle"
             />
           </label>
-
-          <label className="flex min-w-[240px] flex-[2] items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5">
+          <span className="hidden h-4 w-px bg-border sm:block" />
+          <label className="flex min-w-[240px] flex-[2] items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-within:bg-surface">
             <span className="shrink-0 text-[10px] font-semibold tracking-[0.08em] text-subtle uppercase">
               About
             </span>
@@ -716,24 +819,23 @@ export function ExperimentsPage() {
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               placeholder="One sentence the agent reads to decide when to call this tool."
-              className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none placeholder:text-subtle"
+              className="min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-none placeholder:text-subtle"
             />
           </label>
+          {toolId ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Trash2 className="size-3.5" />}
+              onClick={() => setConfirmDelete(true)}
+            >
+              Delete tool
+            </Button>
+          ) : null}
         </div>
+      </Card>
 
-        {toolId ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<Trash2 className="size-3.5" />}
-            onClick={() => setConfirmDelete(true)}
-          >
-            Delete
-          </Button>
-        ) : null}
-      </div>
-
-      <div className="grid min-h-0 flex-1 gap-4 lg:h-[calc(100vh-20rem)] lg:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 gap-4 lg:h-[calc(100vh-17rem)] lg:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
         <Card padding="none" className="flex min-h-[460px] flex-col overflow-hidden">
           <div className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
             <span className="text-[12.5px] font-semibold text-foreground">Build chat</span>

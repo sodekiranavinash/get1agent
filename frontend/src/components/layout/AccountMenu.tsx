@@ -93,7 +93,7 @@ export function AccountMenu({ settingsPath = '/settings' }: AccountMenuProps) {
           <DropdownMenuItem
             onSelect={() => {
               exitDemoMode()
-              void loginWithRedirect(googleLoginOptions('/'))
+              void loginWithRedirect(googleLoginOptions('/dashboard'))
             }}
           >
             <LogIn className="size-3.5" />

@@ -53,7 +53,7 @@ const SERVER_META: Record<string, McpServerMeta> = {
   },
   'web-search': {
     label: 'Web Search',
-    description: 'Search the live web with Exa.',
+    description: 'Search the live web with Bedrock Web Search.',
     icon: Globe,
   },
   'code-interpreter': {

@@ -4,9 +4,9 @@ import { useNavigate } from 'react-router-dom'
 import { AUTH_PATHS, authAbsoluteUrl } from './authUrls'
 import { clearStoredView } from './view'
 
-const AUTH0_DOMAIN = import.meta.env.VITE_AUTH0_DOMAIN
-const AUTH0_CLIENT_ID = import.meta.env.VITE_AUTH0_CLIENT_ID
-const AUTH0_AUDIENCE = import.meta.env.VITE_AUTH0_AUDIENCE
+const AUTH_DOMAIN = import.meta.env.VITE_AUTH_DOMAIN
+const AUTH_CLIENT_ID = import.meta.env.VITE_AUTH_CLIENT_ID
+const AUTH_AUDIENCE = import.meta.env.VITE_AUTH_AUDIENCE
 
 type Auth0ProviderWithNavigateProps = {
   children: ReactNode
@@ -29,7 +29,7 @@ export function Auth0ProviderWithNavigate({
   const authorizationParams = useMemo(
     () => ({
       redirect_uri: authAbsoluteUrl(AUTH_PATHS.callback),
-      audience: AUTH0_AUDIENCE,
+      audience: AUTH_AUDIENCE,
     }),
     [],
   )
@@ -39,8 +39,8 @@ export function Auth0ProviderWithNavigate({
 
   return (
     <Auth0Provider
-      domain={AUTH0_DOMAIN}
-      clientId={AUTH0_CLIENT_ID}
+      domain={AUTH_DOMAIN}
+      clientId={AUTH_CLIENT_ID}
       authorizationParams={authorizationParams}
       onRedirectCallback={onRedirectCallback}
       skipRedirectCallback={skipRedirectCallback}

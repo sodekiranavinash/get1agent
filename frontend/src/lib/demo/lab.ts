@@ -6,7 +6,7 @@ import { DOCS, IDS, daysAgo, hoursAgo } from './shared'
  */
 
 /** `/v1/lab/traces` — the trace table (`input`/`output` feed the "Input" column). */
-export const demoTraces = [
+const rawDemoTraces = [
   {
     id: IDS.traceResearch,
     name: 'agent:research-assistant',
@@ -89,6 +89,29 @@ export const demoTraces = [
   },
 ]
 
+/**
+ * Enrich the canned rows with the fields the trace explorer renders (status,
+ * model, tokens, cost, span count) so the read-only demo looks like a real run.
+ */
+export const demoTraces = rawDemoTraces.map((trace) => {
+  const inputTokens = Math.round(trace.latency * 620)
+  const outputTokens = Math.round(trace.latency * 52)
+  return {
+    ...trace,
+    traceId: trace.id,
+    status: 'ok',
+    level: 'DEFAULT',
+    agentName: trace.tags[1] ?? 'agent',
+    model: trace.tags[2] ?? 'deepseek-v4-flash-vision-exp',
+    latencyMs: Math.round(trace.latency * 1000),
+    usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+    costMicroUsd: Math.round(trace.latency * 95),
+    observationCount: 2,
+  }
+})
+
+const TRACE_START_MS = Date.parse(hoursAgo(2))
+
 const observation = (
   id: string,
   name: string,
@@ -105,10 +128,14 @@ const observation = (
   model,
   input: { messages },
   output: { role: 'assistant', content },
-  usage,
-  startTime: hoursAgo(2),
-  endTime: new Date(Date.parse(hoursAgo(2)) + durationMs).toISOString(),
-  _offset: startOffsetMs,
+  usage: {
+    inputTokens: usage.input ?? 0,
+    outputTokens: usage.output ?? 0,
+    totalTokens: usage.total ?? (usage.input ?? 0) + (usage.output ?? 0),
+  },
+  startTime: TRACE_START_MS + startOffsetMs,
+  endTime: TRACE_START_MS + startOffsetMs + durationMs,
+  durationMs,
 })
 
 const researchSystem =
@@ -167,10 +194,24 @@ export const demoTraceDetails: Record<string, unknown> = {
 /** Fallback detail for traces without a bespoke observation set. */
 export function demoLabTraceDetail(traceId: string) {
   const explicit = demoTraceDetails[traceId]
-  if (explicit) return { trace: explicit }
+  if (explicit) {
+    return {
+      trace: {
+        status: 'ok',
+        level: 'DEFAULT',
+        model: 'deepseek-v4-flash-vision-exp',
+        agentName: 'research-assistant',
+        latencyMs: 12_400,
+        usage: { inputTokens: 9_352, outputTokens: 716, totalTokens: 10_068 },
+        costMicroUsd: 1_180,
+        ...explicit,
+      },
+    }
+  }
   const trace = demoTraces.find((entry) => entry.id === traceId) ?? demoTraces[0]
   return {
     trace: {
+      ...trace,
       id: trace.id,
       name: trace.name,
       input: trace.input,
@@ -200,7 +241,7 @@ export function demoLabTraceDetail(traceId: string) {
   }
 }
 
-/** `/v1/lab/datasets` — Langfuse-native datasets, namespaced `u_<userId>/<name>`. */
+/** `/v1/lab/datasets` — AWS-native datasets, namespaced `u_<userId>/<name>`. */
 export const demoLabDatasets = {
   datasets: [
     {

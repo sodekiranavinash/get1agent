@@ -1,4 +1,4 @@
-import { lazy, useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { RequireAdmin } from './auth/RequireAdmin'
 import { RequireUser } from './auth/RequireUser'
@@ -14,6 +14,9 @@ import { LoginPage } from './pages/LoginPage'
 import { LogoutPage } from './pages/LogoutPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 
+const ArchitecturePage = lazy(() =>
+  import('./pages/ArchitecturePage').then((m) => ({ default: m.ArchitecturePage })),
+)
 const DashboardPage = lazy(() =>
   import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
 )
@@ -49,6 +52,9 @@ const InsightsPage = lazy(() =>
 )
 const TracesPage = lazy(() =>
   import('./pages/TracesPage').then((m) => ({ default: m.TracesPage })),
+)
+const TraceDetailPage = lazy(() =>
+  import('./pages/TraceDetailPage').then((m) => ({ default: m.TraceDetailPage })),
 )
 const ExperimentsPage = lazy(() =>
   import('./pages/ExperimentsPage').then((m) => ({
@@ -87,6 +93,12 @@ const StoragePage = lazy(() =>
 const VaultPage = lazy(() =>
   import('./pages/VaultPage').then((m) => ({ default: m.VaultPage })),
 )
+const GuardrailsPage = lazy(() =>
+  import('./pages/GuardrailsPage').then((m) => ({ default: m.GuardrailsPage })),
+)
+const PlatformPage = lazy(() =>
+  import('./pages/PlatformPage').then((m) => ({ default: m.PlatformPage })),
+)
 const McpOAuthCallbackPage = lazy(() =>
   import('./pages/McpOAuthCallbackPage').then((m) => ({
     default: m.McpOAuthCallbackPage,
@@ -97,6 +109,12 @@ const SettingsPage = lazy(() =>
 )
 const PrivacyPage = lazy(() =>
   import('./pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage })),
+)
+const DataRightsPage = lazy(() =>
+  import('./pages/DataRightsPage').then((m) => ({ default: m.DataRightsPage })),
+)
+const SubProcessorsPage = lazy(() =>
+  import('./pages/SubProcessorsPage').then((m) => ({ default: m.SubProcessorsPage })),
 )
 const DocumentationPage = lazy(() =>
   import('./pages/DocumentationPage').then((m) => ({
@@ -111,6 +129,9 @@ const StatusPage = lazy(() =>
 )
 const SupportPage = lazy(() =>
   import('./pages/SupportPage').then((m) => ({ default: m.SupportPage })),
+)
+const PublicTracePage = lazy(() =>
+  import('./pages/PublicTracePage').then((m) => ({ default: m.PublicTracePage })),
 )
 const TermsPage = lazy(() =>
   import('./pages/TermsPage').then((m) => ({ default: m.TermsPage })),
@@ -147,6 +168,7 @@ const AdminSecurityPage = lazy(() =>
 function PrefetchRoutes() {
   useEffect(() => {
     const prefetch = () => {
+      void import('./pages/ArchitecturePage')
       void import('./pages/DashboardPage')
       void import('./pages/AgentBuilderPage')
       void import('./pages/WorkflowBuilderPage')
@@ -197,12 +219,32 @@ function App() {
   return (
     <>
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
+      {/* The landing page is the root. `/login` stays as an alias so older
+          links and auth redirects keep working. */}
+      <Route path="/" element={<LoginPage />} />
+      <Route path="/login" element={<Navigate to="/" replace />} />
+      <Route
+        path="/architecture"
+        element={
+          <Suspense fallback={null}>
+            <ArchitecturePage />
+          </Suspense>
+        }
+      />
       <Route path="/authorization/callback" element={<CallbackPage />} />
       <Route path="/logout" element={<LogoutPage />} />
+      {/* Public trace share link: a dedicated full-screen viewer, outside every
+          layout so it has no sidebar, navbar or footer. */}
+      <Route
+        path="/trace/:token"
+        element={
+          <Suspense fallback={null}>
+            <PublicTracePage />
+          </Suspense>
+        }
+      />
       <Route element={<RequireAuth />}>
-        {/* Role decides the landing surface: admin console vs user app. */}
-        <Route path="/" element={<RoleRedirect />} />
+        {/* Role decides the post-login surface: admin console vs user app. */}
         <Route path="/administration" element={<RoleRedirect />} />
         <Route path="/select-view" element={<SelectViewPage />} />
         <Route path="/mcp/callback" element={<McpOAuthCallbackPage />} />
@@ -229,8 +271,12 @@ function App() {
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/storage" element={<StoragePage />} />
             <Route path="/vault" element={<VaultPage />} />
+            <Route path="/guardrails" element={<GuardrailsPage />} />
+            <Route path="/platform" element={<PlatformPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
+          {/* Full-screen, chrome-free trace explorer (no sidebar/navbar). */}
+          <Route path="/traces/:traceId" element={<TraceDetailPage />} />
         </Route>
 
         <Route element={<RequireAdmin />}>
@@ -252,6 +298,8 @@ function App() {
           sign-in screen too. */}
       <Route element={<AdaptiveLayout />}>
         <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/privacy/rights" element={<DataRightsPage />} />
+        <Route path="/sub-processors" element={<SubProcessorsPage />} />
         <Route path="/docs" element={<DocumentationPage />} />
         <Route path="/changelog" element={<ChangelogPage />} />
         <Route path="/status" element={<StatusPage />} />

@@ -9,6 +9,7 @@ import {
   Globe,
   KeyRound,
   Loader2,
+  Pencil,
   Plug,
   Plus,
   RefreshCw,
@@ -17,14 +18,17 @@ import {
   Settings2,
   Store,
   Trash2,
+  Wrench,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Dialog } from '../components/ui/Dialog'
 import { ErrorState } from '../components/ui/ErrorState'
+import { IconButton } from '../components/ui/IconButton'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
 import { Segmented } from '../components/ui/Segmented'
@@ -51,6 +55,12 @@ import {
   type McpTool,
   type StartConnectionResult,
 } from '../lib/mcp'
+import {
+  deleteCustomServer,
+  invalidateCustomTools,
+  useCustomTools,
+  type CustomServer,
+} from '../lib/customTools'
 import { fadeUp, stagger } from '../lib/motion'
 
 const TOOLS_QUERY_KEY = 'tools'
@@ -233,6 +243,99 @@ function BuiltInCard({ tool }: { tool: BuiltInTool }) {
           <OriginTag origin="builtin" />
         </div>
         <p className="mt-0.5 truncate text-xs text-muted">{tool.description}</p>
+      </div>
+    </div>
+  )
+}
+
+function CreatedTag() {
+  return (
+    <Badge variant="accent">
+      <Wrench className="size-3" strokeWidth={2} />
+      Created
+    </Badge>
+  )
+}
+
+function CustomServerCard({
+  server,
+  busy,
+  onEdit,
+  onDelete,
+}: {
+  server: CustomServer
+  busy?: boolean
+  onEdit: (server: CustomServer) => void
+  onDelete: (server: CustomServer) => void
+}) {
+  const toolCount = server.tools.length || server.toolCount
+  return (
+    <div
+      className={`flex h-full flex-col gap-3 rounded-lg border border-border bg-surface p-3 transition-colors duration-200 hover:border-accent/30 ${
+        busy ? 'opacity-60' : ''
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-raised text-accent">
+          <Wrench className="size-3.5" strokeWidth={1.75} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <h3 className="truncate text-[13px] font-semibold text-foreground">
+              {server.name}
+            </h3>
+            <CreatedTag />
+          </div>
+          <p className="mt-0.5 line-clamp-2 text-xs text-muted">
+            {server.description || 'Custom MCP server built by you in the MCP Builder.'}
+          </p>
+        </div>
+      </div>
+
+      {server.tools.length > 0 ? (
+        <ul className="max-h-32 space-y-0.5 overflow-y-auto rounded-md border border-border bg-canvas/40 p-1 scrollbar-thin">
+          {server.tools.map((tool) => (
+            <li key={tool.id} className="flex items-baseline gap-2 px-1.5 py-1">
+              <span className="shrink-0 font-mono text-[11px] font-medium text-foreground">
+                {tool.name}
+              </span>
+              {tool.description ? (
+                <span className="min-w-0 truncate text-[11px] text-subtle">
+                  {tool.description}
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="rounded-md border border-dashed border-border px-3 py-3 text-center text-[11px] text-subtle">
+          No tools saved yet
+        </p>
+      )}
+
+      <div className="mt-auto flex items-center justify-between gap-2">
+        <span className="text-[11px] text-subtle">
+          {toolCount} {toolCount === 1 ? 'tool' : 'tools'}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<Pencil className="size-3.5" />}
+            onClick={() => onEdit(server)}
+          >
+            Edit in Builder
+          </Button>
+          <IconButton
+            size="sm"
+            disabled={busy}
+            onClick={() => onDelete(server)}
+            title="Delete server"
+            aria-label={`Delete ${server.name}`}
+          >
+            <Trash2 className="size-3.5" />
+          </IconButton>
+        </div>
       </div>
     </div>
   )
@@ -558,10 +661,18 @@ export function ToolsPage() {
         api.get<{ connections: McpConnection[] }>('/v1/mcp/connections'),
         api.get<{ servers: McpCatalogServer[] }>('/v1/mcp/catalog'),
       ])
-      return { connections: connections.connections, catalog: catalog.servers }
+      return {
+        connections: connections.connections,
+        catalog: catalog.servers,
+      }
     },
     { refetchOnMount: true },
   )
+
+  // Custom servers come from the shared `custom-tools` cache — the same one the
+  // MCP Builder writes to — so creating, editing or deleting a tool there is
+  // reflected here without a separate stale copy.
+  const customToolsQuery = useCustomTools()
 
   const [addOpen, setAddOpen] = useState(false)
   const [name, setName] = useState('')
@@ -573,6 +684,8 @@ export function ToolsPage() {
   const [keyFor, setKeyFor] = useState<McpConnection | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [manageFor, setManageFor] = useState<McpConnection | null>(null)
+  const [serverToDelete, setServerToDelete] = useState<CustomServer | null>(null)
+  const [deletingServer, setDeletingServer] = useState(false)
   const [tab, setTab] = useState<CatalogTab>('All')
   const [registryQuery, setRegistryQuery] = useState('')
   const [registrySearch, setRegistrySearch] = useState('')
@@ -585,6 +698,7 @@ export function ToolsPage() {
 
   const connections = data?.connections ?? []
   const catalog = data?.catalog ?? []
+  const customServers = customToolsQuery.data?.servers ?? []
   const connectedUrls = new Set(
     connections
       .filter((connection) => connection.status === 'connected')
@@ -679,6 +793,26 @@ export function ToolsPage() {
 
   // Authoring a server is done in the MCP Builder (chat-to-code workspace).
   const createServer = () => navigate('/mcp-builder')
+
+  // Deep-link straight to a saved custom server (and its first tool) in the builder.
+  const editCustomServer = (server: CustomServer) =>
+    navigate(`/mcp-builder?server=${encodeURIComponent(server.id)}`)
+
+  const confirmDeleteServer = async () => {
+    if (!serverToDelete) return
+    setDeletingServer(true)
+    try {
+      await deleteCustomServer(api, serverToDelete.id)
+      toast.success(`${serverToDelete.name} deleted`)
+      setServerToDelete(null)
+      invalidateCustomTools()
+      customToolsQuery.refetch()
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setDeletingServer(false)
+    }
+  }
 
   const submitCustom = async () => {
     setFormError(null)
@@ -800,7 +934,7 @@ export function ToolsPage() {
     <PageShell>
       <PageHeader
         title="MCP Tools"
-        description="Built-in, remote, marketplace and public MCP servers your agents can use."
+        description="Built-in tools, your custom MCP servers, and remote, marketplace and public servers your agents can use."
         badge="Build"
       />
 
@@ -813,7 +947,7 @@ export function ToolsPage() {
           <section>
             <SectionLabel
               title="Your MCP Servers"
-              count={builtInTools.length + connections.length}
+              count={builtInTools.length + customServers.length + connections.length}
               action={
                 <Button
                   variant="outline"
@@ -830,6 +964,16 @@ export function ToolsPage() {
               {builtInTools.map((tool) => (
                 <motion.div key={tool.name} variants={fadeUp}>
                   <BuiltInCard tool={tool} />
+                </motion.div>
+              ))}
+              {customServers.map((server) => (
+                <motion.div key={server.id} variants={fadeUp}>
+                  <CustomServerCard
+                    server={server}
+                    busy={deletingServer && serverToDelete?.id === server.id}
+                    onEdit={editCustomServer}
+                    onDelete={setServerToDelete}
+                  />
                 </motion.div>
               ))}
               {connections.map((connection) => (
@@ -1111,6 +1255,25 @@ export function ToolsPage() {
           />
         </label>
       </Dialog>
+
+      <ConfirmDialog
+        open={serverToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deletingServer) setServerToDelete(null)
+        }}
+        title="Delete MCP server?"
+        description={
+          serverToDelete
+            ? `"${serverToDelete.name}" and its ${serverToDelete.toolCount} ${
+                serverToDelete.toolCount === 1 ? 'tool' : 'tools'
+              } will be removed. Agents using them will lose access.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        destructive
+        loading={deletingServer}
+        onConfirm={confirmDeleteServer}
+      />
     </PageShell>
   )
 }

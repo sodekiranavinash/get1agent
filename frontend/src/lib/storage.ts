@@ -5,7 +5,7 @@ import { formatBytes } from './knowledgeBases'
 
 export const STORAGE_QUERY_KEY = 'storage-files'
 
-// Keep in sync with backend/services/user-api/handler.py.
+// Keep in sync with backend/services/apis/user-api/handler.py.
 export const MAX_STORAGE_FILES = 10
 export const MAX_STORAGE_FILE_BYTES = 30 * 1024 * 1024
 export const MAX_STORAGE_BYTES = 100 * 1024 * 1024

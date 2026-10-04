@@ -1,7 +1,7 @@
 import { DOCS, IDS, daysAgo, hoursAgo } from './shared'
 
 /**
- * Evaluation lab: datasets + cases (Langfuse-native), runs, per-case results and
+ * Evaluation lab: datasets + cases (AWS-native), runs, per-case results and
  * the bulky S3 artifact (contexts, answer, judge reasoning).
  */
 

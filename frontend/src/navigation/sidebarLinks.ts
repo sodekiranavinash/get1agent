@@ -13,6 +13,8 @@ import {
   GitBranch,
   HardDrive,
   KeyRound,
+  ShieldCheck,
+  Layers,
   LayoutDashboard,
   LifeBuoy,
   MessageSquare,
@@ -132,6 +134,8 @@ export const sidebarLinks: SidebarLink[] = [
   },
 
   { to: '/vault', label: 'Vault', icon: KeyRound, section: 'manage' },
+  { to: '/guardrails', label: 'Guardrails', icon: ShieldCheck, section: 'manage' },
+  { to: '/platform', label: 'Platform', icon: Layers, section: 'manage' },
   { to: '/usage', label: 'Usage', icon: CreditCard, section: 'manage' },
 
   {

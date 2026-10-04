@@ -5,7 +5,7 @@ import { usePageQuery } from '../hooks/usePageQuery'
 export const AGENTS_QUERY_KEY = 'agents'
 export const AGENT_LIBRARY_QUERY_KEY = 'agent-library'
 
-// Keep these in sync with backend/services/user-api/handler.py.
+// Keep these in sync with backend/services/apis/user-api/handler.py.
 export const MAX_AGENTS_PER_USER = 50
 export const AGENT_NAME_MIN = 1
 export const AGENT_NAME_MAX = 64
@@ -56,6 +56,16 @@ export type AgentMemory = {
   enabled: boolean
 }
 
+/**
+ * The Bedrock guardrail this agent applies. `id` empty means "use the workspace
+ * default"; `enabled` false opts the agent out of screening entirely. The version
+ * is always Bedrock's `DRAFT` and is not user-configurable.
+ */
+export type AgentGuardrail = {
+  enabled: boolean
+  id: string
+}
+
 export type AgentNodeData = {
   kind: AgentNodeKind
   title: string
@@ -77,6 +87,10 @@ export type AgentNodeData = {
   outputInstructions?: string
   /** Agent node: enable cross-session user memory. */
   memoryEnabled?: boolean
+  /** Agent node: screen this agent with a Bedrock guardrail. */
+  guardrailEnabled?: boolean
+  /** Agent node: a specific guardrail id; empty uses the workspace default. */
+  guardrailId?: string
   knowledgeBaseIds?: string[]
   /** Knowledge node: rerank the hybrid results before returning them. */
   rerank?: boolean
@@ -142,6 +156,8 @@ export type AgentConfig = {
   servers: AgentServerSelection[]
   /** Cross-session user memory. */
   memory: AgentMemory
+  /** Bedrock guardrail applied to this agent's model calls. */
+  guardrail: AgentGuardrail
   schedule: AgentSchedule
   graph: AgentGraph
 }
@@ -206,25 +222,19 @@ export type AgentDraft = {
 // --- reference data ----------------------------------------------------------
 
 /** Canonical config schema version. Keep in sync with the backend. */
-export const AGENT_CONFIG_VERSION = 3
+export const AGENT_CONFIG_VERSION = 4
 
-// Curated OpenCode Go models (OpenAI-compatible `/chat/completions`), ordered
-// cheapest/fastest first. Keep the ids in sync with SUPPORTED_AGENT_MODELS in
-// backend/services/user-api/handler.py. `contextWindow` mirrors the runtime's
-// `agentflow/models.py` map (the context meter uses it before a run reports the
-// exact fill).
+// Curated Amazon Bedrock models, ordered cheapest/fastest first. Keep the ids in
+// sync with SUPPORTED_AGENT_MODELS in backend/services/apis/user-api/handler.py and
+// SUPPORTED_MODELS in backend/agents/agentflow/models.py. `contextWindow`
+// mirrors the runtime's context map (the context meter uses it before a run
+// reports the exact fill).
 export const AGENT_MODELS = [
-  { id: 'mimo-v2.5', label: 'MiMo V2.5', blurb: 'Cheapest · everyday', contextWindow: 128_000 },
-  { id: 'glm-5.3-flash', label: 'GLM 5.3 Flash', blurb: 'Fast · balanced', contextWindow: 128_000 },
-  { id: 'qwen3.8-flash', label: 'Qwen3.8 Flash', blurb: 'Fast · long context', contextWindow: 128_000 },
-  {
-    id: 'deepseek-v4-flash-vision-exp',
-    label: 'DeepSeek V4 Flash Vision Exp',
-    blurb: 'Vision · fast · experimental',
-    contextWindow: 128_000,
-  },
-  { id: 'gpt-5.6-luna', label: 'GPT 5.6 Luna', blurb: 'OpenAI · precise', contextWindow: 1_050_000 },
-  { id: 'kimi-k2.6', label: 'Kimi K2.6', blurb: 'Strong reasoning', contextWindow: 256_000 },
+  { id: 'zai.glm-4.7-flash', label: 'GLM 4.7 Flash', blurb: 'Fast · tool-use · cheapest', contextWindow: 128_000 },
+  { id: 'nvidia.nemotron-nano-3-30b', label: 'Nemotron Nano 3 30B', blurb: 'Fastest · everyday', contextWindow: 128_000 },
+  { id: 'deepseek.v3.2', label: 'DeepSeek V3.2', blurb: 'Reasoning · coding', contextWindow: 128_000 },
+  { id: 'qwen.qwen3-next-80b-a3b', label: 'Qwen3 Next 80B', blurb: 'Balanced · multilingual', contextWindow: 128_000 },
+  { id: 'global.amazon.nova-2-lite-v1:0', label: 'Nova 2 Lite', blurb: '1M context · multimodal', contextWindow: 1_000_000 },
 ] as const
 
 export const DEFAULT_AGENT_CONTEXT_WINDOW = 128_000
@@ -599,6 +609,8 @@ export function defaultNodeData(kind: AgentNodeKind): AgentNodeData {
         reasoning: 'low',
         answerMode: DEFAULT_AGENT_ANSWER_MODE,
         memoryEnabled: false,
+        guardrailEnabled: true,
+        guardrailId: '',
       }
     case 'output':
       return {
@@ -769,6 +781,8 @@ export function graphFromConfig(config: AgentConfig): AgentGraph {
             reasoning: config.reasoning,
             answerMode: resolveAnswerMode(config.answerMode),
             memoryEnabled: config.memory?.enabled ?? false,
+            guardrailEnabled: config.guardrail?.enabled ?? true,
+            guardrailId: config.guardrail?.id ?? '',
           },
         }
       case 'input':
@@ -852,6 +866,10 @@ export function configFromGraph(
     skillIds: skills?.data.skillIds ?? [],
     servers: tools?.data.servers ?? [],
     memory: { enabled: agent?.data.memoryEnabled ?? false },
+    guardrail: {
+      enabled: agent?.data.guardrailEnabled ?? true,
+      id: agent?.data.guardrailId ?? '',
+    },
     schedule: schedule?.data.schedule ?? { ...DEFAULT_AGENT_SCHEDULE },
     graph: {
       nodes: nodes.map((node) => ({

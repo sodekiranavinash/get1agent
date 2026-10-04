@@ -22,9 +22,9 @@ export function ThemeSwitch() {
           className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-transparent text-muted transition-colors hover:border-border hover:bg-raised hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
         >
           {isDark ? (
-            <Sun className="size-5" strokeWidth={1.75} />
+            <Sun className="size-[22px]" strokeWidth={1.75} />
           ) : (
-            <Moon className="size-5" strokeWidth={1.75} />
+            <Moon className="size-[22px]" strokeWidth={1.75} />
           )}
         </button>
       </TooltipTrigger>

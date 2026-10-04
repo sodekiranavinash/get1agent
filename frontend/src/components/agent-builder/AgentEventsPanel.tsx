@@ -21,7 +21,7 @@ import { useApiClient } from '../../lib/api'
 import type { AgentEvent, AgentEventKind } from '../../lib/agents'
 import type { Conversation } from '../../lib/conversations'
 import type { RunFields } from '../../lib/runState'
-import { traceHref } from '../../lib/trace'
+import { traceViewHref } from '../../lib/trace'
 
 const KIND_META: Record<AgentEventKind, { icon: LucideIcon; className: string }> = {
   info: { icon: Info, className: 'text-muted' },
@@ -177,9 +177,9 @@ function RunsList({
                     agentId={agentId}
                   />
                 ) : null}
-                {traceHref(run.lastTraceUrl) ? (
+                {traceViewHref(run.lastTraceUrl, run.lastTraceId) ? (
                   <a
-                    href={traceHref(run.lastTraceUrl) ?? undefined}
+                    href={traceViewHref(run.lastTraceUrl, run.lastTraceId) ?? undefined}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 text-[10px] font-medium text-subtle transition-colors hover:text-accent"

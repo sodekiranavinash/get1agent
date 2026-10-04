@@ -4,7 +4,7 @@ import { usePageQuery } from '../hooks/usePageQuery'
 
 export const CUSTOM_TOOLS_QUERY_KEY = 'custom-tools'
 
-// Keep these in sync with backend/services/user-api/src/custom_tools/spec.py.
+// Keep these in sync with backend/services/apis/user-api/src/custom_tools/spec.py.
 export const MAX_CUSTOM_SERVERS_PER_USER = 20
 export const MAX_CUSTOM_TOOLS_PER_SERVER = 20
 export const MAX_CUSTOM_TOOL_CODE_BYTES = 64 * 1024

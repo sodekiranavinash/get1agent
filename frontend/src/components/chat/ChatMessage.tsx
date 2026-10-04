@@ -1,7 +1,7 @@
 import { Bot, ExternalLink, Network } from 'lucide-react'
 import { agentModelLabel } from '../../lib/agents'
 import type { ChatTurn } from '../../lib/chat'
-import { traceHref } from '../../lib/trace'
+import { traceViewHref } from '../../lib/trace'
 import { WorkflowRunTimeline } from '../workflow-builder/WorkflowRunTimeline'
 import { ChatAnswer } from './ChatAnswer'
 import { HumanPrompt } from './HumanPrompt'
@@ -32,6 +32,9 @@ export function ChatMessage({
   // flight, so it must not show citations, feedback or a trace link.
   const settled =
     turn.status === 'done' || turn.status === 'error' || turn.status === 'stopped'
+  // A live run already has a trace id (the runtime emits it) even though the
+  // signed share URL is only minted on reload — so fall back to the app viewer.
+  const traceLink = traceViewHref(turn.traceUrl, turn.traceId)
 
   return (
     <div className="space-y-3">
@@ -112,9 +115,9 @@ export function ChatMessage({
                 traceId={turn.traceId}
                 agentId={turn.agentId}
               />
-              {traceHref(turn.traceUrl) ? (
+              {traceLink ? (
                 <a
-                  href={traceHref(turn.traceUrl) ?? undefined}
+                  href={traceLink}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-[11px] font-medium text-subtle transition-colors hover:text-accent"

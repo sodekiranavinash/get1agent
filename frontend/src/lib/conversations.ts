@@ -26,7 +26,7 @@ export type Conversation = {
   /** Latest run id + trace (keys the builder-history feedback). */
   lastRunId?: string | null
   lastTraceId?: string | null
-  /** Signed, expiring Langfuse trace link for the latest run (API-minted). */
+  /** Signed, expiring AWS (CloudWatch) trace link for the latest run (API-minted). */
   lastTraceUrl?: string | null
   /** The user's feedback for the latest run, if any. */
   feedback?: Feedback | null
@@ -47,7 +47,7 @@ export type StoredTurn = {
   completedAt?: string
   status?: string
   traceId?: string | null
-  /** Signed, expiring Langfuse trace link (API-minted on read). */
+  /** Signed, expiring AWS (CloudWatch) trace link (API-minted on read). */
   traceUrl?: string | null
   /** The user's feedback for this run, if any. */
   feedback?: Feedback | null

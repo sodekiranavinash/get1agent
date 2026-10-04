@@ -1,5 +1,5 @@
 export const AUTH_PATHS = {
-  login: '/login',
+  login: '/',
   callback: '/authorization/callback',
   logout: '/logout',
 } as const

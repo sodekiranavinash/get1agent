@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { ErrorBoundary } from '../components/ErrorBoundary'
+import { ConsentGate } from '../components/privacy/ConsentGate'
 import { TopBar } from '../components/layout/TopBar'
 import { SidebarProvider, useSidebar } from '../components/layout/SidebarProvider'
 import { Sidebar } from './Sidebar'
@@ -55,6 +56,7 @@ function MainLayoutContent({ children }: { children?: ReactNode }) {
           </RouteGate>
         </div>
       </main>
+      <ConsentGate />
     </div>
   )
 }

@@ -6,7 +6,7 @@ import { formatBytes, formatRelative } from './knowledgeBases'
 export const AGENT_SKILLS_QUERY_KEY = 'agent-skills'
 export const AGENT_MCP_SERVERS_QUERY_KEY = 'agent-skills-mcp-servers'
 
-// Keep these in sync with backend/services/user-api/user_api/skills/spec.py.
+// Keep these in sync with backend/services/apis/user-api/user_api/skills/spec.py.
 export const MAX_SKILLS_PER_USER = 50
 export const MAX_SKILL_CONTENT_BYTES = 100 * 1024
 export const MAX_DESCRIPTION_LENGTH = 1000

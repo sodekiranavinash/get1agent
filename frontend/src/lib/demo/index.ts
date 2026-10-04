@@ -28,6 +28,7 @@ import {
   demoSkillRegistry,
 } from './skills'
 import { demoConnections, demoMcpCatalog, demoMcpRegistry, demoToolsByConnection } from './mcp'
+import { demoNotificationsPayload } from './notifications'
 import { demoStorageFiles } from './storage'
 import { demoVaultProviders, demoVaultSecrets } from './vault'
 import {
@@ -55,6 +56,7 @@ import {
   demoEvalRunCases,
   demoEvalRuns,
 } from './evals'
+import { demoGuardrailStatus, demoGuardrailTest } from './guardrails'
 
 const knowledgeBaseList = {
   knowledgeBases: demoKnowledgeBases,
@@ -108,6 +110,18 @@ function match(path: string, params: URLSearchParams): unknown {
 
   // --- account ---------------------------------------------------------
   if (path === '/v1/user/settings') return demoAccount
+
+  // --- notifications ---------------------------------------------------
+  if (path === '/v1/notifications') return demoNotificationsPayload()
+
+  // --- guardrails -------------------------------------------------------
+  if (path === '/v1/guardrails') return demoGuardrailStatus
+  if (path === '/v1/guardrails/test') {
+    // Parse body from query params for demo
+    const text = params.get('text') || 'Hello world'
+    const source = (params.get('source') || 'OUTPUT') as 'INPUT' | 'OUTPUT'
+    return demoGuardrailTest(text, source)
+  }
 
   // --- agents ----------------------------------------------------------
   if (path === '/v1/agents') return demoAgentList
@@ -169,10 +183,7 @@ function match(path: string, params: URLSearchParams): unknown {
     return {
       configured: true,
       traces: demoTraces,
-      lookedFor: [DEMO_USER_ID],
-      page: 1,
-      totalPages: 1,
-      totalItems: demoTraces.length,
+      nextCursor: null,
     }
   }
   if (tail('v1', 'lab', 'traces', at(3))) return demoLabTraceDetail(at(3))

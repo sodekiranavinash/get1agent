@@ -392,7 +392,7 @@ export function UsagePage() {
             {!configured || metrics?.error ? (
               <Card className="px-4 py-3 text-[13px] text-muted">
                 {!configured
-                  ? 'Token and cost analytics need Langfuse. Add LANGFUSE_* keys to see live model usage.'
+                  ? 'Token and cost analytics are unavailable for this environment.'
                   : `Could not load analytics: ${metrics?.error}`}
               </Card>
             ) : (
@@ -531,7 +531,7 @@ export function UsagePage() {
                     <p className="px-4 py-8 text-center text-[13px] text-subtle">
                       {configured
                         ? 'No model usage recorded yet.'
-                        : 'Model usage appears once Langfuse is configured.'}
+                        : 'Model usage appears once the workspace has run an agent.'}
                     </p>
                   ) : (
                     <div className="space-y-4 p-4">

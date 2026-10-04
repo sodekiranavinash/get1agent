@@ -95,17 +95,6 @@ export const demoVaultProviders = {
       docsUrl: 'https://platform.openai.com/docs',
     },
     {
-      id: 'opencode',
-      label: 'OpenCode Go',
-      description: 'The platform gateway.',
-      baseUrl: 'https://opencode.ai/api',
-      defaultModel: 'deepseek-v4-flash-vision-exp',
-      models: ['deepseek-v4-flash-vision-exp', 'glm-5.3-flash'],
-      auth: 'bearer',
-      requiresKey: true,
-      docsUrl: '',
-    },
-    {
       id: 'openrouter',
       label: 'OpenRouter',
       description: 'One key, many models.',

@@ -12,6 +12,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { ScheduleFields } from '../agent-builder/AgentNodeDialog'
+import { LineField, LineToggle } from '../agent-builder/LineField'
 import {
   Select,
   SelectContent,
@@ -357,6 +358,27 @@ function HostInspector({ node }: { node: WorkflowFlowNode }) {
             ))}
           </SelectContent>
         </Select>
+      </Section>
+
+      <Section
+        icon={<Sparkles className="size-3.5" />}
+        title="Guardrail"
+        hint="Screen the workflow's runs with a Bedrock guardrail. Members fall back to this unless their agent sets its own."
+      >
+        <LineToggle
+          label="Screen with a Bedrock guardrail"
+          checked={node.data.guardrailEnabled ?? true}
+          onChange={(checked) => updateNodeData(node.id, { guardrailEnabled: checked })}
+        />
+        {(node.data.guardrailEnabled ?? true) ? (
+          <LineField
+            label="Guardrail id (optional)"
+            value={node.data.guardrailId ?? ''}
+            onChange={(value) => updateNodeData(node.id, { guardrailId: value })}
+            placeholder="Defaults to your workspace guardrail"
+            mono
+          />
+        ) : null}
       </Section>
 
       <Section

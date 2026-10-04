@@ -25,7 +25,7 @@ const RELEASES: Release[] = [
     bullets: [
       { kind: 'feature', text: 'MCP Builder: generate, diff and test custom Python tools.' },
       { kind: 'feature', text: 'Evaluations lab with Ragas-aligned judges and per-case artifacts.' },
-      { kind: 'feature', text: 'Traces, metrics and run feedback backed by Langfuse.' },
+      { kind: 'feature', text: 'Traces, metrics and run feedback backed by CloudWatch/X-Ray.' },
       { kind: 'improvement', text: 'Vault keeps provider keys operator-blind with live model lists.' },
     ],
   },
@@ -56,7 +56,7 @@ export function ChangelogPage() {
     <PageShell>
       <PageHeader
         title="Changelog"
-        description="New capabilities and fixes shipped to OneAgent."
+        description="New capabilities and fixes shipped to OneAgent (powered by get1agent.com)."
         badge="Releases"
         badgeVariant="info"
       />

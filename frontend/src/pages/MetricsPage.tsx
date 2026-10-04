@@ -89,7 +89,7 @@ export function MetricsPage() {
       {!configured || data?.error ? (
         <Card className="p-8 text-center text-[13px] text-muted">
           {!configured
-            ? 'Langfuse isn’t configured for this environment yet.'
+            ? 'Observability metrics aren’t available for this environment yet.'
             : `Could not load metrics: ${data?.error}`}
         </Card>
       ) : (

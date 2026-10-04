@@ -39,11 +39,11 @@ export const DOCS: DocGroup[] = [
         id: 'getting-started',
         title: 'Getting started',
         summary:
-          'OneAgent is a workspace for building, running and evaluating AI agents on your own data.',
+          'OneAgent (powered by get1agent.com) is a workspace for building, running and evaluating AI agents on your own data.',
         blocks: [
           {
             kind: 'paragraph',
-            text: 'OneAgent lets you assemble agents and multi-agent workflows from four building blocks: knowledge (retrieval over your documents), tools (web search, code, HTTP and remote MCP servers), skills (reusable instructions) and models. Everything is serverless and per-user, so your data, files and conversations are private to your account.',
+            text: 'OneAgent lets you assemble agents and multi-agent workflows from four building blocks: knowledge (retrieval over your documents), tools (web search, code, HTTP, a managed browser and remote MCP servers), skills (reusable instructions) and models. The platform is fully AWS-native — built on 10+ AWS services with every model call on Amazon Bedrock — and per-user, so your data, files and conversations are private to your account.',
           },
           {
             kind: 'steps',
@@ -75,10 +75,11 @@ export const DOCS: DocGroup[] = [
               'Agent: one saved configuration — a system prompt, a model, an answer mode, optional knowledge bases, MCP servers, skills and attached files. Runs stream live in Chat.',
               'Workflow: several saved agents coordinated by a host agent, either as a deterministic graph or a dynamic swarm. Workflows reference agents by id; they never embed them.',
               'Knowledge base: a searchable collection of documents. Hybrid search (semantic + keyword) with small-to-big retrieval returns precise passages plus their surrounding page.',
-              'MCP server: a Model Context Protocol tool server. Built-ins are web-search, code-interpreter and http-fetch; remote servers are connected over OAuth or an API key; custom servers are Python tools you build in the MCP Builder.',
+              'MCP server: a Model Context Protocol tool server. Built-ins are web-search, code-interpreter, http-fetch and browser; remote servers are connected over OAuth or an API key; custom servers are Python tools you build in the MCP Builder. Every tool call is routed through AgentCore Gateway and checked by AgentCore Policy.',
               'Skill: a Strands-format markdown document (YAML frontmatter plus a body) that grants an agent reusable instructions and declares which MCP servers it may use.',
+              'Memory: durable facts and preferences an agent keeps across sessions in AgentCore Memory, shared by that user\u2019s agents.',
               'Conversation: one persisted transcript. Chat and builder runs each create a conversation that can be reopened later from the sidebar or History tab.',
-              'Trace: the full Langfuse record of one run — the agent loop, model generations, tool calls, tokens and cost. Traces feed Datasets, Review queues and Metrics.',
+              'Trace: the full AWS (CloudWatch/X-Ray) record of one run — the agent loop, model generations, tool calls, tokens and cost. Traces feed Datasets, Review queues and Metrics (AWS-native).',
               'Vault secret: an encrypted key, token or connection string. Secrets are only ever referenced, never displayed back to the browser.',
             ],
           },
@@ -98,7 +99,7 @@ export const DOCS: DocGroup[] = [
         blocks: [
           {
             kind: 'paragraph',
-            text: 'The Dashboard is the landing page after you sign in. It summarises the workspace and offers the fastest routes into the product. Numbers come from real data: agents and workflows from their stores, tokens and runs from Langfuse metrics (30 days), credits from your quota.',
+            text: 'The Dashboard is the landing page after you sign in. It summarises the workspace and offers the fastest routes into the product. Numbers come from real data: agents and workflows from their stores, and tokens, runs and cost from the workspace metrics over 30 days.',
           },
           {
             kind: 'bullets',
@@ -150,7 +151,7 @@ export const DOCS: DocGroup[] = [
               'Toggle Auto-approve off if you want the agent to ask you a question mid-run, or on to let it assume the best option and state it.',
               'Type a question — or tap a starter question on the welcome screen — and send. Watch the run card move through Planning, sub-query groups and numbered todo steps; each tool call shows its name, arguments, response and citation sources.',
               'Read the final answer, rendered in the agent output format (markdown, pretty JSON or plain text). Below it, the Source carousel lists every source by number; inline [n] badges scroll the matching card into view.',
-              'Rate the run with the thumbs under the answer, or open View trace for the Langfuse trace.',
+              'Rate the run with the thumbs under the answer, or open View trace for the full run trace — every stage with its input, output and metadata.',
             ],
           },
           {
@@ -391,8 +392,8 @@ export const DOCS: DocGroup[] = [
           {
             kind: 'callout',
             tone: 'warning',
-            title: 'No network in the sandbox',
-            text: 'Custom tools cannot fetch the web or reach cloud SDKs. If a tool needs remote content, have the agent call HTTP Fetch first, then read the saved file and pass its content to your tool as an argument.',
+            title: 'Sandboxed and offline',
+            text: 'Custom tools run isolated, so they cannot fetch the web or reach cloud SDKs. If a tool needs remote content, have the agent call HTTP Fetch first, then read the saved file and pass its content to your tool as an argument.',
           },
         ],
       },
@@ -679,7 +680,7 @@ export const DOCS: DocGroup[] = [
             kind: 'bullets',
             items: [
               'The variables panel is frontend-only — substitution happens before the call is made.',
-              'Only chat-completions models are offered here.',
+              'Models are limited to the curated Amazon Bedrock set.',
               'Saved cases are created on demand in the named dataset and can be used in Evaluations.',
             ],
           },
@@ -851,6 +852,61 @@ export const DOCS: DocGroup[] = [
         ],
       },
       {
+        id: 'guardrails',
+        title: 'Guardrails',
+        summary:
+          'Apply Amazon Bedrock Guardrails to your runs — content filters, denied topics and PII handling.',
+        blocks: [
+          {
+            kind: 'paragraph',
+            text: 'Guardrails are created in Amazon Bedrock and referenced here by id (the version is Bedrock’s working DRAFT, managed for you). A guardrail is set on the workspace as the default, and each agent or workflow can name its own id or opt out entirely. When a guardrail applies, every model call is screened: harmful content, denied topics and sensitive information are filtered before the model sees the prompt or the answer reaches the user.',
+          },
+          {
+            kind: 'bullets',
+            items: [
+              'Workspace guardrail: your default. Every agent and workflow run is screened with it unless that agent or workflow names its own. Leave the id empty to disable screening.',
+              'Per agent / workflow: in the builder, toggle the guardrail and optionally give a different guardrail id. Turning it off opts that agent or workflow out.',
+              'Test: run a piece of text through the guardrail and see whether it intervenes, with the filtered output.',
+              'Input vs output: choose which side of the conversation to screen — the prompt or the model answer.',
+            ],
+          },
+          {
+            kind: 'callout',
+            tone: 'tip',
+            title: 'Guardrails vs Policy',
+            text: 'Guardrails screen content. AgentCore Policy is separate and deterministic: it decides which tools an agent may call, and it runs on every tool call.',
+          },
+        ],
+      },
+      {
+        id: 'platform',
+        title: 'Platform',
+        summary:
+          'The AWS-native services behind your workspace: managed identity, catalog, browser, optimisation and the Bedrock levers.',
+        blocks: [
+          {
+            kind: 'paragraph',
+            text: 'This page shows the managed AWS services your workspace runs on. Everything here is provided by Amazon Bedrock and AgentCore; nothing is third-party.',
+          },
+          {
+            kind: 'bullets',
+            items: [
+              'Identity: AgentCore Identity holds third-party OAuth tokens in a managed vault, so they are never stored in this app. The card shows how many providers are wired.',
+              'Registry: a governed catalog of agents, MCP servers, tools and skills. Publish a record from here and search the catalog semantically.',
+              'Browser: open a managed browser session for an allowlisted domain and watch it through the live-view link. Only approved domains can be opened.',
+              'Optimization: AgentCore Optimization analyses evaluated traces and recommends better prompts and tool descriptions.',
+              'Bedrock levers: the cost and latency settings currently applied — prompt caching, service tier, prompt routing and per-workload inference profiles.',
+            ],
+          },
+          {
+            kind: 'callout',
+            tone: 'info',
+            title: 'Only allowlisted domains',
+            text: 'The browser tool refuses any domain that is not on the workspace allowlist. An empty allowlist denies everything — that is intentional.',
+          },
+        ],
+      },
+      {
         id: 'settings',
         title: 'Settings',
         summary:
@@ -965,8 +1021,8 @@ export const DOCS: DocGroup[] = [
           {
             kind: 'bullets',
             items: [
-              'Paid workspaces get a first response within one business day.',
-              'Security reports are triaged around the clock.',
+              'Support is best-effort — there is no guaranteed response time.',
+              'Security reports are read by the security team and are one-way.',
             ],
           },
         ],

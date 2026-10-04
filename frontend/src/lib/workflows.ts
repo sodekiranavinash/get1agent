@@ -8,6 +8,7 @@ import {
   agentModelLabel,
   resolveAgentModel,
   type Agent,
+  type AgentGuardrail,
   type AgentOutputFormat,
   type AgentReasoning,
   type AgentSchedule,
@@ -16,7 +17,7 @@ import {
 
 export const WORKFLOWS_QUERY_KEY = 'workflows'
 
-// Keep these in sync with backend/services/user-api/handler.py.
+// Keep these in sync with backend/services/apis/user-api/handler.py.
 export const MAX_WORKFLOWS_PER_USER = 50
 export const MAX_WORKFLOW_AGENTS = 10
 export const WORKFLOW_NAME_MAX = 64
@@ -44,6 +45,9 @@ export type WorkflowNodeData = {
   prompt?: string
   /** Input/host node: the host's model. */
   model?: string
+  /** Input/host node: the workflow's guardrail (host + fallback for members). */
+  guardrailEnabled?: boolean
+  guardrailId?: string
   /** Agent node: the referenced saved agent + per-workflow overrides. */
   agentId?: string
   agentName?: string
@@ -107,6 +111,8 @@ export type WorkflowConfig = {
   output: { format: AgentOutputFormat; instructions: string }
   /** Stored on the workflow; the schedule node is attached to the host. */
   schedule: AgentSchedule
+  /** The workflow's guardrail: applied to the host, inherited by members. */
+  guardrail: AgentGuardrail
   nodes: WorkflowGraphNode[]
   edges: WorkflowGraphEdge[]
 }
@@ -306,7 +312,7 @@ export function structuralNode(
 ): WorkflowGraphNode {
   const data: WorkflowNodeData =
     kind === 'input'
-      ? { kind, query: '', prompt: '', model: DEFAULT_AGENT_MODEL }
+      ? { kind, query: '', prompt: '', model: DEFAULT_AGENT_MODEL, guardrailEnabled: true, guardrailId: '' }
       : kind === 'schedule'
         ? { kind, schedule: { ...DEFAULT_AGENT_SCHEDULE } }
         : { kind, format: 'markdown', instructions: '' }
@@ -354,6 +360,7 @@ export function defaultWorkflowGraph(): WorkflowConfig {
     input: { query: '', prompt: '', model: DEFAULT_AGENT_MODEL },
     output: { format: 'markdown', instructions: '' },
     schedule: { ...DEFAULT_AGENT_SCHEDULE },
+    guardrail: { enabled: true, id: '' },
     // A new workflow starts with just the query (host) and the output.
     nodes: [
       structuralNode('input', WORKFLOW_LAYOUT.input),
@@ -389,7 +396,17 @@ export function graphFromConfig(config: WorkflowConfig): WorkflowConfig {
     // even for configs saved under an older layout.
     position: structuralPosition(node.type) ?? positionFor(node, index),
     // The run question is never persisted, so the host card starts blank.
-    data: { ...node.data, kind: node.type, ...(node.type === 'input' ? { query: '' } : {}) },
+    data: {
+      ...node.data,
+      kind: node.type,
+      ...(node.type === 'input'
+        ? {
+            query: '',
+            guardrailEnabled: config.guardrail?.enabled ?? node.data.guardrailEnabled ?? true,
+            guardrailId: config.guardrail?.id ?? node.data.guardrailId ?? '',
+          }
+        : {}),
+    },
   }))
   const hasInput = nodes.some((node) => node.type === 'input')
   const hasOutput = nodes.some((node) => node.type === 'output')
@@ -429,6 +446,7 @@ export function graphFromConfig(config: WorkflowConfig): WorkflowConfig {
     },
     output: config.output ?? { format: 'markdown', instructions: '' },
     schedule: config.schedule ?? { ...DEFAULT_AGENT_SCHEDULE },
+    guardrail: config.guardrail ?? { enabled: true, id: '' },
     nodes: arrangeAgentColumn(nodes),
     edges,
   }
@@ -457,6 +475,10 @@ export function configFromGraph(
       instructions: outputNode?.data.instructions ?? '',
     },
     schedule: scheduleNode?.data.schedule ?? { ...DEFAULT_AGENT_SCHEDULE },
+    guardrail: {
+      enabled: inputNode?.data.guardrailEnabled ?? true,
+      id: inputNode?.data.guardrailId ?? '',
+    },
     nodes: nodes.map((node) => ({
       id: node.id,
       type: node.type,

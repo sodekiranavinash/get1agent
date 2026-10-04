@@ -87,7 +87,7 @@ export const IDS = {
   convSwarm: 1034,
   convVendor: 1033,
 
-  // Traces (Langfuse trace ids)
+  // Traces (AWS trace ids)
   traceResearch: '9f3a1c2e5b7d4a6089c1d2e3f4a5b6c7',
   traceSupport: '3d7e9b1f4c2a6e8d0b5f7a9c1e3d5f7b',
   traceWorkflow: 'c1a2b3d4e5f60718293a4b5c6d7e8f90',

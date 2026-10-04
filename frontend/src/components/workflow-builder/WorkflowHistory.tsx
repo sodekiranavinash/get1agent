@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { ExternalLink } from 'lucide-react'
 import { Spinner } from '../ui/Spinner'
 import { useApiClient } from '../../lib/api'
-import { traceHref } from '../../lib/trace'
+import { traceViewHref } from '../../lib/trace'
 import type { Conversation } from '../../lib/conversations'
 import { RunFeedback } from '../chat/RunFeedback'
 
@@ -107,9 +107,9 @@ export function WorkflowHistory({
                     conversationId={run.conversationId}
                   />
                 ) : null}
-                {traceHref(run.lastTraceUrl) ? (
+                {traceViewHref(run.lastTraceUrl, run.lastTraceId) ? (
                   <a
-                    href={traceHref(run.lastTraceUrl) ?? undefined}
+                    href={traceViewHref(run.lastTraceUrl, run.lastTraceId) ?? undefined}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 text-[10px] font-medium text-subtle transition-colors hover:text-accent"

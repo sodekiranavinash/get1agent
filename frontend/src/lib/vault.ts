@@ -5,7 +5,7 @@ import { usePageQuery } from '../hooks/usePageQuery'
 export const VAULT_QUERY_KEY = 'vault-secrets'
 export const VAULT_PROVIDERS_KEY = 'vault-providers'
 
-// Keep in sync with backend/services/user-api/handler.py.
+// Keep in sync with backend/services/apis/user-api/handler.py.
 export const MAX_VAULT_SECRETS = 100
 
 export type VaultSecretKind = 'provider' | 'generic'

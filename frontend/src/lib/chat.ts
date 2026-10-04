@@ -93,9 +93,9 @@ export type ChatTurn = {
   usage?: AgentUsage
   /** Context-window fill for the conversation after this turn. */
   context?: RunContext
-  /** Langfuse trace link for this run (signed + expiring when loaded from the API). */
+  /** AWS (CloudWatch) trace link for this run (signed + expiring when loaded from the API). */
   traceUrl?: string | null
-  /** Langfuse trace id (for mirroring feedback as a score). */
+  /** AWS trace id (for attaching run feedback). */
   traceId?: string | null
   /** The user's feedback for this run, if any. */
   feedback?: Feedback | null

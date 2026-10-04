@@ -47,7 +47,7 @@ export const COOKIE_CATEGORIES: CookieCategory[] = [
     required: true,
     examples: [
       {
-        name: 'auth0_session',
+        name: 'auth_session',
         purpose: 'Keeps you signed in and refreshes your access token',
         duration: 'Session',
       },

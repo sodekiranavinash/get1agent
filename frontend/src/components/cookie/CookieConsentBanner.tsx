@@ -23,7 +23,7 @@ export function CookieConsentBanner() {
           <Cookie className="size-4" />
         </span>
         <p className="min-w-0 flex-1 text-[12px] leading-relaxed text-muted">
-          We use cookies to run OneAgent, remember your preferences, and
+          We use cookies to run OneAgent (powered by get1agent.com), remember your preferences, and
           understand how the product is used. You can allow optional categories
           or reject everything but the cookies needed to sign in.
         </p>

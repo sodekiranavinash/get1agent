@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   BookOpen,
+  BookText,
   Compass,
   FlaskConical,
   Hammer,
@@ -176,7 +177,7 @@ export function DocumentationPage() {
     <PageShell>
       <PageHeader
         title="Documentation"
-        description="A complete guide to every page in OneAgent — what it is for and how to use it."
+        description="A complete guide to every page in OneAgent (powered by get1agent.com) — what it is for and how to use it."
         badge={`${DOC_SECTION_COUNT} sections`}
         badgeVariant="accent"
       />
@@ -185,7 +186,7 @@ export function DocumentationPage() {
         <aside className="hidden lg:block">
           <nav className="scrollbar-thin sticky top-6 max-h-[calc(100vh-3rem)] self-start overflow-y-auto pr-2">
             <p className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-subtle">
-              <BookOpen className="size-3.5" />
+              <BookText className="size-3.5" />
               On this page
             </p>
             <div className="space-y-4">

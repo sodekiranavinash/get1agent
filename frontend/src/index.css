@@ -368,10 +368,211 @@ body {
   animation: aurora-drift 24s ease-in-out infinite;
 }
 
+/* Landing / entry page motion. */
+@keyframes marquee-x {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee-x 32s linear infinite;
+}
+
+@keyframes text-sheen {
+  from {
+    background-position: 200% center;
+  }
+  to {
+    background-position: -200% center;
+  }
+}
+
+.animate-text-sheen {
+  background-size: 220% auto;
+  animation: text-sheen 7s linear infinite;
+}
+
+@keyframes float-y {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-float {
+  animation: float-y 7s ease-in-out infinite;
+}
+
+/* A pulse travelling along the "how it works" connector. */
+@keyframes flow-x {
+  0% {
+    transform: translateX(-120%);
+    opacity: 0;
+  }
+  15%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(340%);
+    opacity: 0;
+  }
+}
+
+.animate-flow {
+  animation: flow-x 5s ease-in-out infinite;
+}
+
+/* Blinking text caret for the MCP Builder code mock. */
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-caret {
+  animation: caret-blink 1.05s steps(1) infinite;
+}
+
+/* Flowing dashes along workflow graph edges. */
+@keyframes dash-move {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.animate-dash {
+  animation: dash-move 1.1s linear infinite;
+}
+
+/* A pulse travelling down a vertical connector (architecture layers). */
+@keyframes flow-y {
+  0% {
+    transform: translateY(-120%);
+    opacity: 0;
+  }
+  15%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(320%);
+    opacity: 0;
+  }
+}
+
+.animate-flow-y {
+  animation: flow-y 3.4s ease-in-out infinite;
+}
+
+/* Typewriter-style reveal for the streamed answer. */
+@keyframes reveal-x {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.animate-reveal-x {
+  animation: reveal-x 1.6s steps(36, end) both;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise-in 0.5s ease-out both;
+}
+
+/* Trace explorer: each observation's detail eases in when selected. */
+@keyframes trace-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-trace-in {
+  animation: trace-detail-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes trace-row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-trace-row {
+  animation: trace-row-in 0.28s ease-out both;
+}
+
+/* Scroll-reveal for landing sections. */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+
+.reveal[data-visible="true"] {
+  opacity: 1;
+  transform: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-aurora,
-  .animate-aurora-slow {
+  .animate-aurora-slow,
+  .animate-marquee,
+  .animate-text-sheen,
+  .animate-float,
+  .animate-flow,
+  .animate-flow-y,
+  .animate-caret,
+  .animate-dash,
+  .animate-reveal-x,
+  .animate-rise,
+  .animate-trace-in,
+  .animate-trace-row {
     animation: none;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
   }
 }
 
@@ -486,4 +687,97 @@ body {
 [data-sonner-toast] [data-close-button]:hover {
   background: var(--app-raised) !important;
   color: var(--app-foreground) !important;
+}
+
+/* ---------------------------------------------------------------------------
+ * Architecture blueprint diagrams (no canvas library — pure CSS + SVG)
+ * ------------------------------------------------------------------------- */
+
+/* Dotted connector — the marching dots read as direction of flow. */
+.bp-line {
+  stroke-dasharray: 1 6;
+  stroke-linecap: round;
+  animation: bp-march 1s linear infinite;
+}
+
+/* A static dotted relationship that does not carry a flow. */
+.bp-line--still {
+  animation: none;
+}
+
+@keyframes bp-march {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+/* Opaque card surface, so a connector can never visually overlap its text. */
+.bp-card {
+  background: linear-gradient(180deg, var(--app-raised), var(--app-surface));
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.bp-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--app-border-strong);
+  box-shadow: var(--app-shadow-panel);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bp-line {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Flowing-border highlight (hero "Architecture" button)
+ *
+ * A bright arc travels around the button's edge. The wrapper paints the moving
+ * conic gradient; the inner button masks the middle so only the border shows.
+ * ------------------------------------------------------------------------- */
+
+@property --glow-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.glow-border {
+  position: relative;
+  display: inline-flex;
+  border-radius: 8px;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--glow-angle),
+    transparent 0deg 250deg,
+    var(--app-accent) 305deg,
+    var(--app-violet) 340deg,
+    transparent 360deg
+  );
+  animation: glow-border-spin 3.2s linear infinite;
+}
+
+.glow-border > .glow-inner,
+.glow-border > .glow-inner:hover,
+.glow-border > .glow-inner:active {
+  border-radius: 6px;
+  background: var(--app-raised);
+  color: var(--app-accent);
+  border-color: transparent;
+}
+
+@keyframes glow-border-spin {
+  to {
+    --glow-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glow-border {
+    animation: none;
+    background: color-mix(in srgb, var(--app-accent) 55%, transparent);
+  }
 }
