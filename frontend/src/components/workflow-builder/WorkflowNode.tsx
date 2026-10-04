@@ -3,9 +3,12 @@ import {
   ArrowRight,
   Bot,
   CalendarClock,
+  Check,
   Crown,
   FileText,
+  Loader2,
   MessageSquare,
+  TriangleAlert,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -16,6 +19,7 @@ import {
   resolveAgentModel,
   type Agent,
 } from '../../lib/agents'
+import type { FlowStatus } from '../../lib/builderFlow'
 import {
   WORKFLOW_HANDLE,
   type WorkflowNodeData,
@@ -60,6 +64,27 @@ const FORMAT_LABELS: Record<string, string> = {
   json: 'JSON',
 }
 
+/** Card treatment for each live execution status. */
+const FLOW_CARD: Record<FlowStatus, string> = {
+  idle: '',
+  active: 'builder-node-active border-accent/70 ring-2 ring-accent/25',
+  done: 'builder-node-done border-success/60 ring-1 ring-success/25',
+  error: 'builder-node-error border-accent/80 ring-2 ring-accent/30',
+}
+
+function FlowBadge({ status }: { status: FlowStatus }) {
+  if (status === 'active') {
+    return <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" strokeWidth={2} />
+  }
+  if (status === 'done') {
+    return <Check className="size-3.5 shrink-0 text-success" strokeWidth={2.4} />
+  }
+  if (status === 'error') {
+    return <TriangleAlert className="size-3.5 shrink-0 text-accent" strokeWidth={2.2} />
+  }
+  return null
+}
+
 function agentSubtitle(agent: Agent | null, data: WorkflowNodeData): string {
   if (!agent) return 'Agent no longer available'
   const model = agentModelLabel(data.overrides?.model ?? resolveAgentModel(agent.model))
@@ -73,9 +98,10 @@ function agentSubtitle(agent: Agent | null, data: WorkflowNodeData): string {
 }
 
 export function WorkflowNodeView({ id, data, selected }: NodeProps<WorkflowFlowNode>) {
-  const { agents, mode, order, openNode, removeNode } = useWorkflowBuilder()
+  const { agents, mode, order, openNode, removeNode, nodeStatus } = useWorkflowBuilder()
   const meta = KIND_META[data.kind] ?? KIND_META.agent
   const Icon = meta.icon
+  const status = nodeStatus[id] ?? 'idle'
   const orderNo = data.kind === 'agent' && mode === 'graph' ? order[id] : undefined
 
   const agent =
@@ -115,8 +141,8 @@ export function WorkflowNodeView({ id, data, selected }: NodeProps<WorkflowFlowN
           openNode(id)
         }
       }}
-      className={`group relative flex h-[68px] w-[220px] cursor-pointer items-center overflow-hidden rounded-xl border bg-gradient-to-b from-raised/60 to-surface py-2.5 pr-2.5 pl-3.5 shadow-control transition-all duration-200 after:pointer-events-none after:absolute after:inset-x-0 after:top-0 after:h-px after:bg-white/[0.06] hover:-translate-y-0.5 hover:border-border-strong hover:shadow-panel focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${
-        selected ? 'border-accent/60 ring-2 ring-accent/15' : 'border-border'
+      className={`group relative flex h-[68px] w-[220px] cursor-pointer items-center overflow-hidden rounded-xl border bg-gradient-to-b from-raised/60 to-surface py-2.5 pr-2.5 pl-3.5 shadow-control transition-all duration-200 after:pointer-events-none after:absolute after:inset-x-0 after:top-0 after:h-px after:bg-white/[0.06] hover:-translate-y-0.5 hover:border-border-strong hover:shadow-panel focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${FLOW_CARD[status]} ${
+        selected ? 'border-accent/60 ring-2 ring-accent/15' : status === 'idle' ? 'border-border' : ''
       }`}
     >
       <span className={`absolute inset-y-0 left-0 w-[3px] ${meta.strip}`} />
@@ -209,11 +235,14 @@ export function WorkflowNodeView({ id, data, selected }: NodeProps<WorkflowFlowN
           </span>
         </span>
 
-        {data.kind === 'schedule' ? (
-          <ArrowDown className="size-3.5 shrink-0 text-subtle" />
-        ) : data.kind !== 'agent' ? (
-          <ArrowRight className="size-3.5 shrink-0 text-subtle" />
-        ) : null}
+        <span className="flex shrink-0 items-center gap-1">
+          <FlowBadge status={status} />
+          {data.kind === 'schedule' ? (
+            <ArrowDown className="size-3.5 shrink-0 text-subtle" />
+          ) : data.kind !== 'agent' ? (
+            <ArrowRight className="size-3.5 shrink-0 text-subtle" />
+          ) : null}
+        </span>
       </div>
 
       {data.kind === 'agent' ? (

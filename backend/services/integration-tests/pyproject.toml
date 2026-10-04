@@ -23,7 +23,7 @@ pythonpath = [
     "../../packages",
     "../apis/user-api",
     "../mcp/knowledge-mcp",
-    "../admin/mcp-tester",
+    "../admin/admin-console",
 ]
 testpaths = ["."]
 addopts = "-q"

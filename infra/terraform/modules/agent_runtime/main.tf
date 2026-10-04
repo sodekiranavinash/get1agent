@@ -146,6 +146,17 @@ resource "aws_iam_role_policy" "runtime" {
         Resource = var.bedrock_model_arns
       },
       {
+        # Applying a Bedrock guardrail on a model call needs bedrock:ApplyGuardrail
+        # for the guardrail (the workspace's, or one the user created in-app).
+        Sid    = "BedrockGuardrails"
+        Effect = "Allow"
+        Action = [
+          "bedrock:ApplyGuardrail",
+          "bedrock:GetGuardrail",
+        ]
+        Resource = "arn:aws:bedrock:*:*:guardrail/*"
+      },
+      {
         Sid      = "Logs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]

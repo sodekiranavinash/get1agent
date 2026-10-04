@@ -98,6 +98,12 @@ variable "bedrock_rerank_arns" {
   description = "Bedrock rerank model ARNs this Lambda may call with bedrock:Rerank"
 }
 
+variable "enable_guardrail_management" {
+  type        = bool
+  default     = false
+  description = "Allow this Lambda to create/update/delete/apply Bedrock guardrails"
+}
+
 variable "lambda_invoke_arns" {
   type        = list(string)
   default     = []
@@ -107,7 +113,7 @@ variable "lambda_invoke_arns" {
 variable "bedrock_agentcore_arns" {
   type        = list(string)
   default     = []
-  description = "Bedrock AgentCore code-interpreter ARNs this Lambda may start/invoke/stop sessions on"
+  description = "Bedrock AgentCore resource ARNs (code-interpreter/browser/registry) this Lambda may use; identity token actions are granted broadly"
 }
 
 variable "dynamodb_table_arns" {

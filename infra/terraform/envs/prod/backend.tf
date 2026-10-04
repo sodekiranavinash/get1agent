@@ -7,7 +7,7 @@ locals {
   # layer_extra_tools_zip    = abspath("${path.module}/../../../../backend/services/dependency-layers/extra-tools/dist/layer.zip")
   user_api_zip             = abspath("${path.module}/../../../../backend/services/apis/user-api/dist/function.zip")
   knowledge_mcp_zip        = abspath("${path.module}/../../../../backend/services/mcp/knowledge-mcp/dist/function.zip")
-  mcp_tester_zip           = abspath("${path.module}/../../../../backend/services/admin/mcp-tester/dist/function.zip")
+  admin_console_zip       = abspath("${path.module}/../../../../backend/services/admin/admin-console/dist/function.zip")
   code_interpreter_zip     = abspath("${path.module}/../../../../backend/services/mcp/code-interpreter/dist/function.zip")
   http_fetch_zip           = abspath("${path.module}/../../../../backend/services/mcp/http-fetch/dist/function.zip")
   custom_tools_zip         = abspath("${path.module}/../../../../backend/services/mcp/custom-tools/dist/function.zip")
@@ -665,10 +665,10 @@ check "knowledge_mcp_zip_exists" {
   }
 }
 
-check "mcp_tester_zip_exists" {
+check "admin_console_zip_exists" {
   assert {
-    condition     = !var.enable_backend_lambdas || fileexists(local.mcp_tester_zip)
-    error_message = "mcp-tester zip not found at ${local.mcp_tester_zip}. Run: make -C backend/services/admin/mcp-tester package"
+    condition     = !var.enable_backend_lambdas || fileexists(local.admin_console_zip)
+    error_message = "admin-console zip not found at ${local.admin_console_zip}. Run: make -C backend/services/admin/admin-console package"
   }
 }
 
@@ -811,6 +811,8 @@ module "user_api" {
   kms_key_arns = [module.vault_kms[0].key_arn]
   # Amazon Titan embeddings (KB creation) + Bedrock models for the Labs.
   bedrock_model_arns = local.bedrock_lab_model_arns
+  # Guardrails page: the user creates/queries/tests their own Bedrock guardrails.
+  enable_guardrail_management = true
   # AgentCore Identity: the /v1/identity routes fetch on-demand OAuth tokens.
   bedrock_agentcore_arns = [
     "arn:aws:bedrock-agentcore:${var.aws_region}:aws:token-vault/*",
@@ -993,14 +995,14 @@ module "knowledge_mcp" {
   ]
 }
 
-module "mcp_tester" {
+module "admin_console" {
   count  = var.enable_backend_lambdas ? 1 : 0
   source = "../../modules/lambda_function"
 
-  name             = "get1agent-prod-mcp-tester"
+  name             = "get1agent-prod-admin-console"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
-  filename         = local.mcp_tester_zip
-  source_code_hash = filebase64sha256(local.mcp_tester_zip)
+  filename         = local.admin_console_zip
+  source_code_hash = filebase64sha256(local.admin_console_zip)
   handler          = "handler.lambda_handler"
   runtime          = local.backend_python_runtime
   layer_arns       = []
@@ -1009,6 +1011,14 @@ module "mcp_tester" {
   timeout     = 300
 
   dynamodb_table_arns = [module.database[0].table_arn]
+
+  # Platform status: AgentCore Identity (tokens), Browser and Registry.
+  bedrock_agentcore_arns = [
+    "arn:aws:bedrock-agentcore:${var.aws_region}:aws:token-vault/*",
+    "arn:aws:bedrock-agentcore:${var.aws_region}:aws:workload-identity/*",
+    "arn:aws:bedrock-agentcore:${var.aws_region}:aws:credential-provider/*",
+    "arn:aws:bedrock-agentcore:${var.aws_region}:aws:browser/*",
+  ]
 
   lambda_invoke_arns = [
     module.knowledge_mcp[0].function_arn,
@@ -1025,6 +1035,26 @@ module "mcp_tester" {
     ])
     MCP_GATEWAY_URL = length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_url : ""
     MCP_TRANSPORT = "gateway"
+    BEDROCK_REGION = var.aws_region
+    # Platform status routes (/v1/admin/platform/*): Identity, Registry,
+    # Browser, Optimization and the Bedrock cost/latency levers.
+    AGENT_WORKLOAD_IDENTITY_ARN = local.workload_identity_arn
+    AGENT_TOKEN_VAULT_ID        = local.token_vault_id
+    AGENT_IDENTITY_PROVIDERS    = join(",", local.identity_provider_arns)
+    AGENT_IDENTITY_RETURN_URL   = var.agent_identity_return_url
+    AGENTCORE_REGISTRY_ARN      = local.registry_arn
+    AGENTCORE_REGISTRY_ID       = local.registry_id
+    BROWSER_ID                  = local.browser_id
+    BROWSER_REGION              = var.aws_region
+    BROWSER_ALLOWED_DOMAINS     = var.browser_allowed_domains
+    AGENT_OPTIMIZATION_ENABLED  = "true"
+    BEDROCK_PROMPT_CACHE        = var.bedrock_prompt_cache
+    BEDROCK_PROMPT_CACHE_TTL    = var.bedrock_prompt_cache_ttl
+    BEDROCK_SERVICE_TIER        = var.bedrock_service_tier
+    BEDROCK_PROMPT_ROUTER_ARN   = local.prompt_router_arn
+    BEDROCK_PROFILE_CHAT        = var.bedrock_profile_chat
+    BEDROCK_PROFILE_EVAL        = var.bedrock_profile_eval
+    BEDROCK_PROFILE_INGESTION   = var.bedrock_profile_ingestion
   }
 
   depends_on = [

@@ -3,3 +3,8 @@ enable_api_gateway       = true
 enable_backend_lambdas   = true
 enable_ingestion         = true
 enable_api_custom_domain = true
+
+# AgentCore Browser domain allowlist: comma-separated suffixes the managed
+# browser may open (a subdomain of a listed domain is allowed). Empty denies
+# every domain — the browser tool fails closed, so it must be set to work.
+browser_allowed_domains = "example.com,docs.aws.amazon.com"

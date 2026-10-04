@@ -12,7 +12,7 @@ frontend/              React + TypeScript + Tailwind (Vite)
 backend/
   services/            Lambda apps, grouped by category (see below)
   services/apis/       user-api
-  services/admin/      mcp-tester
+  services/admin/      admin-console
   services/mcp/        knowledge-mcp, code-interpreter, http-fetch, browser, custom-tools, mcp-connections
   services/ingestion/  ingestion-{dispatcher,extract,embed,index,mark-failed,watchdog}
   services/scheduler/  scheduled agent/workflow runs
@@ -75,7 +75,7 @@ shared modules it uses, **and all third-party dependencies** to the zip root and
 | `user-api` | `python-dateutil`, `tzdata` |
 | `knowledge-mcp`, `code-interpreter`, `http-fetch`, `custom-tools`, `mcp-connections`, `browser` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata` |
 | `ingestion-extract` | `pymupdf`, `python-docx`, `openpyxl`, `python-dateutil`, `tzdata` |
-| `mcp-tester`, `scheduler` | `python-dateutil`, `tzdata` |
+| `admin-console`, `scheduler` | `python-dateutil`, `tzdata` |
 | Other ingestion Lambdas | None (lightweight) |
 
 **No Lambda layers** — simpler deployment, easier local development.
@@ -110,6 +110,7 @@ chunks or postings in DynamoDB.
 | Workflow | `USER#<userId>` | `WORKFLOW#<lowerName>` | `byId`; `byUser` |
 | Storage file | `USER#<userId>` | `STORAGE#<fileId>` | — |
 | Vault secret | `USER#<userId>` | `VAULT#<name>` | `byId` (encrypted value; `name` is the reference slug) |
+| Guardrail | `USER#<userId>` | `GUARDRAIL#<name>` | — (Bedrock guardrail; `name` is the app slug) |
 | Session (code-interp) | `USER#<userId>` | `CONV#<conversationId>` | — |
 | Conversation | `USER#<userId>` | `CHAT#<globalId>` | `byId` (`CHATAGENT#<agentId>`); `byUser` (`CHAT#<updatedAt>#<id>`) |
 | Playground session | `USER#<userId>` | `PGSESSION#<sessionId>` | `byUser` (`PGSESSION#<updatedAt>#<id>`) |
@@ -343,7 +344,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   write dedupes concurrent invocations.
 - **Timeouts**: `CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS` (120) is enforced while
   streaming; on overrun the session is stopped. The code-interpreter Lambda
-  timeout is 240s; `knowledge-mcp` (and `mcp-tester`) timeouts are 300s so the
+  timeout is 240s; `knowledge-mcp` (and `admin-console`) timeouts are 300s so the
   synchronous call chain fits. API Gateway caps HTTP integrations at 30s, so long
   runs must use direct invoke.
 - **Local**: `CODE_INTERPRETER_MODE=local` runs the same guard + prelude in an
@@ -965,7 +966,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   /v1/support/messages`, `GET /v1/support/messages/{id}`,
   `POST /v1/support/messages/{id}/reply`, `GET/POST /v1/security/reports`. Both
   require a signed-in user; the demo is read-only.
-- **Admin routes** (in `mcp-tester`, admin view): `GET /v1/admin/support`,
+- **Admin routes** (in `admin-console`, admin view): `GET /v1/admin/support`,
   `GET /v1/admin/support/{userId}/{ticketId}`,
   `POST /v1/admin/support/{userId}/{ticketId}/reply`,
   `POST /v1/admin/support/{userId}/{ticketId}/status`,
@@ -1136,7 +1137,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   `GET /v1/admin/users` (a GSI3 `USERS#all` page — never a Scan),
   `POST /v1/admin/users/{userId}/credits` and `.../reset`, plus
   `POST /v1/admin/users/{userId}/unlimited` (`{unlimited: bool}`) to set or clear
-  the override, served by the **`mcp-tester`** admin Lambda. Admins start on the
+  the override, served by the **`admin-console`** admin Lambda. Admins start on the
   same default as users and simply raise their own grant in that page.
 - **Enforcement (clean choke points, no per-request guessing).**
   - The **agent runtime** checks the budget at the start of a run
@@ -1332,8 +1333,9 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
 - **Registry (A5)** — `aws_bedrockagentcore_registry` (curated: `auto_approval =
   false`) is the governed catalog for agents, MCP servers, tools and skills.
   `core/registry.py` publishes (`CreateRegistryRecord`) and searches
-  (`SearchRegistryRecords`); routes `GET /v1/registry`, `POST
-  /v1/registry/publish`, `GET /v1/registry/search`. Env: `AGENTCORE_REGISTRY_ARN`,
+  (`SearchRegistryRecords`). Admin-only (admin-console): `GET
+  /v1/admin/platform/registry`, `POST /v1/admin/platform/registry/publish`, `GET
+  /v1/admin/platform/registry/search`. Env: `AGENTCORE_REGISTRY_ARN`,
   `AGENTCORE_REGISTRY_ID`.
 - **Evaluations (A6)** — a managed `aws_bedrockagentcore_evaluator` (LLM-as-a-judge
   on Nova) plus `aws_bedrockagentcore_online_evaluation_config` that samples live
@@ -1342,15 +1344,16 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
   (`src/evals/`) remains for datasets.
 - **Optimization (A7)** — `core/optimization.py` surfaces availability and the
   config surfaces it may rewrite (`system_prompt`, `tool_descriptions`);
-  route `GET /v1/optimization`. Insights/Recommendations consume Evaluations
-  results and are free during preview.
+  admin-only route `GET /v1/admin/platform/optimization`. Insights/Recommendations
+  consume Evaluations results and are free during preview.
 - **Browser (A8)** — `aws_bedrockagentcore_browser` backs a new **`browser` MCP
   server** (`backend/services/mcp/browser/`, `POST /mcp/browser`, agent `builtin`
   server `browser`). Tools: `open-browser-session` / `close-browser-session`.
   `core/browser.py` starts/stops sessions and enforces a **domain allowlist**
   (`BROWSER_ALLOWED_DOMAINS`, empty denies all); the `browser` tool is also
-  covered by AgentCore Policy. Routes `GET /v1/browser`, `POST /v1/browser/check`,
-  `POST|DELETE /v1/browser/session`. Env: `BROWSER_ID`, `BROWSER_REGION`,
+  covered by AgentCore Policy. User routes `GET /v1/browser`, `POST
+  /v1/browser/check`, `POST|DELETE /v1/browser/session`; admin mirror under
+  `/v1/admin/platform/browser`. Env: `BROWSER_ID`, `BROWSER_REGION`,
   `BROWSER_ALLOWED_DOMAINS`, `BROWSER_MCP_FUNCTION`.
 
 ### AgentCore Identity (managed OAuth)
@@ -1365,9 +1368,11 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
 - `core/identity.py` resolves a provider key to its ARN and calls
   `GetResourceOauth2Token` for a user; the runtime and `user-api` carry the
   `bedrock-agentcore:GetResourceOauth2Token` grant.
-- Routes (in `user-api`): `GET /v1/identity` (which providers are wired),
+- Routes: user view in `user-api` — `GET /v1/identity` (which providers are wired),
   `POST /v1/identity/token` (fetch a user's token by provider — never returns the
   raw secret to the client), and the public `GET /v1/identity/callback` return URL.
+  Admin view in `admin-console` — `GET /v1/admin/platform/identity`, `POST
+  /v1/admin/platform/identity/token`.
   Env: `AGENT_WORKLOAD_IDENTITY_ARN`, `AGENT_TOKEN_VAULT_ID`,
   `AGENT_IDENTITY_PROVIDERS`, `AGENT_IDENTITY_RETURN_URL`.
 - The Vault (KMS-encrypted user secrets) remains for user-supplied API keys;
@@ -1416,12 +1421,23 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
 
 ### Bedrock Guardrails
 
-- A guardrail is created in Amazon Bedrock and referenced by **id only** — the
-  version is always Bedrock's working `DRAFT` and is never user-configurable. The
-  agent runtime applies it on every model call via Strands' `guardrail_*` kwargs
+- **Users create their own guardrails.** The Guardrails page (in the **Build**
+  sidebar section) calls Bedrock's control plane and stores one item per
+  guardrail (`USER#<userId>` / `GUARDRAIL#<name>`; `data/repositories/guardrails.py`).
+  The app-side `name` is a lowercase-hyphen slug (the item key, ≤48 chars, ≤20 per
+  user); Bedrock's raw id lives in `guardrailId`. The UI policy (content filters,
+  denied topics, word filters, sensitive information, contextual grounding) is
+  kept in the item's `config` so the editor can reload it;
+  `core/guardrails.policy_config_kwargs` maps it to the Bedrock request and
+  `default_policy_config()` is the standard starting set.
+- A guardrail is referenced by **Bedrock id only** — the version is always
+  Bedrock's working `DRAFT` and is never user-configurable. The agent runtime
+  applies it on every model call via Strands' `guardrail_*` kwargs
   (`agentflow/models.py`); `core/guardrails.py` exposes `enabled()`,
-  `guardrail_config()`, `config_for(id, version)` and
-  `apply(text, source=…, guardrail_identifier=…, guardrail_version=…)`.
+  `guardrail_config()`, `config_for(id, version)`,
+  `apply(text, source=…, guardrail_identifier=…)`, plus the management calls
+  (`create_managed_guardrail` / `get_managed_guardrail` /
+  `update_managed_guardrail` / `delete_managed_guardrail`).
 - **Resolution** (`agentflow/guardrails.py:resolve_guardrail`, one small
   `GetItem` on the settings item): the agent/workflow's own
   `config.guardrail = {enabled, id}` wins (an explicit id, or `enabled:false` to
@@ -1431,21 +1447,26 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
   on the user's own Vault provider key has no Bedrock guardrail (third-party
   endpoint).
 - **Per agent / per workflow.** `config.guardrail` is part of the canonical agent
-  config and the workflow config; the agent builder (agent card → Model group)
-  and the workflow inspector (host card) expose a toggle + optional guardrail id,
-  defaulting to the workspace guardrail. The runtime resolves it for the
-  single-agent model (`agentflow/run.py`), the workflow host and every member
-  (`workflow/build.py`).
+  config and the workflow config; the agent builder (agent card → Guardrail
+  group) and the workflow inspector (host card) expose a toggle + a **dropdown of
+  the user's guardrails** (plus "Workspace default"), defaulting to the workspace
+  guardrail. The runtime resolves it for the single-agent model
+  (`agentflow/run.py`), the workflow host and every member (`workflow/build.py`).
+  The agent runtime role carries `bedrock:ApplyGuardrail` on
+  `guardrail/*`, and `user-api` carries the guardrail management actions
+  (`enable_guardrail_management` on the Lambda module).
 - Env: `GUARDRAIL_ID` (empty disables), `GUARDRAIL_VERSION` (default `DRAFT`).
-- Routes (in `user-api`, registered in API Gateway + Floci): `GET
-  /v1/guardrails` (status — saved default, else env), `PUT /v1/guardrails/config`
-  (record the workspace default id on the settings item), `POST
-  /v1/guardrails/test` (`ApplyGuardrail` on a text; uses the supplied id, else
-  the saved default, else env).
+- Routes (in `user-api`, registered in API Gateway + Floci): `GET /v1/guardrails`
+  (the user's guardrails + the effective default), `POST /v1/guardrails` (create),
+  `GET/PUT/DELETE /v1/guardrails/{name}` (detail/update/delete),
+  `PUT /v1/guardrails/config` (record the workspace default id on the settings
+  item), `POST /v1/guardrails/test` (`ApplyGuardrail` on a text; uses the
+  supplied id, else the saved default, else env). Deleting a guardrail clears it
+  from the workspace default when it pointed there.
 - Frontend: the **Guardrails page** (`frontend/src/pages/GuardrailsPage.tsx`,
-  route `/guardrails`, sidebar `manage`) shows the active workspace guardrail,
-  saves the id, and runs a text through it (or the id typed in) to show whether
-  it intervenes.
+  route `/guardrails`, sidebar `build`) lists the user's guardrails, creates and
+  edits them (`components/guardrails/GuardrailEditorDialog.tsx` — the full policy
+  editor), sets the workspace default, tests a guardrail, and deletes it.
 ### Remote MCP servers & connections
 
 - `mcp-connections` (`backend/services/mcp/mcp-connections/`) is the **OAuth broker
@@ -1522,17 +1543,20 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
   against the token's real roles:
   - `require_user` (user view): `user-api` and the `knowledge-mcp` **HTTP** path.
     An admin who chose the user view is allowed.
-  - `require_admin` (admin view): `mcp-tester`.
+  - `require_admin` (admin view): `admin-console`.
   - No header → falls back to `admin` if the token has the admin role, else
     `user`.
 - Admin code is kept separate: frontend UI under `frontend/src/admin/`, backend
-  Lambda under `backend/services/admin/mcp-tester/`.
-- **`mcp-tester`** (`GET /v1/admin/mcp/tools`, `POST /v1/admin/mcp/call`) is the
+  Lambda under `backend/services/admin/admin-console/`.
+- **`admin-console`** (`GET /v1/admin/mcp/tools`, `POST /v1/admin/mcp/call`) is the
   MCP *client*: it reads the admin claim + `sub`, resolves the caller's internal
   `userId`, builds MCP JSON-RPC, and invokes every MCP server in `MCP_FUNCTIONS`
   over their direct-invoke transports, merging their tool lists and routing each
   call to the owning server. It also serves the admin **AI-credit** routes
-  (`GET /v1/admin/users`, `POST /v1/admin/users/{userId}/{credits|reset}`) — see
+  (`GET /v1/admin/users`, `POST /v1/admin/users/{userId}/{credits|reset}`), the
+  support/security inboxes and the admin **Platform status** routes
+  (`/v1/admin/platform/*`: Identity, Registry, Browser, Optimization, Bedrock
+  levers) — see
   the budget section. The admin SPA pages are `AdminIntegrationsPage`
   (`/admin/mcp-tools`) and `AdminUsersPage` (`/admin/users`, sidebar "AI Credits").
 
@@ -1661,9 +1685,13 @@ make floci-down       # stop and remove (named volumes are kept)
 - After changing Lambda code: `make floci-build` then `make floci-up`
   (provisioning is re-run on every boot), or `make floci-reload`.
 - Local OAuth for remote MCP servers: providers reject plaintext-HTTP redirect
-  URIs unless loopback, and Floci only serves the API on its own host. Run
-  `make floci-oauth-proxy` (a stdlib loopback forwarder) and set
+  URIs unless loopback, and Floci only serves the API on its own host. The
+  `oauth-proxy` compose service (a stdlib loopback forwarder) runs with the
+  Floci stack — started by `make floci`/`floci-up`, left running by
+  `floci-reload` — so just set
   `MCP_OAUTH_REDIRECT_URI=http://127.0.0.1:8765/v1/mcp/oauth/callback`.
+  `make floci-oauth-proxy` (re)starts it and `make floci-oauth-proxy-logs`
+  follows its logs if needed.
 
 ### Migrations
 

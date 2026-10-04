@@ -24,7 +24,7 @@ RERANKER_IMAGE ?= ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
 RERANKER_PORT ?= 8080
 
 .PHONY: help ui architecture agent test test-unit floci floci-env floci-artifacts floci-build floci-up floci-wait \
-	floci-embed floci-rerank floci-reload floci-down floci-logs floci-oauth-proxy
+	floci-embed floci-rerank floci-reload floci-down floci-logs floci-oauth-proxy floci-oauth-proxy-logs
 
 help:
 	@echo "get1agent local dev (Floci + DynamoDB Local)"
@@ -44,6 +44,7 @@ help:
 	@echo "    make floci-up       Start the stack and provision resources"
 	@echo "    make floci-logs     Follow the Floci logs"
 	@echo "    make floci-down     Stop and remove the stack"
+	@echo "    (the loopback OAuth proxy runs with the stack automatically)"
 	@echo ""
 	@echo "  API base URL: $(FLOCI_API_URL)"
 
@@ -89,7 +90,7 @@ floci-build:
 floci-build-parallel: \
 	floci-build-user-api \
 	floci-build-knowledge-mcp \
-	floci-build-mcp-tester \
+	floci-build-admin-console \
 	floci-build-code-interpreter \
 	floci-build-http-fetch \
 	floci-build-custom-tools \
@@ -110,8 +111,8 @@ floci-build-user-api:
 floci-build-knowledge-mcp:
 	$(MAKE) -C backend/services/mcp/knowledge-mcp package
 
-floci-build-mcp-tester:
-	$(MAKE) -C backend/services/admin/mcp-tester package
+floci-build-admin-console:
+	$(MAKE) -C backend/services/admin/admin-console package
 
 floci-build-code-interpreter:
 	$(MAKE) -C backend/services/mcp/code-interpreter package
@@ -174,7 +175,7 @@ floci-artifacts:
 	@missing=0; \
 	for f in backend/services/apis/user-api/dist/function.zip \
 		backend/services/mcp/knowledge-mcp/dist/function.zip \
-		backend/services/admin/mcp-tester/dist/function.zip \
+		backend/services/admin/admin-console/dist/function.zip \
 		backend/services/mcp/code-interpreter/dist/function.zip \
 		backend/services/mcp/http-fetch/dist/function.zip \
 		backend/services/mcp/custom-tools/dist/function.zip \
@@ -225,7 +226,20 @@ floci-reload: floci-env
 		echo "✓ Agent unchanged, restarting only..."; \
 		$(COMPOSE) up -d agent; \
 	fi
-	# Check if any Lambda ZIP files were rebuilt (newer than timestamp)
+	# Keep the loopback OAuth proxy up across reloads. Idempotent: compose
+	# leaves an already-running container alone, so this is a no-op unless the
+	# stack was started without it.
+	@$(COMPOSE) up -d oauth-proxy >/dev/null
+	# The `up` above may have (re)created the floci container — its environment
+	# includes the exported AWS credentials, which change between runs, so Compose
+	# recreates it and Floci's own ready hook re-provisions every Lambda. Wait for
+	# that hook to finish before the manual provision below: two concurrent
+	# UpdateFunctionCode passes race Floci's code extraction and crash the emulator.
+	@$(MAKE) floci-wait
+	# Re-provision when a Lambda ZIP was rebuilt **or** when the provisioning
+	# script itself changed (e.g. a route was added): the init hook only runs on
+	# container (re)creation, so an infra-only edit would otherwise never reach
+	# the emulator and the new route would 404.
 	@lambda_updated=0; \
 	for dir in $$(find backend/services -maxdepth 3 -name Makefile -exec dirname {} \; | sort); do \
 		zip_file="$$dir/dist/function.zip"; \
@@ -234,11 +248,14 @@ floci-reload: floci-env
 			break; \
 		fi; \
 	done; \
-	if [ $$lambda_updated -eq 1 ]; then \
-		echo "🔄 Some Lambdas were rebuilt, running provision script..."; \
+	provision_script=infra/local/floci/init/ready.d/10-provision.py; \
+	infra_updated=0; \
+	if [ "$$provision_script" -nt ".floci-last-rebuild-timestamp" ]; then infra_updated=1; fi; \
+	if [ $$lambda_updated -eq 1 ] || [ $$infra_updated -eq 1 ]; then \
+		echo "🔄 Lambdas rebuilt: $$lambda_updated, provisioning changed: $$infra_updated — running provision script..."; \
 		$(COMPOSE) exec -T floci python3 /etc/floci/init/ready.d/10-provision.py; \
 	else \
-		echo "✓ No Lambdas rebuilt, skipping provision script"; \
+		echo "✓ No Lambdas rebuilt and provisioning unchanged, skipping provision script"; \
 	fi
 
 # Pull the local embedding model (only needed for EMBED_MODE=local).
@@ -273,11 +290,19 @@ floci-down: floci-env
 floci-logs: floci-env
 	$(COMPOSE) logs -f floci
 
-# Loopback OAuth callback forwarder: providers reject plaintext HTTP redirects
-# unless they are loopback, and Floci only serves the API on its own host. Run
-# this and set MCP_OAUTH_REDIRECT_URI=http://127.0.0.1:8765/v1/mcp/oauth/callback.
-floci-oauth-proxy:
-	python3 infra/local/floci/oauth-loopback.py --port $${OAUTH_PROXY_PORT:-8765}
+# Loopback OAuth callback forwarder (the `oauth-proxy` compose service). Providers
+# reject plaintext HTTP redirects unless they are loopback, and Floci only serves
+# the API on its own host; this forwards the callback to Floci. It runs with the
+# stack and survives `floci-reload`, so there is nothing to start by hand — this
+# target just (re)starts it and is safe to run repeatedly. `MCP_OAUTH_REDIRECT_URI`
+# must point at it (set in .env):
+#   MCP_OAUTH_REDIRECT_URI=http://127.0.0.1:8765/v1/mcp/oauth/callback
+floci-oauth-proxy: floci-env
+	$(COMPOSE) up -d oauth-proxy
+	@echo "oauth-proxy: http://127.0.0.1:$${OAUTH_PROXY_PORT:-8765}/v1/mcp/oauth/callback"
+
+floci-oauth-proxy-logs: floci-env
+	$(COMPOSE) logs -f oauth-proxy
 
 # One command: build (if needed), start, provision, print the API URL.
 floci: floci-env

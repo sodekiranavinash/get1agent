@@ -859,15 +859,15 @@ export const DOCS: DocGroup[] = [
         blocks: [
           {
             kind: 'paragraph',
-            text: 'Guardrails are created in Amazon Bedrock and referenced here by id (the version is Bedrock’s working DRAFT, managed for you). A guardrail is set on the workspace as the default, and each agent or workflow can name its own id or opt out entirely. When a guardrail applies, every model call is screened: harmful content, denied topics and sensitive information are filtered before the model sees the prompt or the answer reaches the user.',
+            text: 'Create and manage your own Amazon Bedrock Guardrails from the Guardrails page, then attach one to any agent or workflow. A guardrail bundles content filters, denied topics, word filters, sensitive-information (PII) handling and contextual-grounding checks. A guardrail is set on the workspace as the default, and each agent or workflow can pick its own or opt out entirely. When a guardrail applies, every model call is screened: harmful content, denied topics and sensitive information are filtered before the model sees the prompt or the answer reaches the user.',
           },
           {
             kind: 'bullets',
             items: [
-              'Workspace guardrail: your default. Every agent and workflow run is screened with it unless that agent or workflow names its own. Leave the id empty to disable screening.',
-              'Per agent / workflow: in the builder, toggle the guardrail and optionally give a different guardrail id. Turning it off opts that agent or workflow out.',
-              'Test: run a piece of text through the guardrail and see whether it intervenes, with the filtered output.',
-              'Input vs output: choose which side of the conversation to screen — the prompt or the model answer.',
+              'Create: name the guardrail and choose its policy — content filters per category and strength, denied topics, profanity and custom words, PII entities and custom regex patterns, and grounding/relevance thresholds.',
+              'Workspace guardrail: your default. Every agent and workflow run is screened with it unless that agent or workflow picks its own. Choose “None” to disable workspace screening.',
+              'Per agent / workflow: in the builder, toggle the guardrail and pick one of your guardrails from the dropdown. Turning it off opts that agent or workflow out.',
+              'Test: run a piece of text through a guardrail and see whether it intervenes, with the filtered output.',
             ],
           },
           {
@@ -880,29 +880,29 @@ export const DOCS: DocGroup[] = [
       },
       {
         id: 'platform',
-        title: 'Platform',
+        title: 'Platform status',
         summary:
-          'The AWS-native services behind your workspace: managed identity, catalog, browser, optimisation and the Bedrock levers.',
+          'The AWS-native services behind the workspace: managed identity and browser for everyone; the governed catalog, optimisation and Bedrock levers for admins.',
         blocks: [
           {
             kind: 'paragraph',
-            text: 'This page shows the managed AWS services your workspace runs on. Everything here is provided by Amazon Bedrock and AgentCore; nothing is third-party.',
+            text: 'Platform status reports the managed AWS services the workspace runs on. Everything here is provided by Amazon Bedrock and AgentCore; nothing is third-party. End users see the services they can use; the admin console sees the full operator view.',
           },
           {
             kind: 'bullets',
             items: [
-              'Identity: AgentCore Identity holds third-party OAuth tokens in a managed vault, so they are never stored in this app. The card shows how many providers are wired.',
-              'Registry: a governed catalog of agents, MCP servers, tools and skills. Publish a record from here and search the catalog semantically.',
-              'Browser: open a managed browser session for an allowlisted domain and watch it through the live-view link. Only approved domains can be opened.',
-              'Optimization: AgentCore Optimization analyses evaluated traces and recommends better prompts and tool descriptions.',
-              'Bedrock levers: the cost and latency settings currently applied — prompt caching, service tier, prompt routing and per-workload inference profiles.',
+              'Identity: AgentCore Identity holds third-party OAuth tokens in a managed vault, so they are never stored in this app. Each wired provider can request an on-behalf-of token. Available to users and admins.',
+              'Browser: open a managed browser session for an allowlisted domain and watch it through the live-view link. Only approved domains can be opened. Available to users and admins.',
+              'Registry (admin): a governed catalog of agents, MCP servers, tools and skills. Publish a record from here and search the catalog semantically.',
+              'Optimization (admin): AgentCore Optimization analyses evaluated traces and recommends better prompts and tool descriptions.',
+              'Bedrock levers (admin): the cost and latency settings currently applied — prompt caching, service tier, prompt routing and per-workload inference profiles.',
             ],
           },
           {
             kind: 'callout',
             tone: 'info',
             title: 'Only allowlisted domains',
-            text: 'The browser tool refuses any domain that is not on the workspace allowlist. An empty allowlist denies everything — that is intentional.',
+            text: 'The browser fails closed: it refuses any domain that is not on the allowlist, and an empty allowlist denies everything. An administrator enables it by setting browser_allowed_domains (BROWSER_ALLOWED_DOMAINS).',
           },
         ],
       },

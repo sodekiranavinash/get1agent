@@ -191,7 +191,7 @@ DynamoDB, S3, S3 Vectors, and Amazon Bedrock over public HTTPS.
 |---|---|
 | **Client** | React 19 + TypeScript + Tailwind SPA (Vite), served from S3 through Cloudflare |
 | **API edge** | API Gateway HTTP API, Auth0 JWT authorizer, throttling |
-| **Lambda services** | `user-api`, `knowledge-mcp`, `mcp-connections`, `mcp-tester`, `code-interpreter`, `http-fetch`, `custom-tools`, `browser`, `scheduler`, and the 6 ingestion workers |
+| **Lambda services** | `user-api`, `knowledge-mcp`, `mcp-connections`, `admin-console`, `code-interpreter`, `http-fetch`, `custom-tools`, `browser`, `scheduler`, and the 6 ingestion workers |
 | **Agent runtime** | Bedrock AgentCore container (ARM64): `agentflow` (single agent) and `workflow` (multi-agent) built on Strands |
 | **Ingestion** | EventBridge + SQS (+ DLQ) + Step Functions driving extract → embed → index |
 | **Data plane** | DynamoDB (single table, adjacency list, 3 sparse GSIs), S3, S3 Vectors |
@@ -350,7 +350,7 @@ The full rationale lives in [`docs/design/design-b-dynamodb-s3.md`](docs/design/
 │   │   │   └── user-api/             # control plane: KBs, agents, workflows, skills, storage,
 │   │   │                             #   vault, conversations, evals, support
 │   │   ├── admin/
-│   │   │   └── mcp-tester/           # admin API (MCP client, credits, support, security)
+│   │   │   └── admin-console/        # admin API (MCP client, credits, support, security, platform)
 │   │   ├── mcp/
 │   │   │   ├── knowledge-mcp/        # hybrid search MCP server
 │   │   │   ├── code-interpreter/     # AgentCore sandbox MCP server
@@ -424,7 +424,7 @@ State persists across restarts, so uploaded documents and the retrieval index su
 | `make floci-reload` | Rebuild Lambdas **and** the agent, then re-upload code |
 | `make test` | Backend integration tests (moto, no Docker) |
 | `make test-unit` | Per-Lambda unit tests |
-| `make floci-oauth-proxy` | Loopback forwarder for remote-MCP OAuth |
+| `make floci-oauth-proxy` | (Re)start the background loopback forwarder for remote-MCP OAuth |
 
 Local ingestion runs **offline by default** — `EMBED_MODE=local` embeds with the Ollama container so
 Floci needs no cloud call. Set `EMBED_MODE=bedrock` to use the real Amazon Titan models instead. The

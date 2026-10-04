@@ -147,6 +147,41 @@ resource "aws_iam_role_policy" "bedrock_rerank" {
   })
 }
 
+resource "aws_iam_role_policy" "bedrock_guardrail_management" {
+  count = var.enable_guardrail_management ? 1 : 0
+  name  = "${var.name}-bedrock-guardrail-management"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        # Control plane: create/update/delete/list guardrails. Create and List
+        # are region-scoped and cannot be narrowed to a guardrail ARN.
+        Sid    = "ManageGuardrails"
+        Effect = "Allow"
+        Action = [
+          "bedrock:CreateGuardrail",
+          "bedrock:GetGuardrail",
+          "bedrock:ListGuardrails",
+          "bedrock:UpdateGuardrail",
+          "bedrock:DeleteGuardrail",
+          "bedrock:CreateGuardrailVersion",
+          "bedrock:ListGuardrailVersions",
+        ]
+        Resource = "*"
+      },
+      {
+        # Standalone checks (the workspace's guardrail tester).
+        Sid      = "ApplyGuardrails"
+        Effect   = "Allow"
+        Action   = ["bedrock:ApplyGuardrail"]
+        Resource = "arn:aws:bedrock:*:*:guardrail/*"
+      },
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "lambda_invoke" {
   count = length(var.lambda_invoke_arns) > 0 ? 1 : 0
   name  = "${var.name}-lambda-invoke"
@@ -193,6 +228,25 @@ resource "aws_iam_role_policy" "bedrock_agentcore" {
           "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
         ]
         Resource = "*"
+      },
+      {
+        # AgentCore Browser sessions + Registry records (Platform status). These
+        # only apply where the matching resource ARNs are supplied, so listing
+        # them for every module that passes bedrock_agentcore_arns is safe.
+        Sid    = "BrowserAndRegistry"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:StartBrowserSession",
+          "bedrock-agentcore:StopBrowserSession",
+          "bedrock-agentcore:GetBrowserSession",
+          "bedrock-agentcore:ListBrowserSessions",
+          "bedrock-agentcore:ConnectBrowserAutomation",
+          "bedrock-agentcore:CreateRegistryRecord",
+          "bedrock-agentcore:GetRegistryRecord",
+          "bedrock-agentcore:ListRegistryRecords",
+          "bedrock-agentcore:SearchRegistryRecords",
+        ]
+        Resource = var.bedrock_agentcore_arns
       },
     ]
   })

@@ -7,7 +7,7 @@ import json
 from support import load_module
 
 user_api = load_module("backend/services/apis/user-api/handler.py", "user_api_support_handler")
-admin_api = load_module("backend/services/admin/mcp-tester/handler.py", "mcp_tester_support_handler")
+admin_api = load_module("backend/services/admin/admin-console/handler.py", "admin_console_support_handler")
 
 USER_SUB = "auth0|support-user"
 ADMIN_SUB = "auth0|support-admin"

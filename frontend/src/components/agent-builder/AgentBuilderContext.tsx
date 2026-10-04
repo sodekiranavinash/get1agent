@@ -3,6 +3,7 @@ import type { AgentNodeData, ConnectionOption } from '../../lib/agents'
 import type { KnowledgeBase } from '../../lib/knowledgeBases'
 import type { AgentSkill } from '../../lib/agentSkills'
 import type { CustomServer } from '../../lib/customTools'
+import type { NodeStatusMap } from '../../lib/builderFlow'
 
 /**
  * Shared builder state for the custom node cards. Node components read the
@@ -19,6 +20,8 @@ export type AgentBuilderContextValue = {
   onSkillsChange: (skillIds: string[]) => void
   /** Open the detail dialog for a card (clicking the card opens it). */
   openNodeEditor: (id: string) => void
+  /** Live run status per card, so executing cards highlight on the canvas. */
+  nodeStatus: NodeStatusMap
 }
 
 const AgentBuilderContext = createContext<AgentBuilderContextValue | null>(null)

@@ -4,6 +4,7 @@ import {
   Download,
   FileStack,
   Globe,
+  Layers,
   LifeBuoy,
   Plug,
   Server,
@@ -33,6 +34,9 @@ export const ADMIN_SUPPORT_PATH = '/admin/support'
 
 /** Admin route for the security-report inbox. */
 export const ADMIN_SECURITY_PATH = '/admin/security-reports'
+
+/** Admin route for platform status (AgentCore services + Bedrock levers). */
+export const ADMIN_PLATFORM_PATH = '/admin/platform'
 
 /** `get1agent-prod-knowledge-mcp` -> `knowledge-mcp` (stable route segment). */
 export function mcpServerSlug(server: string): string {
@@ -136,6 +140,13 @@ export function buildAdminLinks(tools?: McpTool[]): SidebarLink[] {
       label: 'Security',
       tooltip: 'Security reports',
       icon: ShieldAlert,
+      section: 'admin',
+    },
+    {
+      to: ADMIN_PLATFORM_PATH,
+      label: 'Platform',
+      tooltip: 'Platform status',
+      icon: Layers,
       section: 'admin',
     },
   ]

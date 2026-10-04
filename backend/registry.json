@@ -30,10 +30,10 @@
       "layers": []
     },
     {
-      "name": "mcp-tester",
+      "name": "admin-console",
       "group": "admin-apis",
-      "dir": "backend/services/admin/mcp-tester",
-      "function_name": "get1agent-prod-mcp-tester",
+      "dir": "backend/services/admin/admin-console",
+      "function_name": "get1agent-prod-admin-console",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
       "packages": [

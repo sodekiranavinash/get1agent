@@ -31,7 +31,7 @@ wheels = [
 ]
 
 [[package]]
-name = "get1agent-mcp-tester"
+name = "get1agent-admin-console"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

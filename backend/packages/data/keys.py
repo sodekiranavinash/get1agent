@@ -19,6 +19,7 @@ Layout (see docs/design/design-b-dynamodb-s3.md Part 6):
     Workflow      USER#<userId>    WORKFLOW#<lowerName>
     Storage file  USER#<userId>    STORAGE#<fileId>
     Vault secret  USER#<userId>    VAULT#<name>        (encrypted; name is the reference slug)
+    Guardrail     USER#<userId>    GUARDRAIL#<name>    (Bedrock guardrail the user created)
     Session       USER#<userId>    CONV#<conversationId>
     Conversation  USER#<userId>    CHAT#<globalId>       (chat/builder conversations)
     Playground    USER#<userId>    PGSESSION#<sessionId> (custom-tool build chats)
@@ -79,6 +80,7 @@ AGENT_PREFIX = "AGENT#"
 WORKFLOW_PREFIX = "WORKFLOW#"
 STORAGE_PREFIX = "STORAGE#"
 VAULT_PREFIX = "VAULT#"
+GUARDRAIL_PREFIX = "GUARDRAIL#"
 CONV_PREFIX = "CONV#"
 CHAT_PREFIX = "CHAT#"
 PG_SESSION_PREFIX = "PGSESSION#"
@@ -199,6 +201,11 @@ def storage_sk(file_id: str) -> str:
 def vault_sk(name: str) -> str:
     """A user's encrypted secret; ``name`` is the ``{{vault:name}}`` slug."""
     return f"{VAULT_PREFIX}{name.lower()}"
+
+
+def guardrail_sk(name: str) -> str:
+    """A user's Bedrock guardrail; ``name`` is the app-side slug."""
+    return f"{GUARDRAIL_PREFIX}{name.lower()}"
 
 
 def conv_sk(conversation_id: str) -> str:

@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { Agent } from '../../lib/agents'
+import type { NodeStatusMap } from '../../lib/builderFlow'
 import type { WorkflowMode, WorkflowNodeData } from '../../lib/workflows'
 
 /**
@@ -16,6 +17,8 @@ export type WorkflowBuilderContextValue = {
   updateNodeData: (id: string, patch: Partial<WorkflowNodeData>) => void
   removeNode: (id: string) => void
   openNode: (id: string) => void
+  /** Live run status per card, so executing cards highlight on the canvas. */
+  nodeStatus: NodeStatusMap
 }
 
 const WorkflowBuilderContext = createContext<WorkflowBuilderContextValue | null>(null)

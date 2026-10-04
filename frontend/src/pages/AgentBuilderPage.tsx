@@ -47,9 +47,17 @@ import { AgentEventsPanel } from '../components/agent-builder/AgentEventsPanel'
 import { useApiClient, ApiError } from '../lib/api'
 import { useDemoMode } from '../auth/useDemoMode'
 import { IDS } from '../lib/demo/shared'
-import { streamDemoAgentRun } from '../lib/demo/demoRun'
+import { streamDemoAgentAnswer, streamDemoAgentRun } from '../lib/demo/demoRun'
 import { agentRunConfigured, runAgentStream } from '../lib/agentRun'
-import { createRunFields, markRunError, reduceRunEvent, type RunFields } from '../lib/runState'
+import { computeAgentFlow, edgeVisual } from '../lib/builderFlow'
+import {
+  beginResume,
+  createRunFields,
+  markRunError,
+  markRunStopped,
+  reduceRunEvent,
+  type RunFields,
+} from '../lib/runState'
 import type { Conversation } from '../lib/conversations'
 import { useKnowledgeBases } from '../lib/knowledgeBases'
 import { useAgentSkills } from '../lib/agentSkills'
@@ -264,6 +272,35 @@ export function AgentBuilderPage() {
     [name, description, config],
   )
 
+  // Live run flow: which card is executing and which connections are carrying
+  // data. Derived from the same run state the right panel renders.
+  const scheduleEnabled = useMemo(
+    () =>
+      nodes.some(
+        (node) => node.type === 'schedule' && (node.data.schedule?.enabled ?? false),
+      ),
+    [nodes],
+  )
+
+  const flow = useMemo(
+    () =>
+      computeAgentFlow({
+        nodes: nodes.map((node) => ({ id: node.id, type: node.type ?? '' })),
+        edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
+        run,
+        scheduleEnabled,
+      }),
+    [nodes, edges, run, scheduleEnabled],
+  )
+
+  const displayEdges = useMemo(
+    () =>
+      flow
+        ? edges.map((edge) => ({ ...edge, ...edgeVisual(flow.edgeStatus[edge.id] ?? 'idle') }))
+        : edges,
+    [edges, flow],
+  )
+
   const nameError = validateAgentName(name)
   const descriptionError = validateAgentDescription(description)
 
@@ -329,6 +366,22 @@ export function AgentBuilderPage() {
           if (demo) {
             clearAgentDraft(agentId)
             clearAgentDraft(null)
+            // Seed the milestone/error log with realistic entries so the
+            // History and Errors tabs are populated in the read-only demo.
+            pushEvents([
+              {
+                kind: 'success',
+                title: 'Resources verified',
+                scope: 'milestone',
+                detail: 'Knowledge bases, MCP servers and skills resolved',
+              },
+              {
+                kind: 'warning',
+                title: 'A knowledge document needs attention',
+                scope: 'milestone',
+                detail: 'release-notes-2026-q2.pdf failed to extract — re-upload it',
+              },
+            ])
           }
           const draft = demo ? null : loadAgentDraft(agentId)
           if (draft) {
@@ -534,6 +587,7 @@ export function AgentBuilderPage() {
       updateNodeData,
       onSkillsChange: handleSkillsChange,
       openNodeEditor,
+      nodeStatus: flow?.nodeStatus ?? {},
     }),
     [
       knowledgeBases,
@@ -543,6 +597,7 @@ export function AgentBuilderPage() {
       updateNodeData,
       handleSkillsChange,
       openNodeEditor,
+      flow,
     ],
   )
 
@@ -607,8 +662,36 @@ export function AgentBuilderPage() {
     runAbortRef.current?.abort()
     runAbortRef.current = null
     setRunning(false)
+    setRun((current) => (current ? markRunStopped(current) : current))
     pushEvents([{ kind: 'warning', title: 'Run stopped', scope: 'milestone' }])
   }, [pushEvents])
+
+  // One event handler shared by a fresh run and a resumed (answered) run.
+  const handleRunEvent = useCallback(
+    (event: Parameters<typeof reduceRunEvent>[1]) => {
+      setRun((current) => (current ? reduceRunEvent(current, event) : current))
+      switch (event.type) {
+        case 'tool.start':
+          pushEvents([
+            {
+              kind: 'tool',
+              title: `Tool · ${event.name}`,
+              detail: event.input ? JSON.stringify(event.input) : undefined,
+            },
+          ])
+          break
+        case 'run.completed':
+          pushEvents([{ kind: 'success', title: 'Run completed', scope: 'milestone' }])
+          break
+        case 'run.error':
+          pushEvents([{ kind: 'error', title: 'Run failed', detail: event.message }])
+          break
+        default:
+          break
+      }
+    },
+    [pushEvents],
+  )
 
   const handleRun = useCallback(
     async (question: string) => {
@@ -654,28 +737,7 @@ export function AgentBuilderPage() {
       }
     }
 
-    const onEvent = (event: Parameters<typeof reduceRunEvent>[1]) => {
-      setRun((current) => (current ? reduceRunEvent(current, event) : current))
-      switch (event.type) {
-        case 'tool.start':
-          pushEvents([
-            {
-              kind: 'tool',
-              title: `Tool · ${event.name}`,
-              detail: event.input ? JSON.stringify(event.input) : undefined,
-            },
-          ])
-          break
-        case 'run.completed':
-          pushEvents([{ kind: 'success', title: 'Run completed', scope: 'milestone' }])
-          break
-        case 'run.error':
-          pushEvents([{ kind: 'error', title: 'Run failed', detail: event.message }])
-          break
-        default:
-          break
-      }
-    }
+    const onEvent = handleRunEvent
 
     try {
       if (demo) {
@@ -704,7 +766,45 @@ export function AgentBuilderPage() {
       setHistoryKey((key) => key + 1)
     }
     },
-    [agentId, api, demo, dirty, getAccessTokenSilently, handleSave, name, pushEvents],
+    [
+      agentId,
+      api,
+      demo,
+      dirty,
+      getAccessTokenSilently,
+      handleRunEvent,
+      handleSave,
+      name,
+      pushEvents,
+    ],
+  )
+
+  // Answer a paused human-in-the-loop question and resume the same run. The
+  // demo replays its scripted continuation; real builder runs never pause (they
+  // run without human-in-the-loop), so this is a demo-first affordance.
+  const handleAnswer = useCallback(
+    async (_questionId: string, answer: string) => {
+      if (!demo || running) return
+      const controller = new AbortController()
+      runAbortRef.current = controller
+      setRunning(true)
+      setRun((current) => (current ? beginResume(current, answer) : current))
+      pushEvents([{ kind: 'info', title: 'Question answered', detail: answer }])
+      try {
+        await streamDemoAgentAnswer(name, handleRunEvent, controller.signal)
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          const message = errorMessage(error)
+          toast.error(message)
+          setRun((current) => (current ? markRunError(current, message) : current))
+        }
+      } finally {
+        if (runAbortRef.current === controller) runAbortRef.current = null
+        setRunning(false)
+        setHistoryKey((key) => key + 1)
+      }
+    },
+    [demo, handleRunEvent, name, pushEvents, running],
   )
 
   const handlePublish = useCallback(async () => {
@@ -888,7 +988,7 @@ export function AgentBuilderPage() {
         <div className="absolute inset-0">
           <ReactFlow
             nodes={nodes}
-            edges={edges}
+            edges={displayEdges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
@@ -924,6 +1024,7 @@ export function AgentBuilderPage() {
           running={running}
           onRun={handleRun}
           onStop={handleStopRun}
+          onAnswer={handleAnswer}
           configured={configured}
           agentId={agentId ?? ''}
           agentName={name}

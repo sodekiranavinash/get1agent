@@ -264,3 +264,92 @@ def test_admin_view_is_rejected(fake_storage, monkeypatch):
     patch_lambda_storage(monkeypatch, handler, fake_storage)
     response = handler.lambda_handler(_event("GET", "/v1/user/settings", view="admin"), None)
     assert response["statusCode"] == 403
+
+
+def test_guardrails_crud(fake_storage, monkeypatch):
+    patch_lambda_storage(monkeypatch, handler, fake_storage)
+    from core import guardrails as core_guardrails
+
+    summary = {
+        "guardrailId": "g-abc123",
+        "guardrailArn": "arn:aws:bedrock:ap-south-1:000000000000:guardrail/g-abc123",
+        "version": "DRAFT",
+        "status": "READY",
+    }
+    monkeypatch.setattr(
+        core_guardrails, "create_managed_guardrail", lambda **kwargs: dict(summary)
+    )
+    monkeypatch.setattr(
+        core_guardrails, "update_managed_guardrail", lambda *args, **kwargs: dict(summary)
+    )
+    monkeypatch.setattr(
+        core_guardrails, "delete_managed_guardrail", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        core_guardrails,
+        "apply",
+        lambda text, **kwargs: {
+            "action": "NONE",
+            "intervened": False,
+            "output": text,
+            "assessments": [],
+        },
+    )
+
+    listing = _call("GET", "/v1/guardrails")
+    assert listing["guardrails"] == [] and listing["limit"] == 20
+
+    payload = {
+        "name": "Strict-Support",
+        "description": "Baseline safety.",
+        "config": {
+            "contentFilters": [
+                {"type": "HATE", "inputStrength": "HIGH", "outputStrength": "HIGH"}
+            ]
+        },
+        "blockedInput": "",
+        "blockedOutput": "",
+    }
+    created = _call("POST", "/v1/guardrails", payload, expect=201)
+    assert created["name"] == "strict-support"
+    assert created["guardrailId"] == "g-abc123"
+    assert created["status"] == "READY"
+
+    # A second guardrail with the same name is rejected.
+    duplicate = handler.lambda_handler(_event("POST", "/v1/guardrails", payload), None)
+    assert duplicate["statusCode"] == 409
+
+    # An invalid name is rejected before any Bedrock call.
+    bad = handler.lambda_handler(
+        _event("POST", "/v1/guardrails", {**payload, "name": "Bad Name"}), None
+    )
+    assert bad["statusCode"] == 400
+
+    detail = _call("GET", "/v1/guardrails/strict-support")
+    assert detail["name"] == "strict-support"
+
+    updated = _call(
+        "PUT",
+        "/v1/guardrails/strict-support",
+        {**payload, "description": "Updated.", "config": {"contentFilters": []}},
+    )
+    assert updated["description"] == "Updated."
+    # An empty policy falls back to the standard content filters.
+    assert updated["config"]["contentFilters"]
+
+    result = _call(
+        "POST",
+        "/v1/guardrails/test",
+        {"text": "hello", "source": "INPUT", "guardrailId": "g-abc123"},
+    )
+    assert result["result"]["intervened"] is False
+
+    # Make it the workspace default, then check it is reported back.
+    _call("PUT", "/v1/guardrails/config", {"guardrailId": "g-abc123"})
+    after_default = _call("GET", "/v1/guardrails")
+    assert after_default["defaultGuardrailId"] == "g-abc123"
+    assert after_default["configured"] is True
+
+    _call("DELETE", "/v1/guardrails/strict-support")
+    final = _call("GET", "/v1/guardrails")
+    assert final["guardrails"] == []

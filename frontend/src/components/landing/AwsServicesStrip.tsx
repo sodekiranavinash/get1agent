@@ -1,3 +1,6 @@
+import { useNavigate } from 'react-router-dom'
+import { Boxes } from 'lucide-react'
+import { Button } from '../ui/Button'
 import { Reveal } from './Reveal'
 import { AWS_SERVICES, AWS_SERVICES_MORE } from './awsServices'
 import { AWS_SERVICE_HEADLINE, AWS_NATIVE_LINE } from '../architecture/stack'
@@ -10,6 +13,8 @@ import { AWS_SERVICE_HEADLINE, AWS_NATIVE_LINE } from '../architecture/stack'
  * © Amazon Web Services, Inc., used under the AWS icon terms.
  */
 export function AwsServicesStrip() {
+  const navigate = useNavigate()
+
   return (
     <section className="relative py-20">
       <div className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 lg:px-8">
@@ -29,6 +34,22 @@ export function AwsServicesStrip() {
             non-AWS dependencies.
           </p>
         </div>
+
+        {/* Mid-section CTA into the full architecture surface. */}
+        <Reveal delay={80}>
+          <div className="mt-8 flex justify-center">
+            <span className="glow-border">
+              <Button
+                size="lg"
+                onClick={() => navigate('/architecture')}
+                icon={<Boxes className="size-4" strokeWidth={1.75} />}
+                className="glow-inner"
+              >
+                Explore architecture
+              </Button>
+            </span>
+          </div>
+        </Reveal>
 
         {/* Icon grid — staggered reveal + hover lift. */}
         <div className="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

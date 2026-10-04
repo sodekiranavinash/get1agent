@@ -1,18 +1,26 @@
-"""Admin MCP tester Lambda.
+"""Admin console Lambda.
 
-A thin, admin-only proxy that lets the admin UI exercise the tools exposed by
-the get1agent MCP servers (``knowledge-mcp``, ``web-search``,
-``code-interpreter``). It is the MCP *client*: it reads the caller's admin claim
-and ``sub`` from the JWT, builds standard MCP JSON-RPC messages, and invokes the
-servers either via direct-invoke Lambda transport or through the AgentCore
-Gateway, based on the MCP_TRANSPORT environment variable.
+The admin-only API behind the admin console. It has three jobs:
+
+* **MCP client** — exercise the tools exposed by the get1agent MCP servers
+  (``knowledge-mcp``, ``web-search``, ``code-interpreter``): read the caller's
+  admin claim and ``sub`` from the JWT, build standard MCP JSON-RPC messages and
+  invoke the servers over direct-invoke Lambda transport or the AgentCore
+  Gateway (``MCP_TRANSPORT``).
+* **Admin operations** — AI-credit management and the support/security inboxes.
+* **Platform status** — AgentCore Identity, Registry, Browser and Optimization
+  plus the Bedrock cost/latency levers, under ``/v1/admin/platform/*``.
 
 Routes (JWT-protected, admin-only):
 
 * ``GET  /v1/admin/mcp/tools`` — MCP ``tools/list`` across every server.
 * ``POST /v1/admin/mcp/call``  — MCP ``tools/call`` routed to the owning server.
+* ``GET/POST /v1/admin/users…`` — AI credits.
+* ``GET/POST /v1/admin/support…`` / ``/v1/admin/security-reports…`` — inboxes.
+* ``GET/POST /v1/admin/platform/{identity,registry,browser}`` +
+  ``GET /v1/admin/platform/{optimization,bedrock-features}`` — platform status.
 
-Every response includes the exact JSON-RPC ``request``/``response`` and the
+MCP responses include the exact JSON-RPC ``request``/``response`` and the
 duration so the admin can inspect exactly what happened.
 """
 
@@ -83,7 +91,7 @@ def _resolve_user(claims: dict[str, Any], sub: str) -> dict[str, Any]:
             profile = get_or_create_user(claims)
         return profile
     except Exception as exc:  # noqa: BLE001
-        print(f"mcp-tester user lookup failed: {exc!r}", file=sys.stderr)
+        print(f"admin-console user lookup failed: {exc!r}", file=sys.stderr)
         return {}
 
 
@@ -627,6 +635,212 @@ def _route_admin_inbox(
     return None
 
 
+# --- admin: platform status ---------------------------------------------------
+#
+# AgentCore Identity/Registry/Browser/Optimization and the Bedrock levers. These
+# are the admin-console counterparts of the user-facing Platform status routes
+# (which keep only Identity + Browser); the admin console gets the full set.
+# All handlers call the same shared ``core.*`` helpers the user-api uses.
+
+
+def _platform_identity(
+    claims: dict[str, Any], method: str, rest: list[str], body: dict[str, Any]
+) -> dict[str, Any]:
+    from core import identity
+
+    if not rest:
+        if method == "GET":
+            get_or_create_user(claims)
+            return _json(200, identity.describe())
+        return _json(405, {"error": f"Method not allowed: {method}"})
+    if rest[0] == "token" and method == "POST":
+        profile = get_or_create_user(claims)
+        provider = str(body.get("provider") or "").strip()
+        if not provider:
+            return _json(400, {"error": "provider is required"})
+        scopes = body.get("scopes")
+        scope_list = (
+            [str(value) for value in scopes if str(value).strip()]
+            if isinstance(scopes, list)
+            else []
+        )
+        if not identity.enabled():
+            return _json(400, {"error": "AgentCore Identity is not configured"})
+        try:
+            token = identity.get_token(
+                profile["userId"], provider, scopes=scope_list or None
+            )
+        except RuntimeError as exc:
+            return _json(400, {"error": str(exc)[:300]})
+        except Exception as exc:  # noqa: BLE001 - provider/authorization failure
+            return _json(502, {"error": f"Identity token request failed: {exc}"})
+        # Never echo a live token; only its shape/lifetime.
+        return _json(
+            200,
+            {
+                "provider": provider,
+                "obtained": bool(token.get("accessToken")),
+                "expiresAt": token.get("expiresAt"),
+                "scopes": token.get("scopes") or scope_list,
+            },
+        )
+    return _json(404, {"error": "Not found"})
+
+
+def _platform_registry(
+    claims: dict[str, Any],
+    event: dict[str, Any],
+    method: str,
+    rest: list[str],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    from core import registry as agent_registry
+
+    profile = get_or_create_user(claims)
+
+    if not rest:
+        if method == "GET":
+            return _json(200, agent_registry.describe())
+        return _json(405, {"error": f"Method not allowed: {method}"})
+
+    if rest[0] == "publish" and method == "POST":
+        if not agent_registry.enabled():
+            return _json(400, {"error": "AgentCore Registry is not configured"})
+        name = str(body.get("name") or "").strip()
+        if not name:
+            return _json(400, {"error": "name is required"})
+        record_type = str(body.get("recordType") or "AGENT").strip().upper()
+        if record_type not in ("AGENT", "MCP_SERVER", "TOOL", "SKILL"):
+            return _json(
+                400, {"error": "recordType must be AGENT, MCP_SERVER, TOOL or SKILL"}
+            )
+        metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+        try:
+            created = agent_registry.publish(
+                name=name,
+                description=str(body.get("description") or ""),
+                record_type=record_type,
+                metadata={"owner": profile["userId"], **metadata},
+            )
+        except Exception as exc:  # noqa: BLE001 - surface a clean error
+            return _json(502, {"error": f"Publish failed: {exc}"})
+        return _json(201, {"ok": True, "record": created})
+
+    if rest[0] == "search" and method == "GET":
+        if not agent_registry.enabled():
+            return _json(200, {"configured": False, "records": []})
+        records = agent_registry.search(_query(event).get("q") or "", limit=20)
+        return _json(200, {"configured": True, "records": records})
+
+    return _json(404, {"error": "Not found"})
+
+
+def _platform_browser(
+    claims: dict[str, Any], method: str, rest: list[str], body: dict[str, Any]
+) -> dict[str, Any]:
+    from core import browser
+
+    get_or_create_user(claims)
+
+    if not rest:
+        if method == "GET":
+            return _json(200, browser.describe())
+        return _json(405, {"error": f"Method not allowed: {method}"})
+
+    if rest[0] == "check" and method == "POST":
+        url = str(body.get("url") or "").strip()
+        if not url:
+            return _json(400, {"error": "url is required"})
+        allowed, reason = browser.allowed(url)
+        return _json(200, {"allowed": allowed, "reason": reason})
+
+    # Order matters: the exact `session/close` route must be matched before the
+    # generic `session` route, which would otherwise swallow it.
+    if rest == ["session", "close"] and method == "POST":
+        session_id = str(body.get("sessionId") or "").strip()
+        if not session_id:
+            return _json(400, {"error": "sessionId is required"})
+        return _json(200, {"stopped": browser.stop_session(session_id)})
+
+    if rest == ["session"] and method == "POST":
+        url = str(body.get("url") or "").strip()
+        if not url:
+            return _json(400, {"error": "url is required"})
+        if not browser.enabled():
+            return _json(400, {"error": "AgentCore Browser is not configured"})
+        allowed, reason = browser.allowed(url)
+        if not allowed:
+            return _json(403, {"error": reason})
+        try:
+            return _json(200, browser.start_session())
+        except Exception as exc:  # noqa: BLE001
+            return _json(502, {"error": f"Browser session failed: {exc}"})
+
+    if rest == ["session"] and method == "DELETE":
+        session_id = str(body.get("sessionId") or "").strip()
+        if not session_id:
+            return _json(400, {"error": "sessionId is required"})
+        return _json(200, {"stopped": browser.stop_session(session_id)})
+
+    return _json(404, {"error": "Not found"})
+
+
+def _platform_optimization(claims: dict[str, Any], method: str) -> dict[str, Any]:
+    from core import optimization
+
+    get_or_create_user(claims)
+    if method != "GET":
+        return _json(405, {"error": f"Method not allowed: {method}"})
+    return _json(200, optimization.describe())
+
+
+def _platform_bedrock_features(claims: dict[str, Any], method: str) -> dict[str, Any]:
+    from core import bedrock_features
+
+    get_or_create_user(claims)
+    if method != "GET":
+        return _json(405, {"error": f"Method not allowed: {method}"})
+    return _json(200, bedrock_features.describe())
+
+
+def _route_platform(
+    event: dict[str, Any],
+    claims: dict[str, Any],
+    method: str,
+    segments: list[str],
+    body: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Dispatch the admin platform-status routes; ``None`` when unmatched."""
+    if segments[:3] != ["v1", "admin", "platform"]:
+        return None
+    rest = segments[3:]
+    if not rest:
+        return _json(
+            200,
+            {
+                "services": [
+                    "identity",
+                    "registry",
+                    "browser",
+                    "optimization",
+                    "bedrock-features",
+                ]
+            },
+        )
+    service, sub = rest[0], rest[1:]
+    if service == "identity":
+        return _platform_identity(claims, method, sub, body)
+    if service == "registry":
+        return _platform_registry(claims, event, method, sub, body)
+    if service == "browser":
+        return _platform_browser(claims, method, sub, body)
+    if service == "optimization":
+        return _platform_optimization(claims, method)
+    if service == "bedrock-features":
+        return _platform_bedrock_features(claims, method)
+    return _json(404, {"error": "Not found"})
+
+
 def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
     event = event if isinstance(event, dict) else {}
 
@@ -653,6 +867,8 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
         inbox = _route_admin_inbox(event, method, segments, admin_name)
         if inbox is not None:
             return inbox
+        if segments[:3] == ["v1", "admin", "platform"]:
+            return _route_platform(event, claims, method, segments, _body(event))
         if method == "GET" and path.endswith("/admin/users"):
             return _handle_list_users(event)
         if method == "POST" and path.endswith("/credits"):
@@ -662,7 +878,7 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
         if method == "POST" and path.endswith("/unlimited"):
             return _handle_set_unlimited(event, _body(event))
     except Exception as exc:  # noqa: BLE001
-        print(f"mcp-tester admin error: {exc!r}", file=sys.stderr)
+        print(f"admin-console admin error: {exc!r}", file=sys.stderr)
         traceback.print_exc()
         return _json(500, {"error": "Internal server error"})
 
@@ -689,6 +905,6 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
     except (McpClientError, ValueError) as exc:
         return _json(502, {"error": str(exc)})
     except Exception as exc:  # noqa: BLE001
-        print(f"mcp-tester error: {exc!r}", file=sys.stderr)
+        print(f"admin-console error: {exc!r}", file=sys.stderr)
         traceback.print_exc()
         return _json(500, {"error": "Internal server error"})

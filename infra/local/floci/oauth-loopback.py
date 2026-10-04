@@ -6,13 +6,19 @@ host, and OAuth providers (Linear, GitHub, …) reject plaintext-HTTP redirect U
 unless they are a loopback address (``localhost`` / ``127.0.0.1``).
 
 This tiny stdlib proxy listens on a loopback port, rewrites the ``Host`` header
-to the Floci execute-api host, and forwards to Floci on ``127.0.0.1:4566``. Point
-the provider's redirect URI at the loopback URL and set:
+to the Floci execute-api host, and forwards to Floci. Point the provider's
+redirect URI at the loopback URL and set:
 
     MCP_OAUTH_REDIRECT_URI=http://127.0.0.1:8765/v1/mcp/oauth/callback
 
 The provider's redirect then lands here, is proxied to Floci, and Floci's own
 302 back to the SPA (FRONTEND_URL/mcp/callback) is passed straight through.
+
+It runs as the ``oauth-proxy`` service in the Floci stack (started by
+``make floci`` / ``make floci-up``, and left untouched by
+``make floci-reload``), so remote-MCP OAuth works without a second terminal.
+The upstream, bind address and port are configurable so the same script also
+works inside the compose network (``--bind 0.0.0.0 --floci-host floci``).
 
 Usage:
     python3 infra/local/floci/oauth-loopback.py [--port 8765]
@@ -22,12 +28,15 @@ from __future__ import annotations
 
 import argparse
 import http.client
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-FLOCI_HOST = "127.0.0.1"
-FLOCI_PORT = 4566
-FLOCI_HTTP_HOST = "get1agent.execute-api.localhost.floci.io"
+FLOCI_HOST = os.environ.get("FLOCI_HOST", "127.0.0.1")
+FLOCI_PORT = int(os.environ.get("FLOCI_PORT", "4566"))
+FLOCI_HTTP_HOST = os.environ.get(
+    "FLOCI_HTTP_HOST", "get1agent.execute-api.localhost.floci.io"
+)
 HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
               "te", "trailers", "transfer-encoding", "upgrade"}
 
@@ -77,12 +86,23 @@ class Forwarder(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    global FLOCI_HOST, FLOCI_PORT, FLOCI_HTTP_HOST
+
     parser = argparse.ArgumentParser(description="Loopback OAuth callback forwarder for Floci")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("OAUTH_PROXY_PORT", "8765")))
+    parser.add_argument("--bind", default=os.environ.get("OAUTH_PROXY_BIND", "127.0.0.1"))
+    parser.add_argument("--floci-host", default=FLOCI_HOST)
+    parser.add_argument("--floci-port", type=int, default=FLOCI_PORT)
+    parser.add_argument("--host-header", default=FLOCI_HTTP_HOST)
     args = parser.parse_args()
 
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Forwarder)
-    print(f"[oauth-loopback] http://127.0.0.1:{args.port} -> http://{FLOCI_HTTP_HOST}:{FLOCI_PORT}")
+    FLOCI_HOST, FLOCI_PORT, FLOCI_HTTP_HOST = args.floci_host, args.floci_port, args.host_header
+
+    server = ThreadingHTTPServer((args.bind, args.port), Forwarder)
+    print(
+        f"[oauth-loopback] {args.bind}:{args.port} -> "
+        f"http://{FLOCI_HOST}:{FLOCI_PORT} (Host: {FLOCI_HTTP_HOST})"
+    )
     print(f"[oauth-loopback] set MCP_OAUTH_REDIRECT_URI=http://127.0.0.1:{args.port}/v1/mcp/oauth/callback")
     try:
         server.serve_forever()

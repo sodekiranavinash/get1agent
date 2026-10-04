@@ -11,7 +11,7 @@ package:
 	if [ -f pyproject.toml ]; then \
 		uv sync --project . --no-dev --quiet; \
 		cp -R .venv/lib/python3.14/site-packages/* dist/ 2>/dev/null || true; \
-		cp -R .venv/lib/python3.14/site-packages/*/* dist/ 2>/dev/null || true; \
+		rm -rf dist/bin dist/*.pth dist/INSTALLER dist/_virtualenv.py; \
 	fi
 	find dist -type d -name __pycache__ -prune -exec rm -rf {} +
 	find dist -type d -name "*.dist-info" -prune -exec rm -rf {} +

@@ -1,9 +1,10 @@
 import { type ApiClient } from './api'
 
 /**
- * Platform capabilities surfaced from the AWS-native backend:
- * AgentCore Identity, Registry, Browser, Optimization, and the Bedrock
- * cost/latency levers. Each maps to a `/v1/...` route in user-api.
+ * User-facing Platform status: the AgentCore services an end user can actually
+ * use — Identity (their own provider tokens) and Browser (their sessions).
+ * The admin-only services (Registry, Optimization and the Bedrock levers) live
+ * on the admin console; see `admin/lib/adminPlatform.ts`.
  */
 
 // --- AgentCore Identity -------------------------------------------------------
@@ -32,45 +33,6 @@ export function requestIdentityToken(
   payload: { provider: string; scopes?: string[] },
 ): Promise<IdentityTokenResult> {
   return api.post<IdentityTokenResult>('/v1/identity/token', payload)
-}
-
-// --- AgentCore Registry -------------------------------------------------------
-
-export type RegistryStatus = {
-  configured: boolean
-  registryId: string | null
-  registryArn: string | null
-  region: string
-}
-
-export type RegistryRecord = {
-  id?: string
-  name?: string
-  description?: string
-  recordType?: string
-}
-
-export function fetchRegistry(api: ApiClient): Promise<RegistryStatus> {
-  return api.get<RegistryStatus>('/v1/registry')
-}
-
-export function publishRegistryRecord(
-  api: ApiClient,
-  payload: {
-    name: string
-    description: string
-    recordType: 'AGENT' | 'MCP_SERVER' | 'TOOL' | 'SKILL'
-    metadata?: Record<string, unknown>
-  },
-): Promise<{ ok: boolean; record: unknown }> {
-  return api.post('/v1/registry/publish', payload)
-}
-
-export function searchRegistry(
-  api: ApiClient,
-  q: string,
-): Promise<{ configured: boolean; records: RegistryRecord[] }> {
-  return api.get(`/v1/registry/search?q=${encodeURIComponent(q)}`)
 }
 
 // --- AgentCore Browser --------------------------------------------------------
@@ -113,31 +75,4 @@ export function closeBrowserSession(
   sessionId: string,
 ): Promise<{ stopped: boolean }> {
   return api.post('/v1/browser/session/close', { sessionId })
-}
-
-// --- AgentCore Optimization ---------------------------------------------------
-
-export type OptimizationStatus = {
-  configured: boolean
-  insightsArn: string | null
-  region: string
-  targets: string[]
-  note: string
-}
-
-export function fetchOptimization(api: ApiClient): Promise<OptimizationStatus> {
-  return api.get<OptimizationStatus>('/v1/optimization')
-}
-
-// --- Bedrock cost/latency levers ---------------------------------------------
-
-export type BedrockFeatures = {
-  promptCache: { strategy: string; ttl: string | null } | null
-  serviceTier: string | null
-  promptRouterArn: string | null
-  applicationProfiles: Record<string, string | null>
-}
-
-export function fetchBedrockFeatures(api: ApiClient): Promise<BedrockFeatures> {
-  return api.get<BedrockFeatures>('/v1/bedrock-features')
 }

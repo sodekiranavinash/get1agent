@@ -127,7 +127,7 @@ zip.
 | `custom-tools` | `POST /mcp/custom-tools` | `core`, `data` | user-built Python MCP tools |
 | `mcp-connections` | `/v1/mcp/*`, `POST /mcp/remote` | `core`, `data` | Remote MCP OAuth broker + aggregator |
 | `browser` | `POST /mcp/browser` | `core`, `data` | AgentCore Browser sessions (domain allowlist) |
-| `mcp-tester` | `/v1/admin/*` | `core`, `data` | Admin: MCP client, AI credits, support, security |
+| `admin-console` | `/v1/admin/*` | `core`, `data` | Admin: MCP client, AI credits, support, security, platform status |
 | `scheduler` | EventBridge `rate(1 minute)` | `core`, `data` | Runs due agent/workflow schedules |
 | `ingestion-dispatcher` | SQS | `core`, `data`, `ingestion` | Parse `raw/` events, start Step Functions |
 | `ingestion-extract` | Step Functions | `core`, `data`, `ingestion` | extract + chunk (heavy deps bundled: `pymupdf`, `python-docx`, `openpyxl`) |
@@ -160,7 +160,7 @@ GitHub Actions: **Backend** workflow — pick one or more **groups** to deploy h
 |----------|---------|
 | `user-apis` | `user-api` |
 | `knowledge-mcp` | `knowledge-mcp` |
-| `admin-apis` | `mcp-tester` |
+| `admin-apis` | `admin-console` |
 | `mcp-tools` | `code-interpreter`, `http-fetch`, `custom-tools`, `mcp-connections`, `browser` |
 | `scheduler` | `scheduler` |
 | `ingestion-apis` | `ingestion-dispatcher`, `ingestion-extract`, `ingestion-embed`, `ingestion-index`, `ingestion-mark-failed`, `ingestion-watchdog` |

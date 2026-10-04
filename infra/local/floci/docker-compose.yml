@@ -194,6 +194,39 @@ services:
     networks:
       - get1agent
 
+  # Loopback OAuth callback forwarder for remote MCP servers (GitHub, Linear…).
+  # Providers only allow plaintext-HTTP redirects to a loopback address, but
+  # Floci serves the API on its own host. This publishes 127.0.0.1:8765 and
+  # rewrites the Host header to the Floci execute-api host, so the provider's
+  # redirect lands on Floci and is 302'd back to the SPA. It is part of the
+  # stack: started by `make floci`/`floci-up` and left running by `floci-reload`
+  # (so there is no separate terminal to keep open).
+  oauth-proxy:
+    image: ${OAUTH_PROXY_IMAGE:-python:3.12-alpine}
+    command:
+      [
+        "python3",
+        "/opt/oauth-loopback.py",
+        "--bind",
+        "0.0.0.0",
+        "--port",
+        "8765",
+        "--floci-host",
+        "floci",
+        "--floci-port",
+        "4566",
+      ]
+    depends_on:
+      - floci
+    ports:
+      # Loopback only: the provider redirects the browser to 127.0.0.1.
+      - "127.0.0.1:${OAUTH_PROXY_PORT:-8765}:8765"
+    volumes:
+      - ./oauth-loopback.py:/opt/oauth-loopback.py:ro
+    networks:
+      - get1agent
+    restart: unless-stopped
+
   # Real text embeddings for local ingestion (1024-dim, matches the schema).
   # Opt-in profile: only started for EMBED_MODE=local.
   ollama:

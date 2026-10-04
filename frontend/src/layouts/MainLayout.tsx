@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { ErrorBoundary } from '../components/ErrorBoundary'
+import { AppFooter } from '../components/layout/AppFooter'
 import { ConsentGate } from '../components/privacy/ConsentGate'
 import { TopBar } from '../components/layout/TopBar'
 import { SidebarProvider, useSidebar } from '../components/layout/SidebarProvider'
@@ -46,14 +47,16 @@ function MainLayoutContent({ children }: { children?: ReactNode }) {
       >
         <TopBar />
         {/* No route transition animation: the next page mounts immediately
-            instead of waiting for the previous one to fade out. The bottom
-            padding reserves space for the fixed footer. */}
-        <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-y-auto pb-14">
+            instead of waiting for the previous one to fade out. The footer is
+            the last child of this scroll column, so it sits at the end of the
+            page content and is never covered by the sidebar. */}
+        <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-y-auto">
           <RouteGate>
             <ErrorBoundary key={routeKey(location.pathname)}>
               {children ?? <Outlet />}
             </ErrorBoundary>
           </RouteGate>
+          <AppFooter />
         </div>
       </main>
       <ConsentGate />

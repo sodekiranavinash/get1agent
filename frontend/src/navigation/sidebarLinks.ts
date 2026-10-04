@@ -90,6 +90,12 @@ export const sidebarLinks: SidebarLink[] = [
     section: 'build',
   },
   {
+    to: '/guardrails',
+    label: 'Guardrails',
+    icon: ShieldCheck,
+    section: 'build',
+  },
+  {
     to: '/traces',
     label: 'Traces',
     tooltip: 'Traces',
@@ -134,8 +140,7 @@ export const sidebarLinks: SidebarLink[] = [
   },
 
   { to: '/vault', label: 'Vault', icon: KeyRound, section: 'manage' },
-  { to: '/guardrails', label: 'Guardrails', icon: ShieldCheck, section: 'manage' },
-  { to: '/platform', label: 'Platform', icon: Layers, section: 'manage' },
+  { to: '/platform', label: 'Platform status', icon: Layers, section: 'manage' },
   { to: '/usage', label: 'Usage', icon: CreditCard, section: 'manage' },
 
   {

@@ -23,6 +23,7 @@ import { AuroraBackground } from '../components/landing/AuroraBackground'
 import { AgentRunPreview } from '../components/landing/AgentRunPreview'
 import { AbTestPreview, EvalPreview } from '../components/landing/EvalPreview'
 import { LandingNav } from '../components/landing/LandingNav'
+import { AppFooter } from '../components/layout/AppFooter'
 import { McpBuilderPreview } from '../components/landing/McpBuilderPreview'
 import { Reveal } from '../components/landing/Reveal'
 import { AwsServicesStrip } from '../components/landing/AwsServicesStrip'
@@ -43,60 +44,96 @@ const FEATURES = [
   {
     icon: BookOpen,
     title: 'Knowledge bases',
-    detail:
-      'Upload PDFs, docs and Markdown. Hybrid semantic + keyword search over your own private index, with reranking for precision.',
+    detail: 'Hybrid semantic + keyword search over your own private index.',
+    tags: ['RAG', 'Hybrid', 'Rerank'],
+    tone: {
+      text: 'text-info',
+      soft: 'bg-info-soft',
+      dot: 'bg-info',
+      border: 'hover:border-info/40',
+    },
   },
   {
     icon: Wrench,
     title: 'Tools & skills',
-    detail:
-      'Built-in web search, a code sandbox, HTTP fetch and a managed browser, any remote MCP server, plus reusable skills loaded on demand.',
+    detail: 'Web, code, HTTP, browser, MCP servers and skills on demand.',
+    tags: ['Web', 'Code', 'MCP'],
+    tone: {
+      text: 'text-teal',
+      soft: 'bg-teal-soft',
+      dot: 'bg-teal',
+      border: 'hover:border-teal/40',
+    },
   },
   {
     icon: Workflow,
     title: 'Multi-agent workflows',
-    detail:
-      'Compose agents into a deterministic graph or a dynamic swarm, coordinated by a host agent and streamed live.',
+    detail: 'A deterministic graph or a dynamic swarm, streamed live.',
+    tags: ['Graph', 'Swarm'],
+    tone: {
+      text: 'text-violet',
+      soft: 'bg-violet-soft',
+      dot: 'bg-violet',
+      border: 'hover:border-violet/40',
+    },
   },
   {
     icon: CalendarClock,
     title: 'Runs unattended',
-    detail:
-      'Timezone-aware schedules, durable memory that carries facts across sessions, and an encrypted vault for your keys and tokens.',
+    detail: 'Timezone-aware schedules, durable memory and an encrypted vault.',
+    tags: ['Cron', 'Memory', 'Vault'],
+    tone: {
+      text: 'text-warning',
+      soft: 'bg-warning-soft',
+      dot: 'bg-warning',
+      border: 'hover:border-warning/40',
+    },
   },
   {
     icon: Gauge,
     title: 'Evaluations & guardrails',
-    detail:
-      'Score answers against a golden dataset with explainable judges, sample live traffic, and screen every model call before it reaches the user.',
+    detail: 'Explainable judges, live sampling and screening on every call.',
+    tags: ['Ragas', 'Judges', 'Guardrails'],
+    tone: {
+      text: 'text-rose',
+      soft: 'bg-rose-soft',
+      dot: 'bg-rose',
+      border: 'hover:border-rose/40',
+    },
   },
   {
     icon: KeyRound,
     title: 'Bring your own model',
-    detail:
-      'Use the curated platform models, or your own provider key — billed to your account.',
+    detail: 'Curated platform models, or your own provider key.',
+    tags: ['Bedrock', 'Your key'],
+    tone: {
+      text: 'text-accent',
+      soft: 'bg-accent-soft',
+      dot: 'bg-accent',
+      border: 'hover:border-accent/40',
+    },
   },
 ]
 
 const WORKFLOW_POINTS = [
   'Graph mode wires agents with fixed edges — independent branches run in parallel.',
-  'Swarm mode lets the host hand off to any teammate with a single tool call.',
-  'A host agent owns the prompt and model, and always writes the final answer.',
-  'Per-node overrides let one workflow tweak a model, prompt, tools or skills.',
+  'Swarm mode keeps the host as the entry point and hands off to any teammate on demand.',
+  'The host owns the prompt and model, and always writes the final answer.',
+  'Per-node overrides tune a model, prompt, tools or skills for one workflow only.',
 ]
 
 const TRACE_POINTS = [
-  'Every run traced end to end via OpenTelemetry into CloudWatch and X-Ray.',
-  'Publish a signed, expiring public trace link to share a run with anyone.',
-  'Replay any generation in the Prompt Playground and rate runs as feedback scores.',
-  'Send a trace to a dataset or a review queue in a single click.',
+  'Every run is instrumented with OpenTelemetry and exported to CloudWatch and X-Ray — no separate APM to run.',
+  'Traces carry the agent, model, tokens, cost, per-step latency and tool I/O, so a regression is one click from its cause.',
+  'Share any run as a signed, expiring public trace link — no account needed to read it.',
+  'Replay a generation in the Prompt Playground, attach it to a dataset or review queue, and rate it as feedback.',
 ]
 
 const MCP_POINTS = [
-  'Describe the tool in plain English — the generator writes the Python.',
+  'Describe the tool in plain English — the generator writes the Python; there is no boilerplate to wire up.',
   'Input and output schemas are produced and validated automatically.',
-  'Test it inline in a sandbox; iterate with the chat until it works.',
-  'Use it in any agent, namespaced as server/tool — with policy enforced on every call.',
+  'Test it inline in a sandbox, iterate in the chat, then ship it to any agent.',
+  'Every call runs under AgentCore Policy and is namespaced as server/tool.',
 ]
 
 const DEMO_POINTS = [
@@ -104,21 +141,6 @@ const DEMO_POINTS = [
   'Inspect public traces with tokens and cost',
   'Build an MCP server from a prompt',
   'Score a RAG dataset and compare models',
-]
-
-const STEPS = [
-  {
-    title: 'Add your knowledge',
-    detail: 'Drop in documents — they are chunked, embedded and indexed automatically.',
-  },
-  {
-    title: 'Compose your agent',
-    detail: 'Pick a model, then attach knowledge, tools and skills as nodes on the canvas.',
-  },
-  {
-    title: 'Run and improve',
-    detail: 'Chat or schedule runs, inspect traces, and measure quality before you ship.',
-  },
 ]
 
 const CAPABILITIES = [
@@ -209,12 +231,12 @@ export function LoginPage() {
     )
 
   return (
-    <div className="relative min-h-screen bg-canvas text-foreground">
+    <div className="relative flex min-h-screen flex-col bg-canvas text-foreground">
       <AuroraBackground />
 
       <LandingNav />
 
-      <main className="relative z-10 pt-[4.5rem] pb-20 sm:pt-20">
+      <main className="relative z-10 flex-1 pt-[4.5rem] pb-20 sm:pt-20">
         {/* Hero */}
         <Section className="flex min-h-[calc(100vh-4.5rem)] items-center py-12 sm:min-h-[calc(100vh-5rem)]">
           <div className="grid w-full items-center gap-10 lg:grid-cols-[1.05fr_minmax(400px,0.95fr)] lg:gap-16">
@@ -313,13 +335,15 @@ export function LoginPage() {
             </div>
 
             <div className="flex w-full flex-col items-center">
-              <div className="animate-float mx-auto w-full max-w-md">
-                <AgentRunPreview />
+              <div className="relative mx-auto w-full max-w-md">
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute -inset-6 rounded-[2rem] bg-accent-soft/50 blur-3xl"
+                />
+                <div className="relative">
+                  <AgentRunPreview />
+                </div>
               </div>
-              <p className="mt-4 max-w-sm text-center text-[11.5px] leading-relaxed text-subtle">
-                A live run — planning, tool calls, then a grounded answer with
-                numbered citations.
-              </p>
             </div>
           </div>
         </Section>
@@ -343,8 +367,6 @@ export function LoginPage() {
           </div>
         </div>
 
-        <AwsServicesStrip />
-
         {/* 1 — The whole agent stack */}
         <Section className="py-20">
           <SectionHeading
@@ -352,26 +374,62 @@ export function LoginPage() {
             title="One platform, the whole agent stack."
             description="Knowledge, tools, skills and orchestration — plus scheduling, memory, secrets and files. Every piece an agent needs, serverless and private to your account."
           />
-          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map(({ icon: Icon, title, detail }, index) => (
-              <Reveal key={title} delay={index * 70} className="h-full">
-                <div className="group relative h-full overflow-hidden rounded-2xl border border-border bg-surface/50 p-5 backdrop-blur-sm transition-all duration-300 hover:-translate-y-1 hover:border-accent/40 hover:bg-surface/80">
+          <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {FEATURES.map(
+              ({ icon: Icon, title, detail, tags, tone }, index) => (
+                <Reveal key={title} delay={index * 60} className="h-full">
                   <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute -top-8 -right-8 size-24 rounded-full bg-accent-soft opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-100"
-                  />
-                  <span className="relative flex size-10 items-center justify-center rounded-xl border border-border bg-canvas text-accent transition-transform duration-300 group-hover:scale-110">
-                    <Icon className="size-5" strokeWidth={1.75} />
-                  </span>
-                  <h3 className="relative mt-4 text-[14px] font-semibold text-foreground">
-                    {title}
-                  </h3>
-                  <p className="relative mt-1.5 text-[12.5px] leading-relaxed text-muted">
-                    {detail}
-                  </p>
-                </div>
-              </Reveal>
-            ))}
+                    className={`group relative h-full overflow-hidden rounded-xl border border-border bg-surface/50 p-4 backdrop-blur-sm transition-all duration-300 hover:-translate-y-1 hover:bg-surface/80 hover:shadow-[0_14px_40px_-22px_rgba(0,0,0,0.5)] ${tone.border}`}
+                  >
+                    {/* Tone glow + diagonal sheen sweep on hover. */}
+                    <div
+                      aria-hidden="true"
+                      className={`pointer-events-none absolute -top-10 -right-10 size-24 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-100 ${tone.soft}`}
+                    />
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-foreground/5 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full"
+                    />
+                    {/* Oversized watermark symbol. */}
+                    <Icon
+                      aria-hidden="true"
+                      strokeWidth={1.25}
+                      className={`pointer-events-none absolute -right-4 -bottom-4 size-20 opacity-[0.06] transition-all duration-500 group-hover:scale-110 group-hover:rotate-6 group-hover:opacity-[0.11] ${tone.text}`}
+                    />
+
+                    <div className="relative flex items-start gap-3">
+                      <span
+                        className={`relative flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-canvas transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3 ${tone.text}`}
+                      >
+                        <Icon className="size-4" strokeWidth={1.75} />
+                        <span
+                          className={`absolute -top-0.5 -right-0.5 size-1.5 animate-pulse rounded-full ring-2 ring-canvas ${tone.dot}`}
+                        />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="text-[13px] font-semibold text-foreground">
+                          {title}
+                        </h3>
+                        <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
+                          {detail}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="relative mt-3 flex flex-wrap gap-1">
+                      {tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded border border-border bg-canvas/60 px-1.5 py-0.5 font-mono text-[9.5px] text-subtle"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </Reveal>
+              ),
+            )}
           </div>
         </Section>
 
@@ -393,25 +451,7 @@ export function LoginPage() {
           </div>
         </Section>
 
-        {/* 3 — Observability */}
-        <Section className="py-20">
-          <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
-            <div>
-              <SectionHeading
-                align="left"
-                eyebrow="Observability"
-                title="Every run, fully traced."
-                description="Runs are instrumented and exported to CloudWatch/X-Ray — the same trace powers debugging, sharing and evaluation."
-              />
-              <CheckList items={TRACE_POINTS} />
-            </div>
-            <Reveal>
-              <TracePreview />
-            </Reveal>
-          </div>
-        </Section>
-
-        {/* 4 — MCP Builder */}
+        {/* 3 — MCP Builder */}
         <Section className="py-20">
           <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
             <Reveal className="lg:order-2">
@@ -421,11 +461,29 @@ export function LoginPage() {
               <SectionHeading
                 align="left"
                 eyebrow="MCP Builder"
-                title="Build MCP servers from a sentence."
-                description="Describe the tool you want in natural language and get a working, testable MCP server you can ship."
+                title="Build an MCP server from a sentence."
+                description="Turn a plain-English description into a working, testable MCP tool — generated code, validated schemas and a sandboxed test in one workspace."
               />
               <CheckList items={MCP_POINTS} />
             </div>
+          </div>
+        </Section>
+
+        {/* 4 — Observability */}
+        <Section className="py-20">
+          <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
+            <div>
+              <SectionHeading
+                align="left"
+                eyebrow="Observability"
+                title="See exactly what every run did."
+                description="End-to-end tracing over Amazon Bedrock and AgentCore: every plan, tool call and generation captured as OpenTelemetry spans, then reused for debugging, sharing and evaluation."
+              />
+              <CheckList items={TRACE_POINTS} />
+            </div>
+            <Reveal>
+              <TracePreview />
+            </Reveal>
           </div>
         </Section>
 
@@ -466,39 +524,9 @@ export function LoginPage() {
           </Reveal>
         </Section>
 
-        {/* 6 — How it works */}
-        <Section className="py-20">
-          <SectionHeading
-            eyebrow="How it works"
-            title="From documents to a running agent."
-            description="Three steps from raw files to a measured, shareable agent."
-          />
-          <div className="relative mt-12 grid gap-10 sm:grid-cols-3 sm:gap-8">
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 top-6 hidden h-px bg-border sm:block"
-            >
-              <span className="animate-flow absolute top-[-2.5px] left-0 h-[6px] w-28 rounded-full bg-gradient-to-r from-transparent via-accent to-transparent" />
-            </div>
-            {STEPS.map((step, index) => (
-              <Reveal key={step.title} delay={index * 90} className="relative">
-                <div className="flex flex-col items-center text-center sm:items-start sm:text-left">
-                  <span className="relative z-10 flex size-12 items-center justify-center rounded-full border border-border bg-surface text-[15px] font-semibold text-accent shadow-panel">
-                    {index + 1}
-                  </span>
-                  <h3 className="mt-4 text-[14px] font-semibold text-foreground">
-                    {step.title}
-                  </h3>
-                  <p className="mt-1.5 max-w-xs text-[12.5px] leading-relaxed text-muted">
-                    {step.detail}
-                  </p>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </Section>
+        <AwsServicesStrip />
 
-        {/* 7 — Demo highlight (closing CTA) */}
+        {/* 6 — Demo highlight (closing CTA) */}
         <Section className="pb-8">
           <Reveal>
             <div className="relative overflow-hidden rounded-3xl border border-accent/30 bg-gradient-to-br from-accent-soft via-surface/50 to-violet-soft px-6 py-10 backdrop-blur-xl sm:px-10">
@@ -556,6 +584,7 @@ export function LoginPage() {
           </Reveal>
         </Section>
       </main>
+      <AppFooter />
     </div>
   )
 }

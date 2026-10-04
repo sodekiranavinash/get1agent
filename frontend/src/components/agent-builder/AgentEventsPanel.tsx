@@ -255,6 +255,7 @@ export function AgentEventsPanel({
   running = false,
   onRun,
   onStop,
+  onAnswer,
   configured = true,
   agentId = '',
   agentName = '',
@@ -266,6 +267,8 @@ export function AgentEventsPanel({
   running?: boolean
   onRun?: (question: string) => void
   onStop?: () => void
+  /** Answer a human-in-the-loop question and resume the paused run. */
+  onAnswer?: (questionId: string, answer: string) => void
   configured?: boolean
   agentId?: string
   agentName?: string
@@ -332,6 +335,7 @@ export function AgentEventsPanel({
                   endedAt={run.endedAt}
                   usage={run.usage}
                   answer={run.answer}
+                  onAnswer={onAnswer}
                 />
                 {answer && conversationId ? (
                   <Link

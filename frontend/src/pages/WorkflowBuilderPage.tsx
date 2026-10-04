@@ -54,6 +54,7 @@ import { useDemoMode } from '../auth/useDemoMode'
 import { IDS } from '../lib/demo/shared'
 import { streamDemoWorkflowRun } from '../lib/demo/demoRun'
 import { agentRunConfigured } from '../lib/agentRun'
+import { computeWorkflowFlow, edgeVisual } from '../lib/builderFlow'
 import { runWorkflowStream, type WorkflowRunEvent, type WorkflowRunFields } from '../lib/workflowRun'
 import {
   createWorkflowRunFields,
@@ -310,6 +311,35 @@ export function WorkflowBuilderPage() {
     [name, description, config],
   )
 
+  // Live run flow: which agent card is executing and which connections are
+  // carrying the handoff/dispatch. Derived from the run panel's state.
+  const scheduleEnabled = useMemo(
+    () =>
+      nodes.some(
+        (node) => node.type === 'schedule' && (node.data.schedule?.enabled ?? false),
+      ),
+    [nodes],
+  )
+
+  const flow = useMemo(
+    () =>
+      computeWorkflowFlow({
+        nodes: nodes.map((node) => ({ id: node.id, type: node.type ?? '' })),
+        edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
+        run,
+        scheduleEnabled,
+      }),
+    [nodes, edges, run, scheduleEnabled],
+  )
+
+  const displayEdges = useMemo(
+    () =>
+      flow
+        ? edges.map((edge) => ({ ...edge, ...edgeVisual(flow.edgeStatus[edge.id] ?? 'idle') }))
+        : edges,
+    [edges, flow],
+  )
+
   const nameError = validateWorkflowName(name)
   const descriptionError = validateWorkflowDescription(description)
   const canSave = !nameError && !descriptionError
@@ -538,8 +568,9 @@ export function WorkflowBuilderPage() {
         setSelectedNodeId(id)
         setTab('inspect')
       },
+      nodeStatus: flow?.nodeStatus ?? {},
     }),
-    [agents, mode, order, selectedNodeId, updateNodeData, removeNode],
+    [agents, mode, order, selectedNodeId, updateNodeData, removeNode, flow],
   )
 
   // --- actions ---------------------------------------------------------------
@@ -776,7 +807,7 @@ export function WorkflowBuilderPage() {
           <ReactFlowProvider>
             <WorkflowCanvas
               nodes={nodes}
-              edges={edges}
+              edges={displayEdges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}

@@ -117,7 +117,7 @@ run_env() {
       need_backend=true
     else
       case "$PROD_TARGETS" in
-        *user_api*|*knowledge_mcp*|*ingestion*|*mcp_tester*|*code_interpreter*|*http_fetch*|*custom_tools*|*mcp_connections*|*browser*|*scheduler*)
+        *user_api*|*knowledge_mcp*|*ingestion*|*admin_console*|*code_interpreter*|*http_fetch*|*custom_tools*|*mcp_connections*|*browser*|*scheduler*)
           need_backend=true
           ;;
       esac
@@ -133,7 +133,7 @@ run_env() {
     check_zip "$ROOT/backend/services/ingestion/ingestion-index/dist/function.zip" "ingestion-index" "make -C backend/services/ingestion/ingestion-index package"
     check_zip "$ROOT/backend/services/ingestion/ingestion-mark-failed/dist/function.zip" "ingestion-mark-failed" "make -C backend/services/ingestion/ingestion-mark-failed package"
     check_zip "$ROOT/backend/services/ingestion/ingestion-watchdog/dist/function.zip" "ingestion-watchdog" "make -C backend/services/ingestion/ingestion-watchdog package"
-    check_zip "$ROOT/backend/services/admin/mcp-tester/dist/function.zip" "mcp-tester" "make -C backend/services/admin/mcp-tester package"
+    check_zip "$ROOT/backend/services/admin/admin-console/dist/function.zip" "admin-console" "make -C backend/services/admin/admin-console package"
     check_zip "$ROOT/backend/services/mcp/code-interpreter/dist/function.zip" "code-interpreter" "make -C backend/services/mcp/code-interpreter package"
     check_zip "$ROOT/backend/services/mcp/http-fetch/dist/function.zip" "http-fetch" "make -C backend/services/mcp/http-fetch package"
     check_zip "$ROOT/backend/services/mcp/mcp-connections/dist/function.zip" "mcp-connections" "make -C backend/services/mcp/mcp-connections package"
@@ -146,7 +146,7 @@ run_env() {
     if [[ -z "${TF_VAR_agent_worker_image_uri:-}" ]]; then
       local region="${AWS_REGION:-ap-south-1}" rid img
       rid="$(aws bedrock-agentcore-control list-agent-runtimes --region "$region" \
-        --query "items[?name=='get1agent_prod_agent_worker'].agentRuntimeId | [0]" \
+        --query "agentRuntimes[?agentRuntimeName=='get1agent_prod_agent_worker'].agentRuntimeId | [0]" \
         --output text 2>/dev/null || true)"
       if [[ -n "$rid" && "$rid" != "None" ]]; then
         img="$(aws bedrock-agentcore-control get-agent-runtime --region "$region" \

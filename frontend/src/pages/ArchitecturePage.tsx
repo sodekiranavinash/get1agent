@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { AuroraBackground } from '../components/landing/AuroraBackground'
 import { LandingNav } from '../components/landing/LandingNav'
+import { AppFooter } from '../components/layout/AppFooter'
 import { ReturnLink } from '../components/layout/ReturnLink'
 import { DiagramTab } from '../components/architecture/views/DiagramTab'
 import { PipelinesTab } from '../components/architecture/views/PipelinesTab'
@@ -194,11 +195,11 @@ export function ArchitecturePage() {
   }
 
   return (
-    <div className="relative min-h-screen bg-canvas text-foreground">
+    <div className="relative flex min-h-screen flex-col bg-canvas text-foreground">
       <AuroraBackground />
       <LandingNav wide />
 
-      <main className="relative z-10 pt-[4.5rem] pb-16 sm:pt-20">
+      <main className="relative z-10 flex-1 pt-[4.5rem] pb-16 sm:pt-20">
         <div className="mx-auto w-full max-w-[1800px] px-4 pt-4 pb-2 sm:px-6 lg:px-8">
           <ReturnLink fallbackTo="/" />
         </div>
@@ -209,6 +210,7 @@ export function ArchitecturePage() {
           <TabContent tab={tab} />
         </div>
       </main>
+      <AppFooter />
     </div>
   )
 }

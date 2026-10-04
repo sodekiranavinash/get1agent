@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
       admin_apis:
-        description: Admin APIs (mcp-tester)
+        description: Admin APIs (admin-console)
         type: boolean
         default: false
       mcp_tools:

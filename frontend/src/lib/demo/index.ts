@@ -56,7 +56,8 @@ import {
   demoEvalRunCases,
   demoEvalRuns,
 } from './evals'
-import { demoGuardrailStatus, demoGuardrailTest } from './guardrails'
+import { demoGuardrails, demoGuardrailTest } from './guardrails'
+import { demoBrowser, demoIdentity } from './platform'
 
 const knowledgeBaseList = {
   knowledgeBases: demoKnowledgeBases,
@@ -115,12 +116,19 @@ function match(path: string, params: URLSearchParams): unknown {
   if (path === '/v1/notifications') return demoNotificationsPayload()
 
   // --- guardrails -------------------------------------------------------
-  if (path === '/v1/guardrails') return demoGuardrailStatus
+  if (path === '/v1/guardrails') return demoGuardrails
   if (path === '/v1/guardrails/test') {
     // Parse body from query params for demo
     const text = params.get('text') || 'Hello world'
     const source = (params.get('source') || 'OUTPUT') as 'INPUT' | 'OUTPUT'
     return demoGuardrailTest(text, source)
+  }
+  if (tail('v1', 'guardrails', at(2))) {
+    const name = at(2)
+    return (
+      demoGuardrails.guardrails.find((guardrail) => guardrail.name === name) ??
+      demoGuardrails.guardrails[0]
+    )
   }
 
   // --- agents ----------------------------------------------------------
@@ -207,6 +215,10 @@ function match(path: string, params: URLSearchParams): unknown {
   if (tail('v1', 'evals', 'runs', at(3), 'cases', at(5))) return demoEvalCaseArtifact(at(5))
   if (tail('v1', 'evals', 'runs', at(3), 'cases')) return demoEvalRunCases(at(3))
   if (tail('v1', 'evals', 'runs', at(3))) return demoEvalRun(at(3))
+
+  // --- platform (AgentCore Identity / Browser — what users can use) -------
+  if (path === '/v1/identity') return demoIdentity
+  if (path === '/v1/browser') return demoBrowser
 
   // --- admin (safety net) ----------------------------------------------
   if (path === '/v1/admin/users') return demoAdminUsers

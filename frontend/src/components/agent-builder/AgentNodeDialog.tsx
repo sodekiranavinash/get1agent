@@ -66,6 +66,7 @@ import {
 } from './LineField'
 import { MarkdownField } from './MarkdownField'
 import { useVaultProviderSecrets } from '../../lib/vault'
+import { useGuardrails } from '../../lib/guardrails'
 
 function FieldGroup({ title, children }: { title?: string; children: ReactNode }) {
   return (
@@ -710,6 +711,22 @@ export function AgentNodeDialog({
 }: Props) {
   const { knowledgeBases, skills, connections, customServers } = useAgentBuilder()
   const providerSecrets = useVaultProviderSecrets().data
+  const guardrails = useGuardrails()
+  const defaultGuardrailName = (guardrails.data?.guardrails ?? []).find(
+    (guardrail) => guardrail.guardrailId === guardrails.data?.defaultGuardrailId,
+  )?.name
+  const guardrailOptions = [
+    {
+      value: '',
+      label: defaultGuardrailName
+        ? `Workspace default (${defaultGuardrailName})`
+        : 'Workspace default',
+    },
+    ...(guardrails.data?.guardrails ?? []).map((guardrail) => ({
+      value: guardrail.guardrailId,
+      label: guardrail.name,
+    })),
+  ]
 
   if (!node) {
     return (
@@ -832,13 +849,20 @@ export function AgentNodeDialog({
                 hint="Filter harmful content, denied topics and PII on this agent's runs."
               />
               {(data.guardrailEnabled ?? true) ? (
-                <LineField
-                  label="Guardrail id (optional)"
+                <LineSelect
+                  label="Guardrail"
                   value={data.guardrailId ?? ''}
                   onChange={(value) => patch({ guardrailId: value })}
-                  placeholder="Defaults to your workspace guardrail"
-                  mono
-                  hint="Leave empty to use the workspace default set on the Guardrails page."
+                  options={
+                    data.guardrailId &&
+                    !guardrailOptions.some((option) => option.value === data.guardrailId)
+                      ? [
+                          ...guardrailOptions,
+                          { value: data.guardrailId, label: `${data.guardrailId} (unknown)` },
+                        ]
+                      : guardrailOptions
+                  }
+                  hint="Pick one of your guardrails, or leave it on the workspace default."
                 />
               ) : null}
             </FieldGroup>

@@ -59,7 +59,10 @@ def allowed(url: str) -> tuple[bool, str]:
         return False, "a valid absolute URL is required"
     allow = allowed_domains()
     if not allow:
-        return False, "browser access is not allowed for this workspace"
+        return False, (
+            "browser access is disabled: no domains are on the allowlist "
+            "(set BROWSER_ALLOWED_DOMAINS)"
+        )
     for suffix in allow:
         if host == suffix or host.endswith(f".{suffix}"):
             return True, ""

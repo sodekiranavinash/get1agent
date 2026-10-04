@@ -8,7 +8,7 @@ owns its own tools and uses this module to expose them over two transports:
   :func:`require_user`) gates the surface, and ``resolve_user_id`` maps the Auth0
   ``sub`` to the internal userId when the server stores user-scoped data.
 * **Direct Lambda invoke:** the event is a JSON-RPC message plus ``userId``
-  (already the internal id). Used by ``mcp-tester``; the caller's IAM role is the
+  (already the internal id). Used by ``admin-console``; the caller's IAM role is the
   trust boundary.
 
 The active user's internal id is stashed in a ContextVar for the request so tool

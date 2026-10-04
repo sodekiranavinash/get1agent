@@ -12,7 +12,7 @@ Mirrors infra/terraform:
         -> extract/embed/index/mark-failed
   * API (infra/terraform/envs/prod/api_gateway.tf):
       HTTP API -> JWT authorizer (Auth0) -> user-api / knowledge-mcp /
-        web-search / code-interpreter / mcp-tester
+        web-search / code-interpreter / admin-console
 
 Operational data lives in DynamoDB Local (see docker-compose.yml); vectors use
 ``VECTOR_STORE=local`` (brute force over an S3 object) because S3 Vectors is not
@@ -72,7 +72,7 @@ FUNCTIONS = {
     "dispatcher": "get1agent-local-ingestion-dispatcher",
     "user_api": "get1agent-local-user-api",
     "knowledge_mcp": "get1agent-local-knowledge-mcp",
-    "mcp_tester": "get1agent-local-mcp-tester",
+    "admin_console": "get1agent-local-admin-console",
     "code_interpreter": "get1agent-local-code-interpreter",
     "http_fetch": "get1agent-local-http-fetch",
     "mcp_connections": "get1agent-local-mcp-connections",
@@ -154,6 +154,19 @@ ROUTES = {
         ("DELETE", "/v1/vault/secrets/{id}"),
         ("POST", "/v1/vault/secrets/{id}/test"),
         ("POST", "/v1/vault/secrets/{id}/reveal"),
+        ("GET", "/v1/guardrails"),
+        ("POST", "/v1/guardrails"),
+        ("PUT", "/v1/guardrails/config"),
+        ("POST", "/v1/guardrails/test"),
+        ("GET", "/v1/guardrails/{name}"),
+        ("PUT", "/v1/guardrails/{name}"),
+        ("DELETE", "/v1/guardrails/{name}"),
+        ("GET", "/v1/identity"),
+        ("POST", "/v1/identity/token"),
+        ("GET", "/v1/browser"),
+        ("POST", "/v1/browser/check"),
+        ("POST", "/v1/browser/session"),
+        ("POST", "/v1/browser/session/close"),
         ("GET", "/v1/agents/{id}/runs"),
         ("GET", "/v1/workflows"),
         ("POST", "/v1/workflows"),
@@ -213,7 +226,7 @@ ROUTES = {
     "custom_tools": [
         ("POST", "/mcp/custom-tools"),
     ],
-    "mcp_tester": [
+    "admin_console": [
         ("GET", "/v1/admin/mcp/tools"),
         ("POST", "/v1/admin/mcp/call"),
         ("GET", "/v1/admin/users"),
@@ -226,6 +239,17 @@ ROUTES = {
         ("GET", "/v1/admin/security-reports"),
         ("GET", "/v1/admin/security-reports/{userId}/{reportId}"),
         ("POST", "/v1/admin/security-reports/{userId}/{reportId}/status"),
+        ("GET", "/v1/admin/platform/identity"),
+        ("POST", "/v1/admin/platform/identity/token"),
+        ("GET", "/v1/admin/platform/registry"),
+        ("POST", "/v1/admin/platform/registry/publish"),
+        ("GET", "/v1/admin/platform/registry/search"),
+        ("GET", "/v1/admin/platform/browser"),
+        ("POST", "/v1/admin/platform/browser/check"),
+        ("POST", "/v1/admin/platform/browser/session"),
+        ("POST", "/v1/admin/platform/browser/session/close"),
+        ("GET", "/v1/admin/platform/optimization"),
+        ("GET", "/v1/admin/platform/bedrock-features"),
     ],
     "mcp_connections": [
         ("GET", "/v1/mcp/catalog"),
@@ -489,6 +513,44 @@ def ensure_layer(lm, name: str, zip_path: str) -> str:
     return ""
 
 
+def _resolve_checksum_file() -> str:
+    """Per-function zip checksum cache.
+
+    Keep it on the persistent Floci data volume: the container is recreated
+    whenever the exported AWS credentials change, and a /tmp cache would be lost
+    each time — forcing a full re-upload of every Lambda zip (hundreds of MB).
+    Fall back to /tmp when the data dir is unavailable.
+    """
+    preferred = "/app/data/.floci-lambda-checksums.json"
+    parent = os.path.dirname(preferred)
+    if os.path.isdir(parent) and os.access(parent, os.W_OK):
+        return preferred
+    return "/tmp/floci-lambda-checksums.json"
+
+
+CHECKSUM_FILE = _resolve_checksum_file()
+
+
+def load_checksums() -> dict[str, str]:
+    if os.path.exists(CHECKSUM_FILE):
+        with open(CHECKSUM_FILE, "r") as handle:
+            return json.load(handle)
+    return {}
+
+
+def save_checksums(checksums: dict[str, str]) -> None:
+    with open(CHECKSUM_FILE, "w") as handle:
+        json.dump(checksums, handle)
+
+
+def compute_checksum(filepath: str) -> str:
+    digest = hashlib.sha256()
+    with open(filepath, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def ensure_function(
     lm,
     name: str,
@@ -500,27 +562,6 @@ def ensure_function(
     timeout: int,
     memory: int,
 ) -> str:
-    # Track checksums in a file to avoid unnecessary updates
-    # Store in /tmp (cleared on container restart) - this is fine since checksums
-    # are only needed within a single session. If Floci restarts, we'll update all Lambdas once.
-    CHECKSUM_FILE = "/tmp/floci-lambda-checksums.json"
-    
-    def load_checksums():
-        if os.path.exists(CHECKSUM_FILE):
-            with open(CHECKSUM_FILE, 'r') as f:
-                return json.load(f)
-        return {}
-    
-    def save_checksums(checksums):
-        with open(CHECKSUM_FILE, 'w') as f:
-            json.dump(checksums, f)
-    
-    def compute_checksum(filepath):
-        with open(filepath, 'rb') as f:
-            return hashlib.sha256(f.read()).hexdigest()
-    
-    with open(zip_path, "rb") as handle:
-        code = handle.read()
     config = {
         "Runtime": RUNTIME,
         "Handler": handler,
@@ -529,7 +570,24 @@ def ensure_function(
         "Environment": {"Variables": environment},
         "Layers": layers,
     }
+
+    # Hash the zip on disk first: `create_function` / `update_function_code`
+    # upload the whole archive (tens of MB each), so only send it when the code
+    # actually changed. `get_function` is a cheap existence check.
+    checksums = load_checksums()
+    current_checksum = compute_checksum(zip_path)
+
     try:
+        lm.get_function(FunctionName=name)
+        exists = True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] != "ResourceNotFoundException":
+            raise
+        exists = False
+
+    if not exists:
+        with open(zip_path, "rb") as handle:
+            code = handle.read()
         lm.create_function(
             FunctionName=name,
             Role=ROLE_ARN,
@@ -537,32 +595,25 @@ def ensure_function(
             **config,
         )
         log(f"created function {name}")
-        # Save checksum for newly created function
-        checksums = load_checksums()
-        checksums[name] = compute_checksum(zip_path)
+        checksums[name] = current_checksum
         save_checksums(checksums)
-    except ClientError as exc:
-        if exc.response["Error"]["Code"] != "ResourceConflictException":
-            raise
-        
-        # Check if we need to update based on checksum
-        checksums = load_checksums()
-        current_checksum = compute_checksum(zip_path)
-        
-        if name in checksums and checksums[name] == current_checksum:
-            # Checksum hasn't changed, skip code update
+    else:
+        if checksums.get(name) == current_checksum:
+            # Checksum hasn't changed, skip the (large) code upload.
             log(f"skipped function {name} code update (no changes)")
         else:
-            # Checksum changed or function not tracked yet
+            # Checksum changed or function not tracked yet.
+            with open(zip_path, "rb") as handle:
+                code = handle.read()
             lm.update_function_code(FunctionName=name, ZipFile=code)
             log(f"updated function {name} code")
-            # Save new checksum
             checksums[name] = current_checksum
             save_checksums(checksums)
-        
+
         # Always update configuration (env vars may have changed)
         lm.update_function_configuration(FunctionName=name, **config)
         log(f"updated function {name} configuration")
+
     return lm.get_function(FunctionName=name)["Configuration"]["FunctionArn"]
 
 
@@ -643,65 +694,94 @@ def ensure_event_source_mapping(lm, function_name: str, queue_arn: str) -> None:
 
 
 def ensure_http_api(apigw, function_arns: dict[str, str]) -> str:
-    # Try to reuse existing API
+    # Reuse the pinned API when it already exists, otherwise create it. Either
+    # way the function below reconciles routes, so a route added to ROUTES after
+    # the first boot is registered instead of silently 404-ing.
+    api_id = None
     for api in apigw.get_apis().get("Items", []):
         if api["Name"] == API_NAME:
-            log(f"reusing existing HTTP API {api['ApiId']}")
-            return api["ApiId"]
-    
-    # If not found, create new
-    api = apigw.create_api(
-        Name=API_NAME,
-        ProtocolType="HTTP",
-        Tags={"floci:override-id": API_ID},
-        CorsConfiguration={
-            "AllowOrigins": ["http://localhost:5173"],
-            "AllowMethods": ["*"],
-            "AllowHeaders": ["*"],
-            "MaxAge": 3000,
-        },
-    )
-    api_id = api["ApiId"]
-    log(f"created HTTP API {api_id}")
+            api_id = api["ApiId"]
+            log(f"reusing existing HTTP API {api_id}")
+            break
+
+    if api_id is None:
+        api = apigw.create_api(
+            Name=API_NAME,
+            ProtocolType="HTTP",
+            Tags={"floci:override-id": API_ID},
+            CorsConfiguration={
+                "AllowOrigins": ["http://localhost:5173"],
+                "AllowMethods": ["*"],
+                "AllowHeaders": ["*"],
+                "MaxAge": 3000,
+            },
+        )
+        api_id = api["ApiId"]
+        log(f"created HTTP API {api_id}")
 
     # Audience is intentionally omitted locally (Floci's JWT authorizer only
     # reads a scalar `aud`). Signature, issuer and expiry are still verified.
-    authorizer = apigw.create_authorizer(
-        ApiId=api_id,
-        Name="auth0",
-        AuthorizerType="JWT",
-        IdentitySource=["$request.header.Authorization"],
-        JwtConfiguration={"Issuer": AUTH_ISSUER},
-    )
-    authorizer_id = authorizer["AuthorizerId"]
-    log(f"created JWT authorizer (issuer={AUTH_ISSUER}; audience not enforced)")
+    authorizer_id = None
+    for authorizer in apigw.get_authorizers(ApiId=api_id).get("Items", []):
+        if authorizer["Name"] == "auth0":
+            authorizer_id = authorizer["AuthorizerId"]
+            break
+    if authorizer_id is None:
+        authorizer_id = apigw.create_authorizer(
+            ApiId=api_id,
+            Name="auth0",
+            AuthorizerType="JWT",
+            IdentitySource=["$request.header.Authorization"],
+            JwtConfiguration={"Issuer": AUTH_ISSUER},
+        )["AuthorizerId"]
+        log(f"created JWT authorizer (issuer={AUTH_ISSUER}; audience not enforced)")
 
     # There is no `/health` route (the app does not call one).
 
+    # One integration per Lambda. Reuse by target so re-provisioning doesn't
+    # pile up duplicates (each Lambda is provisioned before the API).
+    existing_integrations = {
+        integration["IntegrationUri"]: integration["IntegrationId"]
+        for integration in apigw.get_integrations(ApiId=api_id).get("Items", [])
+    }
     integrations: dict[str, str] = {}
     for key, arn in function_arns.items():
-        integration = apigw.create_integration(
-            ApiId=api_id,
-            IntegrationType="AWS_PROXY",
-            IntegrationUri=arn,
-            PayloadFormatVersion="2.0",
-        )
-        integrations[key] = integration["IntegrationId"]
+        integration_id = existing_integrations.get(arn)
+        if integration_id is None:
+            integration_id = apigw.create_integration(
+                ApiId=api_id,
+                IntegrationType="AWS_PROXY",
+                IntegrationUri=arn,
+                PayloadFormatVersion="2.0",
+            )["IntegrationId"]
+        integrations[key] = integration_id
 
-    route_count = 0
+    existing_routes = {
+        route["RouteKey"] for route in apigw.get_routes(ApiId=api_id).get("Items", [])
+    }
+    added = 0
     for key, routes in ROUTES.items():
         for method, path in routes:
+            route_key = f"{method} {path}"
+            if route_key in existing_routes:
+                continue
             public = (method, path) in PUBLIC_ROUTES
             apigw.create_route(
                 ApiId=api_id,
-                RouteKey=f"{method} {path}",
+                RouteKey=route_key,
                 Target=f"integrations/{integrations[key]}",
                 AuthorizationType="NONE" if public else "JWT",
                 **({} if public else {"AuthorizerId": authorizer_id}),
             )
-            route_count += 1
-    apigw.create_stage(ApiId=api_id, StageName="$default", AutoDeploy=True)
-    log(f"created {route_count} routes + $default stage")
+            added += 1
+
+    try:
+        apigw.get_stage(ApiId=api_id, StageName="$default")
+    except ClientError:
+        apigw.create_stage(ApiId=api_id, StageName="$default", AutoDeploy=True)
+        log("created $default stage")
+
+    log(f"{len(ROUTES)} route groups reconciled ({added} new routes)")
     return api_id
 
 
@@ -716,7 +796,7 @@ def main() -> int:
         # f"{ROOT}/backend/services/dependency-layers/extra-tools/dist/layer.zip",
         f"{ROOT}/backend/services/apis/user-api/dist/function.zip",
         f"{ROOT}/backend/services/mcp/knowledge-mcp/dist/function.zip",
-        f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
+        f"{ROOT}/backend/services/admin/admin-console/dist/function.zip",
         f"{ROOT}/backend/services/mcp/code-interpreter/dist/function.zip",
         f"{ROOT}/backend/services/mcp/http-fetch/dist/function.zip",
         f"{ROOT}/backend/services/mcp/mcp-connections/dist/function.zip",
@@ -1039,10 +1119,10 @@ def main() -> int:
         timeout=60,
         memory=512,
     )
-    mcp_tester_arn = ensure_function(
+    admin_console_arn = ensure_function(
         lm,
-        FUNCTIONS["mcp_tester"],
-        f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
+        FUNCTIONS["admin_console"],
+        f"{ROOT}/backend/services/admin/admin-console/dist/function.zip",
         handler="handler.lambda_handler",
         layers=[],
         environment={
@@ -1054,6 +1134,9 @@ def main() -> int:
                     FUNCTIONS["http_fetch"],
                 ]
             ),
+            "BROWSER_ID": os.environ.get("BROWSER_ID", ""),
+            "BROWSER_REGION": REGION,
+            "BROWSER_ALLOWED_DOMAINS": os.environ.get("BROWSER_ALLOWED_DOMAINS", ""),
             "AWS_REGION": REGION,
             "AWS_DEFAULT_REGION": REGION,
         },
@@ -1093,7 +1176,7 @@ def main() -> int:
             "code_interpreter": code_interpreter_arn,
             "http_fetch": http_fetch_arn,
             "custom_tools": custom_tools_arn,
-            "mcp_tester": mcp_tester_arn,
+            "admin_console": admin_console_arn,
             "mcp_connections": mcp_connections_arn,
         },
     )

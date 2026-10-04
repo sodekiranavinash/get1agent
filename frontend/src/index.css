@@ -217,6 +217,26 @@ body {
   border-color: var(--app-accent);
 }
 
+/* Live builder execution: the card that is running pulses, finished cards
+   settle to success, and failed cards flag the error. */
+@keyframes builder-node-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--app-accent) 32%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--app-accent) 0%, transparent);
+  }
+}
+
+.builder-node-active {
+  animation: builder-node-pulse 1.6s ease-out infinite;
+}
+
+.builder-node-error {
+  animation: builder-node-pulse 1.2s ease-out infinite;
+}
+
 .react-flow__edge.selected .react-flow__edge-path {
   stroke: var(--app-accent);
 }
@@ -396,40 +416,6 @@ body {
   animation: text-sheen 7s linear infinite;
 }
 
-@keyframes float-y {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-8px);
-  }
-}
-
-.animate-float {
-  animation: float-y 7s ease-in-out infinite;
-}
-
-/* A pulse travelling along the "how it works" connector. */
-@keyframes flow-x {
-  0% {
-    transform: translateX(-120%);
-    opacity: 0;
-  }
-  15%,
-  85% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateX(340%);
-    opacity: 0;
-  }
-}
-
-.animate-flow {
-  animation: flow-x 5s ease-in-out infinite;
-}
-
 /* Blinking text caret for the MCP Builder code mock. */
 @keyframes caret-blink {
   0%,
@@ -506,6 +492,54 @@ body {
   animation: rise-in 0.5s ease-out both;
 }
 
+/* Small, snappy entrance for rows appearing one after another in the hero and
+   preview widgets (sub-queries, todos, spans). */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-pop {
+  animation: pop-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* A soft breathing ring used to mark the active node in the orchestration map. */
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.06);
+  }
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 1.8s ease-in-out infinite;
+}
+
+/* The playhead that sweeps a live trace waterfall. */
+@keyframes scan-line {
+  0% {
+    left: 0%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+.animate-scan-line {
+  animation: scan-line 4.2s linear infinite;
+}
+
 /* Trace explorer: each observation's detail eases in when selected. */
 @keyframes trace-detail-in {
   from {
@@ -558,15 +592,19 @@ body {
   .animate-aurora-slow,
   .animate-marquee,
   .animate-text-sheen,
-  .animate-float,
-  .animate-flow,
   .animate-flow-y,
   .animate-caret,
   .animate-dash,
   .animate-reveal-x,
   .animate-rise,
+  .animate-pop,
+  .animate-pulse-soft,
+  .animate-scan-line,
   .animate-trace-in,
-  .animate-trace-row {
+  .animate-trace-row,
+  .builder-node-active,
+  .builder-node-error,
+  .react-flow__edge.animated .react-flow__edge-path {
     animation: none;
   }
   .reveal {

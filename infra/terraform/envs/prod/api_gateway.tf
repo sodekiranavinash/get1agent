@@ -545,6 +545,76 @@ module "api_gateway" {
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
+    guardrails_create = {
+      method               = "POST"
+      path                 = "/v1/guardrails"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    guardrails_get = {
+      method               = "GET"
+      path                 = "/v1/guardrails/{name}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    guardrails_update = {
+      method               = "PUT"
+      path                 = "/v1/guardrails/{name}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    guardrails_delete = {
+      method               = "DELETE"
+      path                 = "/v1/guardrails/{name}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    identity_status = {
+      method               = "GET"
+      path                 = "/v1/identity"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    identity_token = {
+      method               = "POST"
+      path                 = "/v1/identity/token"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    browser_status = {
+      method               = "GET"
+      path                 = "/v1/browser"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    browser_check = {
+      method               = "POST"
+      path                 = "/v1/browser/check"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    browser_session_create = {
+      method               = "POST"
+      path                 = "/v1/browser/session"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    browser_session_close = {
+      method               = "POST"
+      path                 = "/v1/browser/session/close"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
     vault_providers = {
       method               = "GET"
       path                 = "/v1/vault/providers"
@@ -930,85 +1000,162 @@ module "api_gateway" {
     admin_mcp_tools = {
       method               = "GET"
       path                 = "/v1/admin/mcp/tools"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     admin_mcp_call = {
       method               = "POST"
       path                 = "/v1/admin/mcp/call"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     admin_users_list = {
       method               = "GET"
       path                 = "/v1/admin/users"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     admin_user_credits = {
       method               = "POST"
       path                 = "/v1/admin/users/{userId}/credits"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     admin_user_reset = {
       method               = "POST"
       path                 = "/v1/admin/users/{userId}/reset"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     admin_support_list = {
       method               = "GET"
       path                 = "/v1/admin/support"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     admin_support_detail = {
       method               = "GET"
       path                 = "/v1/admin/support/{userId}/{ticketId}"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     admin_support_reply = {
       method               = "POST"
       path                 = "/v1/admin/support/{userId}/{ticketId}/reply"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     admin_support_status = {
       method               = "POST"
       path                 = "/v1/admin/support/{userId}/{ticketId}/status"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     admin_security_list = {
       method               = "GET"
       path                 = "/v1/admin/security-reports"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     admin_security_detail = {
       method               = "GET"
       path                 = "/v1/admin/security-reports/{userId}/{reportId}"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     admin_security_status = {
       method               = "POST"
       path                 = "/v1/admin/security-reports/{userId}/{reportId}/status"
-      lambda_invoke_arn    = module.mcp_tester[0].invoke_arn
-      lambda_function_name = module.mcp_tester[0].function_name
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_identity = {
+      method               = "GET"
+      path                 = "/v1/admin/platform/identity"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_identity_token = {
+      method               = "POST"
+      path                 = "/v1/admin/platform/identity/token"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_registry = {
+      method               = "GET"
+      path                 = "/v1/admin/platform/registry"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_registry_publish = {
+      method               = "POST"
+      path                 = "/v1/admin/platform/registry/publish"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_registry_search = {
+      method               = "GET"
+      path                 = "/v1/admin/platform/registry/search"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_browser = {
+      method               = "GET"
+      path                 = "/v1/admin/platform/browser"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_browser_check = {
+      method               = "POST"
+      path                 = "/v1/admin/platform/browser/check"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_browser_session = {
+      method               = "POST"
+      path                 = "/v1/admin/platform/browser/session"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_browser_session_close = {
+      method               = "POST"
+      path                 = "/v1/admin/platform/browser/session/close"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_optimization = {
+      method               = "GET"
+      path                 = "/v1/admin/platform/optimization"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_bedrock_features = {
+      method               = "GET"
+      path                 = "/v1/admin/platform/bedrock-features"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
     mcp_catalog = {

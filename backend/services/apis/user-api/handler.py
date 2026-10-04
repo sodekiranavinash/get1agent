@@ -33,6 +33,7 @@ from data.repositories import documents as documents_repo
 from data.repositories import evals as evals_repo
 from data.repositories import events as events_repo
 from data.repositories import feedback as feedback_repo
+from data.repositories import guardrails as guardrails_repo
 from data.repositories import knowledge_bases as kb_repo
 from data.repositories import mcp_connections as mcp_repo
 from data.repositories import notifications as notifications_repo
@@ -48,6 +49,7 @@ from data.repositories import workflows as workflows_repo
 from data.repositories.agents import DuplicateAgent
 from data.repositories.custom_tools import DuplicateCustomServer, DuplicateCustomTool
 from data.repositories.knowledge_bases import DuplicateKnowledgeBase
+from data.repositories.guardrails import DuplicateGuardrail
 from data.repositories.skills import DuplicateSkill
 from data.repositories.vault import DuplicateVaultSecret
 from data.repositories.workflows import DuplicateWorkflow
@@ -221,6 +223,20 @@ AGENT_NAME_MIN = 1
 AGENT_NAME_MAX = 64
 _AGENT_NAME_CHARS = re.compile(r"^[a-z0-9-]+$")
 _AGENT_NAME_EDGES = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+
+# Bedrock guardrails a user creates from the app. One item per guardrail, plus
+# the workspace default recorded on the settings item.
+MAX_GUARDRAILS_PER_USER = 20
+GUARDRAIL_NAME_MIN = 1
+GUARDRAIL_NAME_MAX = 48
+MAX_GUARDRAIL_DESCRIPTION_LENGTH = 200
+MAX_GUARDRAIL_TOPICS = 30
+MAX_GUARDRAIL_TOPIC_NAME = 100
+MAX_GUARDRAIL_TOPIC_DEFINITION = 200
+MAX_GUARDRAIL_WORDS = 10000
+MAX_GUARDRAIL_REGEXES = 10
+# Reserved route segments that must never collide with a guardrail name.
+_GUARDRAIL_RESERVED = {"config", "test"}
 
 
 class ApiError(Exception):
@@ -2303,6 +2319,178 @@ def _validated_guardrail(value: Any) -> dict[str, Any]:
         "enabled": _validated_toggle("guardrail.enabled", value.get("enabled", True)),
         "id": guardrail_id,
     }
+
+
+def _validated_guardrail_name(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ApiError(400, "Guardrail name is required")
+    name = value.strip().lower()
+    if len(name) < GUARDRAIL_NAME_MIN or len(name) > GUARDRAIL_NAME_MAX:
+        raise ApiError(400, f"Name must be at most {GUARDRAIL_NAME_MAX} characters")
+    if not _AGENT_NAME_CHARS.match(name):
+        raise ApiError(
+            400,
+            "Name can only contain lowercase letters, numbers and hyphens "
+            "(no spaces or special characters)",
+        )
+    if not _AGENT_NAME_EDGES.match(name):
+        raise ApiError(400, "Name must start and end with a letter or number")
+    if name in _GUARDRAIL_RESERVED:
+        raise ApiError(400, f'"{name}" is a reserved guardrail name')
+    return name
+
+
+def _bounded_text(value: Any, label: str, limit: int, *, required: bool = False) -> str:
+    text = str(value or "").strip()
+    if required and not text:
+        raise ApiError(400, f"{label} is required")
+    if len(text) > limit:
+        raise ApiError(400, f"{label} must be at most {limit} characters")
+    return text
+
+
+def _validated_guardrail_config(value: Any) -> dict[str, Any]:
+    """Normalize the guardrail policy the editor sends, with bounds + enums."""
+    from core import guardrails as core_guardrails
+
+    data = value if isinstance(value, dict) else {}
+
+    raw_filters = data.get("contentFilters")
+    filters: list[dict[str, str]] = []
+    for raw in raw_filters if isinstance(raw_filters, list) else []:
+        item = raw if isinstance(raw, dict) else {}
+        filter_type = str(item.get("type") or "").strip().upper()
+        if filter_type not in core_guardrails.CONTENT_FILTER_TYPES:
+            raise ApiError(400, f"Unknown content filter type: {filter_type or '(empty)'}")
+        input_strength = str(item.get("inputStrength") or "HIGH").strip().upper()
+        output_strength = str(item.get("outputStrength") or "HIGH").strip().upper()
+        if input_strength not in core_guardrails.STRENGTHS:
+            raise ApiError(400, f"Invalid content filter strength: {input_strength}")
+        if filter_type == "PROMPT_ATTACK":
+            output_strength = "NONE"
+        elif output_strength not in core_guardrails.STRENGTHS:
+            raise ApiError(400, f"Invalid content filter strength: {output_strength}")
+        filters.append(
+            {
+                "type": filter_type,
+                "inputStrength": input_strength,
+                "outputStrength": output_strength,
+            }
+        )
+
+    raw_topics = data.get("deniedTopics")
+    topics: list[dict[str, Any]] = []
+    for raw in raw_topics if isinstance(raw_topics, list) else []:
+        item = raw if isinstance(raw, dict) else {}
+        name = _bounded_text(
+            item.get("name"), "Denied topic name", MAX_GUARDRAIL_TOPIC_NAME, required=True
+        )
+        definition = _bounded_text(
+            item.get("definition"),
+            "Denied topic definition",
+            MAX_GUARDRAIL_TOPIC_DEFINITION,
+            required=True,
+        )
+        examples: list[str] = []
+        raw_examples = item.get("examples")
+        for example in raw_examples if isinstance(raw_examples, list) else []:
+            text = _bounded_text(example, "Denied topic example", 100)
+            if text:
+                examples.append(text)
+        topics.append({"name": name, "definition": definition, "examples": examples[:5]})
+    if len(topics) > MAX_GUARDRAIL_TOPICS:
+        raise ApiError(400, f"At most {MAX_GUARDRAIL_TOPICS} denied topics are allowed")
+
+    raw_words = data.get("wordFilters")
+    word_filters = raw_words if isinstance(raw_words, dict) else {}
+    words: list[str] = []
+    raw_word_list = word_filters.get("words")
+    for raw in raw_word_list if isinstance(raw_word_list, list) else []:
+        text = _bounded_text(raw, "Word filter", 100)
+        if text:
+            words.append(text)
+    if len(words) > MAX_GUARDRAIL_WORDS:
+        raise ApiError(400, f"At most {MAX_GUARDRAIL_WORDS} words are allowed")
+    profanity = bool(word_filters.get("profanity"))
+
+    raw_sensitive = data.get("sensitiveInfo")
+    sensitive = raw_sensitive if isinstance(raw_sensitive, dict) else {}
+    pii: list[dict[str, str]] = []
+    raw_pii = sensitive.get("pii")
+    for raw in raw_pii if isinstance(raw_pii, list) else []:
+        item = raw if isinstance(raw, dict) else {}
+        entity_type = str(item.get("type") or "").strip().upper()
+        if not entity_type:
+            continue
+        action = str(item.get("action") or "ANONYMIZE").strip().upper()
+        if action not in core_guardrails.PII_ACTIONS:
+            raise ApiError(400, f"Invalid PII action: {action}")
+        pii.append({"type": entity_type, "action": action})
+    regexes: list[dict[str, str]] = []
+    raw_regexes = sensitive.get("regexes")
+    for raw in raw_regexes if isinstance(raw_regexes, list) else []:
+        item = raw if isinstance(raw, dict) else {}
+        name = _bounded_text(item.get("name"), "Regex name", 100, required=True)
+        pattern = _bounded_text(item.get("pattern"), "Regex pattern", 500, required=True)
+        action = str(item.get("action") or "BLOCK").strip().upper()
+        if action not in core_guardrails.PII_ACTIONS:
+            raise ApiError(400, f"Invalid regex action: {action}")
+        regexes.append({"name": name, "pattern": pattern, "action": action})
+    if len(regexes) > MAX_GUARDRAIL_REGEXES:
+        raise ApiError(400, f"At most {MAX_GUARDRAIL_REGEXES} regex patterns are allowed")
+
+    raw_grounding = data.get("contextualGrounding")
+    grounding: list[dict[str, Any]] = []
+    for raw in raw_grounding if isinstance(raw_grounding, list) else []:
+        item = raw if isinstance(raw, dict) else {}
+        grounding_type = str(item.get("type") or "").strip().upper()
+        if grounding_type not in core_guardrails.GROUNDING_TYPES:
+            raise ApiError(400, f"Invalid contextual grounding type: {grounding_type or '(empty)'}")
+        try:
+            threshold = float(item.get("threshold"))
+        except (TypeError, ValueError):
+            threshold = 0.7
+        action = str(item.get("action") or "BLOCK").strip().upper()
+        if action not in core_guardrails.GROUNDING_ACTIONS:
+            raise ApiError(400, f"Invalid contextual grounding action: {action}")
+        grounding.append(
+            {
+                "type": grounding_type,
+                "threshold": max(0.0, min(0.99, threshold)),
+                "action": action,
+            }
+        )
+
+    normalized = {
+        "contentFilters": filters,
+        "deniedTopics": topics,
+        "wordFilters": {"profanity": profanity, "words": words},
+        "sensitiveInfo": {"pii": pii, "regexes": regexes},
+        "contextualGrounding": grounding,
+    }
+    if not any((filters, topics, words, profanity, pii, regexes, grounding)):
+        # A brand-new guardrail with no policy is useless; start from the
+        # standard harmful-content set instead of an inert guardrail.
+        return core_guardrails.default_policy_config()
+    return normalized
+
+
+def _serialize_guardrail(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(item.get("name") or ""),
+        "name": str(item.get("name") or ""),
+        "description": str(item.get("description") or ""),
+        "guardrailId": str(item.get("guardrailId") or ""),
+        "guardrailArn": str(item.get("guardrailArn") or ""),
+        "version": str(item.get("version") or "DRAFT"),
+        "status": str(item.get("status") or "READY"),
+        "config": item.get("config") or {},
+        "blockedInput": str(item.get("blockedInput") or ""),
+        "blockedOutput": str(item.get("blockedOutput") or ""),
+        "createdAt": str(item.get("createdAt") or ""),
+        "updatedAt": str(item.get("updatedAt") or ""),
+    }
+
 
 
 def _validated_agent_config(value: Any) -> dict[str, Any]:
@@ -5981,60 +6169,6 @@ def _handle_identity_token(claims: dict[str, Any], body: dict[str, Any]) -> dict
     )
 
 
-def _route_registry(
-    claims: dict[str, Any],
-    method: str,
-    rest: list[str],
-    body: dict[str, Any],
-    query: dict[str, str],
-):
-    """AgentCore Registry: publish and search the workspace's catalog."""
-    from core import registry as agent_registry
-
-    profile = get_or_create_user(claims)
-    sub = profile["userId"]
-
-    if not rest:
-        if method == "GET":
-            return _json(200, agent_registry.describe())
-        raise ApiError(405, f"Method not allowed: {method}")
-
-    if rest[0] == "publish" and method == "POST":
-        if not agent_registry.enabled():
-            raise ApiError(400, "AgentCore Registry is not configured")
-        name = str(body.get("name") or "").strip()
-        if not name:
-            raise ApiError(400, "name is required")
-        record_type = str(body.get("recordType") or "AGENT").strip().upper()
-        if record_type not in ("AGENT", "MCP_SERVER", "TOOL", "SKILL"):
-            raise ApiError(400, "recordType must be AGENT, MCP_SERVER, TOOL or SKILL")
-        try:
-            created = agent_registry.publish(
-                name=name,
-                description=str(body.get("description") or ""),
-                record_type=record_type,
-                metadata={
-                    "owner": sub,
-                    **(
-                        body.get("metadata")
-                        if isinstance(body.get("metadata"), dict)
-                        else {}
-                    ),
-                },
-            )
-        except Exception as exc:  # noqa: BLE001 - surface a clean error
-            raise ApiError(502, f"Publish failed: {exc}") from exc
-        return _json(201, {"ok": True, "record": created})
-
-    if rest[0] == "search" and method == "GET":
-        if not agent_registry.enabled():
-            return _json(200, {"configured": False, "records": []})
-        records = agent_registry.search(query.get("q") or "", limit=20)
-        return _json(200, {"configured": True, "records": records})
-
-    raise ApiError(404, "Not found")
-
-
 def _route_browser(
     claims: dict[str, Any], method: str, rest: list[str], body: dict[str, Any]
 ):
@@ -6055,7 +6189,15 @@ def _route_browser(
         allowed, reason = browser.allowed(url)
         return _json(200, {"allowed": allowed, "reason": reason})
 
-    if rest[0] == "session" and method == "POST":
+    # Order matters: the exact `session/close` route must be matched before the
+    # generic `session` route, which would otherwise swallow it.
+    if rest == ["session", "close"] and method == "POST":
+        session_id = str(body.get("sessionId") or "").strip()
+        if not session_id:
+            raise ApiError(400, "sessionId is required")
+        return _json(200, {"stopped": browser.stop_session(session_id)})
+
+    if rest == ["session"] and method == "POST":
         url = str(body.get("url") or "").strip()
         if not url:
             raise ApiError(400, "url is required")
@@ -6069,76 +6211,197 @@ def _route_browser(
         except Exception as exc:  # noqa: BLE001
             raise ApiError(502, f"Browser session failed: {exc}") from exc
 
-    if rest[0] == "session" and method == "DELETE":
-        session_id = str(body.get("sessionId") or "").strip()
-        if not session_id:
-            raise ApiError(400, "sessionId is required")
-        return _json(200, {"stopped": browser.stop_session(session_id)})
-
-    if rest == ["session", "close"] and method == "POST":
+    if rest == ["session"] and method == "DELETE":
         session_id = str(body.get("sessionId") or "").strip()
         if not session_id:
             raise ApiError(400, "sessionId is required")
         return _json(200, {"stopped": browser.stop_session(session_id)})
 
     raise ApiError(404, "Not found")
-
-
-def _handle_bedrock_features(claims: dict[str, Any]) -> dict[str, Any]:
-    """The Bedrock cost/latency levers currently in effect (read-only)."""
-    from core import bedrock_features
-
-    get_or_create_user(claims)
-    return _json(200, bedrock_features.describe())
-
-
-def _route_optimization(claims: dict[str, Any], method: str, rest: list[str]):
-    """AgentCore Optimization: availability + the config surfaces it may change."""
-    from core import optimization
-
-    get_or_create_user(claims)
-    if rest:
-        raise ApiError(404, "Not found")
-    if method != "GET":
-        raise ApiError(405, f"Method not allowed: {method}")
-    return _json(200, optimization.describe())
 
 
 def _route_guardrails(
     claims: dict[str, Any], method: str, rest: list[str], body: dict[str, Any]
 ):
-    """Bedrock Guardrails: which guardrail this workspace applies, and a tester."""
+    """Bedrock Guardrails: the user's guardrails, the workspace default, a tester."""
     if not rest:
         if method == "GET":
-            return _handle_guardrail_status(claims)
+            return _handle_guardrails_list(claims)
+        if method == "POST":
+            return _handle_guardrail_create(claims, body)
         raise ApiError(405, f"Method not allowed: {method}")
-    if rest[0] == "test" and method == "POST":
+    segment = rest[0]
+    if segment == "test" and method == "POST":
         return _handle_guardrail_test(claims, body)
-    if rest[0] == "config" and method == "PUT":
+    if segment == "config" and method == "PUT":
         return _handle_guardrail_config(claims, body)
-    raise ApiError(404, "Not found")
+    if segment in _GUARDRAIL_RESERVED:
+        raise ApiError(404, "Not found")
+    name = _validated_guardrail_name(segment)
+    if method == "GET":
+        return _handle_guardrail_detail(claims, name)
+    if method == "PUT":
+        return _handle_guardrail_update(claims, name, body)
+    if method == "DELETE":
+        return _handle_guardrail_delete(claims, name)
+    raise ApiError(405, f"Method not allowed: {method}")
 
 
-def _handle_guardrail_status(claims: dict[str, Any]) -> dict[str, Any]:
+def _handle_guardrails_list(claims: dict[str, Any]) -> dict[str, Any]:
     from core import guardrails
 
     profile = get_or_create_user(claims)
-    settings = settings_repo.get_settings(profile["userId"]) or {}
-    guardrail_id = str(settings.get("guardrailId") or "").strip()
-    version = str(settings.get("guardrailVersion") or "").strip()
-    # Fall back to the platform-wide guardrail when the user has set none.
-    if not guardrail_id:
-        guardrail_id = guardrails.guardrail_id()
-        version = guardrails.guardrail_version() if guardrail_id else ""
+    sub = profile["userId"]
+    items = guardrails_repo.list_guardrails(sub)
+    settings = settings_repo.get_settings(sub) or {}
+    workspace_id = str(settings.get("guardrailId") or "").strip()
+    workspace_version = str(settings.get("guardrailVersion") or "").strip()
+    # The effective default: the user's workspace guardrail, else the
+    # platform-wide one (if any).
+    effective_id = workspace_id or guardrails.guardrail_id()
+    effective_version = (
+        workspace_version if workspace_id else guardrails.guardrail_version() if effective_id else ""
+    )
     return _json(
         200,
         {
-            "configured": bool(guardrail_id),
-            "guardrailId": guardrail_id or None,
-            "version": version or None,
+            "guardrails": [_serialize_guardrail(item) for item in items],
+            "defaultGuardrailId": workspace_id,
+            "platformGuardrailId": guardrails.guardrail_id(),
+            "configured": bool(effective_id),
+            "guardrailId": effective_id or None,
+            "version": effective_version or None,
             "region": guardrails.region(),
+            "limit": MAX_GUARDRAILS_PER_USER,
         },
     )
+
+
+def _handle_guardrail_create(claims: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    from core import guardrails
+
+    profile = get_or_create_user(claims)
+    sub = profile["userId"]
+    if guardrails_repo.count_guardrails(sub) >= MAX_GUARDRAILS_PER_USER:
+        raise ApiError(409, f"You can create at most {MAX_GUARDRAILS_PER_USER} guardrails")
+    name = _validated_guardrail_name(body.get("name"))
+    description = _bounded_text(
+        body.get("description"), "description", MAX_GUARDRAIL_DESCRIPTION_LENGTH
+    )
+    config = _validated_guardrail_config(body.get("config"))
+    blocked_input = _bounded_text(body.get("blockedInput"), "blockedInput", 500)
+    blocked_output = _bounded_text(body.get("blockedOutput"), "blockedOutput", 500)
+    try:
+        created = guardrails.create_managed_guardrail(
+            name=name,
+            description=description,
+            config=config,
+            blocked_input=blocked_input,
+            blocked_output=blocked_output,
+        )
+    except Exception as exc:  # noqa: BLE001 - surface a clean error
+        raise ApiError(502, f"Could not create the guardrail: {exc}") from exc
+    item = guardrails_repo.guardrail_item(
+        user_id=sub,
+        name=name,
+        description=description,
+        guardrail_id=created["guardrailId"],
+        guardrail_arn=created["guardrailArn"],
+        version=created["version"],
+        status=created["status"],
+        config=config,
+        blocked_input=blocked_input or guardrails.DEFAULT_BLOCKED_INPUT,
+        blocked_output=blocked_output or guardrails.DEFAULT_BLOCKED_OUTPUT,
+    )
+    try:
+        guardrails_repo.create_guardrail(item)
+    except DuplicateGuardrail as exc:
+        # Roll back the Bedrock guardrail so a name clash leaves no orphan.
+        try:
+            guardrails.delete_managed_guardrail(created["guardrailId"])
+        except Exception:  # noqa: BLE001 - best-effort cleanup
+            pass
+        raise ApiError(409, f'A guardrail named "{name}" already exists') from exc
+    return _json(201, _serialize_guardrail(item))
+
+
+def _handle_guardrail_detail(claims: dict[str, Any], name: str) -> dict[str, Any]:
+    profile = get_or_create_user(claims)
+    item = guardrails_repo.get_guardrail(profile["userId"], name)
+    if item is None:
+        raise ApiError(404, "Guardrail not found")
+    return _json(200, _serialize_guardrail(item))
+
+
+def _handle_guardrail_update(
+    claims: dict[str, Any], name: str, body: dict[str, Any]
+) -> dict[str, Any]:
+    from core import guardrails
+
+    profile = get_or_create_user(claims)
+    sub = profile["userId"]
+    existing = guardrails_repo.get_guardrail(sub, name)
+    if existing is None:
+        raise ApiError(404, "Guardrail not found")
+    description = _bounded_text(
+        body.get("description"), "description", MAX_GUARDRAIL_DESCRIPTION_LENGTH
+    )
+    config = _validated_guardrail_config(body.get("config"))
+    blocked_input = _bounded_text(body.get("blockedInput"), "blockedInput", 500)
+    blocked_output = _bounded_text(body.get("blockedOutput"), "blockedOutput", 500)
+    try:
+        updated = guardrails.update_managed_guardrail(
+            str(existing.get("guardrailId") or ""),
+            name=name,
+            description=description,
+            config=config,
+            blocked_input=blocked_input,
+            blocked_output=blocked_output,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise ApiError(502, f"Could not update the guardrail: {exc}") from exc
+    item = guardrails_repo.update_guardrail(
+        sub,
+        name,
+        description=description,
+        guardrail_id=updated["guardrailId"] or str(existing.get("guardrailId") or ""),
+        guardrail_arn=updated["guardrailArn"] or str(existing.get("guardrailArn") or ""),
+        version=updated["version"],
+        status=updated["status"],
+        config=config,
+        blocked_input=blocked_input or guardrails.DEFAULT_BLOCKED_INPUT,
+        blocked_output=blocked_output or guardrails.DEFAULT_BLOCKED_OUTPUT,
+    )
+    if item is None:
+        raise ApiError(404, "Guardrail not found")
+    return _json(200, _serialize_guardrail(item))
+
+
+def _handle_guardrail_delete(claims: dict[str, Any], name: str) -> dict[str, Any]:
+    from core import guardrails
+
+    profile = get_or_create_user(claims)
+    sub = profile["userId"]
+    existing = guardrails_repo.get_guardrail(sub, name)
+    if existing is None:
+        raise ApiError(404, "Guardrail not found")
+    try:
+        guardrails.delete_managed_guardrail(str(existing.get("guardrailId") or ""))
+    except Exception as exc:  # noqa: BLE001
+        raise ApiError(502, f"Could not delete the guardrail: {exc}") from exc
+    guardrails_repo.delete_guardrail(sub, name)
+    # Clear the workspace default if it pointed at the guardrail we removed.
+    settings = settings_repo.get_settings(sub) or {}
+    if str(settings.get("guardrailId") or "").strip() == str(
+        existing.get("guardrailId") or ""
+    ).strip():
+        settings_repo.update_settings(
+            sub,
+            guardrail_id="",
+            guardrail_version=guardrails.DEFAULT_GUARDRAIL_VERSION,
+        )
+    return _json(200, {"ok": True})
+
 
 
 def _handle_guardrail_config(claims: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
@@ -6584,16 +6847,8 @@ def _route(
         return _route_guardrails(claims, method, segments[2:], body)
     if segments[:2] == ["v1", "identity"]:
         return _route_identity(claims, method, segments[2:], body, query)
-    if segments[:2] == ["v1", "registry"]:
-        return _route_registry(claims, method, segments[2:], body, query)
     if segments[:2] == ["v1", "browser"]:
         return _route_browser(claims, method, segments[2:], body)
-    if segments[:2] == ["v1", "optimization"]:
-        return _route_optimization(claims, method, segments[2:])
-    if segments[:2] == ["v1", "bedrock-features"]:
-        if method != "GET":
-            raise ApiError(405, f"Method not allowed: {method}")
-        return _handle_bedrock_features(claims)
     if segments[:2] == ["v1", "lab"]:
         return _route_lab(claims, method, segments[2:], body, query)
     if segments[:2] == ["v1", "feedback"]:

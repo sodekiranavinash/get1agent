@@ -1,5 +1,6 @@
 import { Suspense, type ReactNode } from 'react'
 import { Outlet } from 'react-router-dom'
+import { AppFooter } from '../../components/layout/AppFooter'
 import { TopBar } from '../../components/layout/TopBar'
 import { SidebarProvider, useSidebar } from '../../components/layout/SidebarProvider'
 import { AdminSidebar } from './AdminSidebar'
@@ -30,16 +31,19 @@ function AdminLayoutContent() {
       </aside>
 
       <main
-        className={`flex min-h-screen flex-col pb-14 transition-[padding] duration-200 ease-out ${
+        className={`flex min-h-screen flex-col transition-[padding] duration-200 ease-out ${
           effectiveCollapsed ? 'pl-[60px]' : 'pl-[240px]'
         }`}
       >
         <TopBar settingsPath={null} />
-        {/* No route transition animation — see `MainLayout`. */}
+        {/* No route transition animation — see `MainLayout`. The footer is the
+            last child of the content column, so it lands at the end of the
+            page and never sits under the sidebar. */}
         <div className="flex min-h-0 flex-1 flex-col">
           <RouteGate>
             <Outlet />
           </RouteGate>
+          <AppFooter />
         </div>
       </main>
     </div>

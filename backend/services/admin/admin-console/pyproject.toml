@@ -1,7 +1,7 @@
 [project]
-name = "get1agent-mcp-tester"
+name = "get1agent-admin-console"
 version = "0.1.0"
-description = "Admin MCP client and admin API routes"
+description = "Admin console API: MCP client, AI credits, support, security and platform status"
 requires-python = ">=3.14"
 dependencies = [
     "boto3>=1.43.31",

@@ -1,12 +1,15 @@
 import {
   Bot,
   CalendarClock,
+  CheckCircle2,
   ChevronRight,
   FileStack,
   FileText,
+  Loader2,
   MessageSquare,
   Plug,
   Sparkles,
+  XCircle,
   type LucideIcon,
 } from 'lucide-react'
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
@@ -18,6 +21,7 @@ import {
   type AgentNodeKind,
   type AgentSchedule,
 } from '../../lib/agents'
+import type { FlowStatus } from '../../lib/builderFlow'
 import { useAgentBuilder } from './AgentBuilderContext'
 
 export type AgentFlowNode = Node<AgentNodeData>
@@ -150,6 +154,27 @@ function cardSubtitle(data: AgentNodeData, { knowledgeBases, skills }: Lookups):
   }
 }
 
+/** Card treatment for each live execution status. */
+const FLOW_CARD: Record<FlowStatus, string> = {
+  idle: '',
+  active: 'builder-node-active border-accent/70 ring-2 ring-accent/25',
+  done: 'builder-node-done border-success/60 ring-1 ring-success/25',
+  error: 'builder-node-error border-accent/80 ring-2 ring-accent/30',
+}
+
+function FlowBadge({ status }: { status: FlowStatus }) {
+  if (status === 'active') {
+    return <Loader2 className="size-4 shrink-0 animate-spin text-accent" strokeWidth={2} />
+  }
+  if (status === 'done') {
+    return <CheckCircle2 className="size-4 shrink-0 text-success" strokeWidth={2} />
+  }
+  if (status === 'error') {
+    return <XCircle className="size-4 shrink-0 text-accent" strokeWidth={2} />
+  }
+  return null
+}
+
 function isEmptySubtitle(data: AgentNodeData): boolean {
   switch (data.kind) {
     case 'agent':
@@ -178,7 +203,8 @@ function isEmptySubtitle(data: AgentNodeData): boolean {
 export function AgentNodeView({ id, data, selected }: NodeProps<AgentFlowNode>) {
   const meta = AGENT_KIND_META[data.kind] ?? AGENT_KIND_META.agent
   const Icon = meta.icon
-  const { openNodeEditor, knowledgeBases, skills } = useAgentBuilder()
+  const { openNodeEditor, knowledgeBases, skills, nodeStatus } = useAgentBuilder()
+  const status = nodeStatus[id] ?? 'idle'
 
   const subtitle = cardSubtitle(data, { knowledgeBases, skills })
   const muted = isEmptySubtitle(data)
@@ -195,8 +221,8 @@ export function AgentNodeView({ id, data, selected }: NodeProps<AgentFlowNode>) 
           openNodeEditor(id)
         }
       }}
-      className={`group relative flex h-[88px] w-[272px] cursor-pointer items-center overflow-hidden rounded-2xl border bg-gradient-to-b from-raised/60 to-surface py-3 pr-3 pl-4 shadow-control transition-all duration-200 after:pointer-events-none after:absolute after:inset-x-0 after:top-0 after:h-px after:bg-white/[0.06] hover:-translate-y-0.5 hover:border-border-strong hover:shadow-panel focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${
-        selected ? 'border-accent/60 ring-2 ring-accent/15' : 'border-border'
+      className={`group relative flex h-[88px] w-[272px] cursor-pointer items-center overflow-hidden rounded-2xl border bg-gradient-to-b from-raised/60 to-surface py-3 pr-3 pl-4 shadow-control transition-all duration-200 after:pointer-events-none after:absolute after:inset-x-0 after:top-0 after:h-px after:bg-white/[0.06] hover:-translate-y-0.5 hover:border-border-strong hover:shadow-panel focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${FLOW_CARD[status]} ${
+        selected ? 'border-accent/60 ring-2 ring-accent/15' : status === 'idle' ? 'border-border' : ''
       }`}
     >
       <span
@@ -244,7 +270,10 @@ export function AgentNodeView({ id, data, selected }: NodeProps<AgentFlowNode>) 
           </span>
         </span>
 
-        <ChevronRight className="size-4 shrink-0 text-subtle transition-all duration-150 group-hover:translate-x-0.5 group-hover:text-foreground" />
+        <span className="flex shrink-0 items-center gap-1.5">
+          <FlowBadge status={status} />
+          <ChevronRight className="size-4 shrink-0 text-subtle transition-all duration-150 group-hover:translate-x-0.5 group-hover:text-foreground" />
+        </span>
       </div>
     </div>
   )

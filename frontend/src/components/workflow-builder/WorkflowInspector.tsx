@@ -12,7 +12,8 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { ScheduleFields } from '../agent-builder/AgentNodeDialog'
-import { LineField, LineToggle } from '../agent-builder/LineField'
+import { LineSelect, LineToggle } from '../agent-builder/LineField'
+import { useGuardrails } from '../../lib/guardrails'
 import {
   Select,
   SelectContent,
@@ -316,6 +317,26 @@ function AgentInspector({
 
 function HostInspector({ node }: { node: WorkflowFlowNode }) {
   const { updateNodeData } = useWorkflowBuilder()
+  const guardrails = useGuardrails()
+  const guardrailId = node.data.guardrailId ?? ''
+  const defaultGuardrailName = (guardrails.data?.guardrails ?? []).find(
+    (guardrail) => guardrail.guardrailId === guardrails.data?.defaultGuardrailId,
+  )?.name
+  const guardrailOptions = [
+    {
+      value: '',
+      label: defaultGuardrailName
+        ? `Workspace default (${defaultGuardrailName})`
+        : 'Workspace default',
+    },
+    ...(guardrails.data?.guardrails ?? []).map((guardrail) => ({
+      value: guardrail.guardrailId,
+      label: guardrail.name,
+    })),
+    ...(guardrailId && !(guardrails.data?.guardrails ?? []).some((g) => g.guardrailId === guardrailId)
+      ? [{ value: guardrailId, label: `${guardrailId} (unknown)` }]
+      : []),
+  ]
   return (
     <>
       <div className="shrink-0 border-b border-border px-4 py-3.5">
@@ -371,12 +392,12 @@ function HostInspector({ node }: { node: WorkflowFlowNode }) {
           onChange={(checked) => updateNodeData(node.id, { guardrailEnabled: checked })}
         />
         {(node.data.guardrailEnabled ?? true) ? (
-          <LineField
-            label="Guardrail id (optional)"
+          <LineSelect
+            label="Guardrail"
             value={node.data.guardrailId ?? ''}
             onChange={(value) => updateNodeData(node.id, { guardrailId: value })}
-            placeholder="Defaults to your workspace guardrail"
-            mono
+            options={guardrailOptions}
+            hint="Pick one of your guardrails, or leave it on the workspace default."
           />
         ) : null}
       </Section>

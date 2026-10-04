@@ -1,4 +1,4 @@
-"""Test MCP Gateway functionality in admin mcp-tester."""
+"""Test MCP Gateway functionality in admin-console."""
 
 import os
 import json

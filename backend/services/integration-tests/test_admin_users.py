@@ -1,4 +1,4 @@
-"""Admin AI-credit management via the admin (mcp-tester) Lambda."""
+"""Admin AI-credit management via the admin-console Lambda."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 
 from support import load_module
 
-handler = load_module("backend/services/admin/mcp-tester/handler.py", "mcp_tester_handler")
+handler = load_module("backend/services/admin/admin-console/handler.py", "admin_console_handler")
 
 ADMIN_SUB = "auth0|admin-user"
 

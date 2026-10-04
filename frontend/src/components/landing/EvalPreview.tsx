@@ -55,11 +55,6 @@ export function EvalPreview() {
           </div>
         ))}
       </div>
-
-      <p className="mt-4 border-t border-border pt-3 text-[10.5px] leading-relaxed text-subtle">
-        Per-case results are recorded as AWS evaluation artifacts, with deterministic
-        retrieval scores and explainable LLM judges.
-      </p>
     </div>
   )
 }
@@ -106,11 +101,6 @@ export function AbTestPreview() {
           </div>
         ))}
       </div>
-
-      <p className="mt-4 border-t border-border pt-3 text-[10.5px] leading-relaxed text-subtle">
-        Replay a trace against several models, then score each with the same
-        judges.
-      </p>
     </div>
   )
 }

@@ -6,7 +6,6 @@ import { RoleRedirect } from './auth/RoleRedirect'
 import { SelectViewPage } from './auth/SelectViewPage'
 import { AdminLayout } from './admin/layouts/AdminLayout'
 import { RequireAuth } from './auth/RequireAuth'
-import { AppFooter } from './components/layout/AppFooter'
 import { MainLayout } from './layouts/MainLayout'
 import { AdaptiveLayout } from './layouts/AdaptiveLayout'
 import { CallbackPage } from './pages/CallbackPage'
@@ -159,6 +158,11 @@ const AdminSecurityPage = lazy(() =>
     default: m.AdminSecurityPage,
   })),
 )
+const AdminPlatformPage = lazy(() =>
+  import('./admin/pages/AdminPlatformPage').then((m) => ({
+    default: m.AdminPlatformPage,
+  })),
+)
 
 /**
  * Warms the lazy route chunks once the browser is idle, so navigating to a
@@ -189,6 +193,7 @@ function PrefetchRoutes() {
       void import('./pages/StoragePage')
       void import('./pages/VaultPage')
       void import('./pages/SettingsPage')
+      void import('./pages/PlatformPage')
       void import('./pages/PrivacyPage')
       void import('./pages/DocumentationPage')
       void import('./pages/ChangelogPage')
@@ -200,6 +205,7 @@ function PrefetchRoutes() {
       void import('./admin/pages/AdminUsersPage')
       void import('./admin/pages/AdminSupportPage')
       void import('./admin/pages/AdminSecurityPage')
+      void import('./admin/pages/AdminPlatformPage')
     }
     const win = window as Window & {
       requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
@@ -287,6 +293,7 @@ function App() {
             <Route path="users" element={<AdminUsersPage />} />
             <Route path="support" element={<AdminSupportPage />} />
             <Route path="security-reports" element={<AdminSecurityPage />} />
+            <Route path="platform" element={<AdminPlatformPage />} />
             <Route
               path="integrations"
               element={<Navigate to="/admin/mcp-tools" replace />}
@@ -309,7 +316,6 @@ function App() {
       </Route>
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
-    <AppFooter />
     <PrefetchRoutes />
     </>
   )
