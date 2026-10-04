@@ -408,7 +408,7 @@ function ConnectionCard({
             </p>
           ) : null}
           {connection.status === 'connected' && connection.accountLogin ? (
-            <p className="mt-1 flex items-center gap-1.5 text-[11px] text-subtle">
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-subtle">
               {connection.accountAvatarUrl ? (
                 <img
                   src={connection.accountAvatarUrl}
@@ -417,11 +417,27 @@ function ConnectionCard({
                   className="size-4 shrink-0 rounded-full border border-border"
                 />
               ) : null}
-              <span className="truncate">
-                Connected as{' '}
-                <span className="text-foreground">@{connection.accountLogin}</span>
+              <span
+                className="truncate"
+                title={
+                  connection.accountName
+                    ? `${connection.accountName} (@${connection.accountLogin})`
+                    : `@${connection.accountLogin}`
+                }
+              >
+                {connection.accountName ? (
+                  <>
+                    <span className="text-foreground">{connection.accountName}</span>
+                    <span className="text-subtle"> · @{connection.accountLogin}</span>
+                  </>
+                ) : (
+                  <>
+                    Connected as{' '}
+                    <span className="text-foreground">@{connection.accountLogin}</span>
+                  </>
+                )}
               </span>
-            </p>
+            </div>
           ) : null}
           {connection.lastError && connection.status !== 'connected' ? (
             <p className="mt-0.5 line-clamp-2 text-[11px] text-warning">
