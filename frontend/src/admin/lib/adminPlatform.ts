@@ -1,32 +1,30 @@
 import { type ApiClient } from '../../lib/api'
-import {
-  type BrowserSession,
-  type BrowserStatus,
-  type IdentityStatus,
-  type IdentityTokenResult,
-} from '../../lib/platform'
 
 /**
  * Admin Platform status: the full set of AgentCore services (Identity, Registry,
  * Browser, Optimization) plus the Bedrock cost/latency levers, served by the
  * admin-console Lambda under `/v1/admin/platform/*`. These are admin-view routes
  * (no user-view header override needed).
- *
- * Identity/Browser reuse the user-facing response shapes; the shared `core.*`
- * helpers back both.
  */
 
 const BASE = '/v1/admin/platform'
 
-// Re-export the shared identity/browser shapes so pages only import from here.
-export type {
-  BrowserSession,
-  BrowserStatus,
-  IdentityStatus,
-  IdentityTokenResult,
+// --- Identity -----------------------------------------------------------------
+
+export type IdentityStatus = {
+  configured: boolean
+  workloadIdentityArn: string | null
+  tokenVaultId: string | null
+  providers: string[]
+  region: string
 }
 
-// --- Identity -----------------------------------------------------------------
+export type IdentityTokenResult = {
+  provider: string
+  obtained: boolean
+  expiresAt: string | null
+  scopes: string[]
+}
 
 export function fetchIdentity(api: ApiClient): Promise<IdentityStatus> {
   return api.get<IdentityStatus>(`${BASE}/identity`)
@@ -79,6 +77,21 @@ export function searchRegistry(
 }
 
 // --- Browser ------------------------------------------------------------------
+
+export type BrowserStatus = {
+  configured: boolean
+  browserId: string | null
+  region: string
+  allowedDomains: string[]
+  sessionTimeout: number
+}
+
+export type BrowserSession = {
+  sessionId: string
+  browserId: string
+  liveViewUrl: string | null
+  wsHeaders?: Record<string, string>
+}
 
 export function fetchBrowser(api: ApiClient): Promise<BrowserStatus> {
   return api.get<BrowserStatus>(`${BASE}/browser`)

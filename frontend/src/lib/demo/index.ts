@@ -57,7 +57,6 @@ import {
   demoEvalRuns,
 } from './evals'
 import { demoGuardrails, demoGuardrailTest } from './guardrails'
-import { demoBrowser, demoIdentity } from './platform'
 
 const knowledgeBaseList = {
   knowledgeBases: demoKnowledgeBases,
@@ -215,10 +214,6 @@ function match(path: string, params: URLSearchParams): unknown {
   if (tail('v1', 'evals', 'runs', at(3), 'cases', at(5))) return demoEvalCaseArtifact(at(5))
   if (tail('v1', 'evals', 'runs', at(3), 'cases')) return demoEvalRunCases(at(3))
   if (tail('v1', 'evals', 'runs', at(3))) return demoEvalRun(at(3))
-
-  // --- platform (AgentCore Identity / Browser — what users can use) -------
-  if (path === '/v1/identity') return demoIdentity
-  if (path === '/v1/browser') return demoBrowser
 
   // --- admin (safety net) ----------------------------------------------
   if (path === '/v1/admin/users') return demoAdminUsers

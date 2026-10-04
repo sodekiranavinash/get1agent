@@ -882,20 +882,20 @@ export const DOCS: DocGroup[] = [
         id: 'platform',
         title: 'Platform status',
         summary:
-          'The AWS-native services behind the workspace: managed identity and browser for everyone; the governed catalog, optimisation and Bedrock levers for admins.',
+          'The AWS-native services behind the workspace: managed identity, governed catalog, browser, optimisation and the Bedrock levers. An admin-console page.',
         blocks: [
           {
             kind: 'paragraph',
-            text: 'Platform status reports the managed AWS services the workspace runs on. Everything here is provided by Amazon Bedrock and AgentCore; nothing is third-party. End users see the services they can use; the admin console sees the full operator view.',
+            text: 'Platform status is an admin-console page that reports the managed AWS services the workspace runs on. Everything here is provided by Amazon Bedrock and AgentCore; nothing is third-party.',
           },
           {
             kind: 'bullets',
             items: [
-              'Identity: AgentCore Identity holds third-party OAuth tokens in a managed vault, so they are never stored in this app. Each wired provider can request an on-behalf-of token. Available to users and admins.',
-              'Browser: open a managed browser session for an allowlisted domain and watch it through the live-view link. Only approved domains can be opened. Available to users and admins.',
-              'Registry (admin): a governed catalog of agents, MCP servers, tools and skills. Publish a record from here and search the catalog semantically.',
-              'Optimization (admin): AgentCore Optimization analyses evaluated traces and recommends better prompts and tool descriptions.',
-              'Bedrock levers (admin): the cost and latency settings currently applied — prompt caching, service tier, prompt routing and per-workload inference profiles.',
+              'Identity: AgentCore Identity holds third-party OAuth tokens in a managed vault, so they are never stored in this app. Each wired provider can request an on-behalf-of token.',
+              'Registry: a governed catalog of agents, MCP servers, tools and skills. Publish a record from here and search the catalog semantically.',
+              'Browser: open a managed browser session for an allowlisted domain and watch it through the live-view link. Only approved domains can be opened.',
+              'Optimization: AgentCore Optimization analyses evaluated traces and recommends better prompts and tool descriptions.',
+              'Bedrock levers: the cost and latency settings currently applied — prompt caching, service tier, prompt routing and per-workload inference profiles.',
             ],
           },
           {

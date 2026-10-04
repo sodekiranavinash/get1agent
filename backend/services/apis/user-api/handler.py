@@ -6102,124 +6102,6 @@ def _handle_lab_playground_judge(
     return _json(200, {"metrics": metrics})
 
 
-def _route_identity(
-    claims: dict[str, Any],
-    method: str,
-    rest: list[str],
-    body: dict[str, Any],
-    query: dict[str, str],
-):
-    """AgentCore Identity: provider status + on-demand OAuth tokens."""
-    if not rest:
-        if method == "GET":
-            return _handle_identity_status(claims)
-        raise ApiError(405, f"Method not allowed: {method}")
-    if rest[0] == "token" and method == "POST":
-        return _handle_identity_token(claims, body)
-    if rest[0] == "callback" and method == "GET":
-        # Public redirect target registered as the provider return URL.
-        return _json(200, {"ok": True, "state": query.get("state")})
-    raise ApiError(404, "Not found")
-
-
-def _handle_identity_status(claims: dict[str, Any]) -> dict[str, Any]:
-    from core import identity
-
-    get_or_create_user(claims)
-    return _json(200, identity.describe())
-
-
-def _handle_identity_token(claims: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
-    """Fetch a user's third-party OAuth token from the managed token vault.
-
-    Only the provider key is accepted from the client — never a client secret.
-    """
-    from core import identity
-
-    profile = get_or_create_user(claims)
-    provider = str(body.get("provider") or "").strip()
-    if not provider:
-        raise ApiError(400, "provider is required")
-    scopes = body.get("scopes")
-    scope_list = (
-        [str(value) for value in scopes if str(value).strip()]
-        if isinstance(scopes, list)
-        else []
-    )
-    if not identity.enabled():
-        raise ApiError(400, "AgentCore Identity is not configured for this workspace")
-    try:
-        token = identity.get_token(
-            profile["userId"], provider, scopes=scope_list or None
-        )
-    except RuntimeError as exc:
-        raise ApiError(400, str(exc)[:300]) from exc
-    except Exception as exc:  # noqa: BLE001 - provider/authorization failure
-        raise ApiError(502, f"Identity token request failed: {exc}") from exc
-
-    # Never echo a live token to the client; only its shape/lifetime.
-    return _json(
-        200,
-        {
-            "provider": provider,
-            "obtained": bool(token.get("accessToken")),
-            "expiresAt": token.get("expiresAt"),
-            "scopes": token.get("scopes") or scope_list,
-        },
-    )
-
-
-def _route_browser(
-    claims: dict[str, Any], method: str, rest: list[str], body: dict[str, Any]
-):
-    """AgentCore Browser: status, allowlist check, session lifecycle."""
-    from core import browser
-
-    get_or_create_user(claims)
-
-    if not rest:
-        if method == "GET":
-            return _json(200, browser.describe())
-        raise ApiError(405, f"Method not allowed: {method}")
-
-    if rest[0] == "check" and method == "POST":
-        url = str(body.get("url") or "").strip()
-        if not url:
-            raise ApiError(400, "url is required")
-        allowed, reason = browser.allowed(url)
-        return _json(200, {"allowed": allowed, "reason": reason})
-
-    # Order matters: the exact `session/close` route must be matched before the
-    # generic `session` route, which would otherwise swallow it.
-    if rest == ["session", "close"] and method == "POST":
-        session_id = str(body.get("sessionId") or "").strip()
-        if not session_id:
-            raise ApiError(400, "sessionId is required")
-        return _json(200, {"stopped": browser.stop_session(session_id)})
-
-    if rest == ["session"] and method == "POST":
-        url = str(body.get("url") or "").strip()
-        if not url:
-            raise ApiError(400, "url is required")
-        if not browser.enabled():
-            raise ApiError(400, "AgentCore Browser is not configured")
-        allowed, reason = browser.allowed(url)
-        if not allowed:
-            raise ApiError(403, reason)
-        try:
-            return _json(200, browser.start_session())
-        except Exception as exc:  # noqa: BLE001
-            raise ApiError(502, f"Browser session failed: {exc}") from exc
-
-    if rest == ["session"] and method == "DELETE":
-        session_id = str(body.get("sessionId") or "").strip()
-        if not session_id:
-            raise ApiError(400, "sessionId is required")
-        return _json(200, {"stopped": browser.stop_session(session_id)})
-
-    raise ApiError(404, "Not found")
-
-
 def _route_guardrails(
     claims: dict[str, Any], method: str, rest: list[str], body: dict[str, Any]
 ):
@@ -6845,10 +6727,6 @@ def _route(
         return _route_evals(claims, method, segments[2:], body, query)
     if segments[:2] == ["v1", "guardrails"]:
         return _route_guardrails(claims, method, segments[2:], body)
-    if segments[:2] == ["v1", "identity"]:
-        return _route_identity(claims, method, segments[2:], body, query)
-    if segments[:2] == ["v1", "browser"]:
-        return _route_browser(claims, method, segments[2:], body)
     if segments[:2] == ["v1", "lab"]:
         return _route_lab(claims, method, segments[2:], body, query)
     if segments[:2] == ["v1", "feedback"]:

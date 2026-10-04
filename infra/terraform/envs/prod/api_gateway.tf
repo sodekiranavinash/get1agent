@@ -573,48 +573,6 @@ module "api_gateway" {
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
-    identity_status = {
-      method               = "GET"
-      path                 = "/v1/identity"
-      lambda_invoke_arn    = module.user_api[0].invoke_arn
-      lambda_function_name = module.user_api[0].function_name
-      authorization_type   = "JWT"
-    }
-    identity_token = {
-      method               = "POST"
-      path                 = "/v1/identity/token"
-      lambda_invoke_arn    = module.user_api[0].invoke_arn
-      lambda_function_name = module.user_api[0].function_name
-      authorization_type   = "JWT"
-    }
-    browser_status = {
-      method               = "GET"
-      path                 = "/v1/browser"
-      lambda_invoke_arn    = module.user_api[0].invoke_arn
-      lambda_function_name = module.user_api[0].function_name
-      authorization_type   = "JWT"
-    }
-    browser_check = {
-      method               = "POST"
-      path                 = "/v1/browser/check"
-      lambda_invoke_arn    = module.user_api[0].invoke_arn
-      lambda_function_name = module.user_api[0].function_name
-      authorization_type   = "JWT"
-    }
-    browser_session_create = {
-      method               = "POST"
-      path                 = "/v1/browser/session"
-      lambda_invoke_arn    = module.user_api[0].invoke_arn
-      lambda_function_name = module.user_api[0].function_name
-      authorization_type   = "JWT"
-    }
-    browser_session_close = {
-      method               = "POST"
-      path                 = "/v1/browser/session/close"
-      lambda_invoke_arn    = module.user_api[0].invoke_arn
-      lambda_function_name = module.user_api[0].function_name
-      authorization_type   = "JWT"
-    }
     vault_providers = {
       method               = "GET"
       path                 = "/v1/vault/providers"

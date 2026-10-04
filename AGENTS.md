@@ -1351,9 +1351,9 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
   server `browser`). Tools: `open-browser-session` / `close-browser-session`.
   `core/browser.py` starts/stops sessions and enforces a **domain allowlist**
   (`BROWSER_ALLOWED_DOMAINS`, empty denies all); the `browser` tool is also
-  covered by AgentCore Policy. User routes `GET /v1/browser`, `POST
-  /v1/browser/check`, `POST|DELETE /v1/browser/session`; admin mirror under
-  `/v1/admin/platform/browser`. Env: `BROWSER_ID`, `BROWSER_REGION`,
+  covered by AgentCore Policy. Admin-only routes (admin-console) under
+  `/v1/admin/platform/browser` (`GET`, `POST /check`, `POST /session`,
+  `POST /session/close`). Env: `BROWSER_ID`, `BROWSER_REGION`,
   `BROWSER_ALLOWED_DOMAINS`, `BROWSER_MCP_FUNCTION`.
 
 ### AgentCore Identity (managed OAuth)
@@ -1366,13 +1366,11 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
   credentials. Providers are created only when their credentials are supplied
   (`identity_google_client_id`, `identity_github_client_id`, `identity_slack_client_id`).
 - `core/identity.py` resolves a provider key to its ARN and calls
-  `GetResourceOauth2Token` for a user; the runtime and `user-api` carry the
+  `GetResourceOauth2Token` for a user; the runtime and `admin-console` carry the
   `bedrock-agentcore:GetResourceOauth2Token` grant.
-- Routes: user view in `user-api` — `GET /v1/identity` (which providers are wired),
-  `POST /v1/identity/token` (fetch a user's token by provider — never returns the
-  raw secret to the client), and the public `GET /v1/identity/callback` return URL.
-  Admin view in `admin-console` — `GET /v1/admin/platform/identity`, `POST
-  /v1/admin/platform/identity/token`.
+- Routes (admin-only, admin-console): `GET /v1/admin/platform/identity`,
+  `POST /v1/admin/platform/identity/token` (fetch a user's token by provider —
+  never returns the raw secret to the client).
   Env: `AGENT_WORKLOAD_IDENTITY_ARN`, `AGENT_TOKEN_VAULT_ID`,
   `AGENT_IDENTITY_PROVIDERS`, `AGENT_IDENTITY_RETURN_URL`.
 - The Vault (KMS-encrypted user secrets) remains for user-supplied API keys;

@@ -95,9 +95,6 @@ const VaultPage = lazy(() =>
 const GuardrailsPage = lazy(() =>
   import('./pages/GuardrailsPage').then((m) => ({ default: m.GuardrailsPage })),
 )
-const PlatformPage = lazy(() =>
-  import('./pages/PlatformPage').then((m) => ({ default: m.PlatformPage })),
-)
 const McpOAuthCallbackPage = lazy(() =>
   import('./pages/McpOAuthCallbackPage').then((m) => ({
     default: m.McpOAuthCallbackPage,
@@ -193,7 +190,6 @@ function PrefetchRoutes() {
       void import('./pages/StoragePage')
       void import('./pages/VaultPage')
       void import('./pages/SettingsPage')
-      void import('./pages/PlatformPage')
       void import('./pages/PrivacyPage')
       void import('./pages/DocumentationPage')
       void import('./pages/ChangelogPage')
@@ -278,7 +274,6 @@ function App() {
             <Route path="/storage" element={<StoragePage />} />
             <Route path="/vault" element={<VaultPage />} />
             <Route path="/guardrails" element={<GuardrailsPage />} />
-            <Route path="/platform" element={<PlatformPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
           {/* Full-screen, chrome-free trace explorer (no sidebar/navbar). */}

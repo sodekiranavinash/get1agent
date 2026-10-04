@@ -14,7 +14,6 @@ import {
   HardDrive,
   KeyRound,
   ShieldCheck,
-  Layers,
   LayoutDashboard,
   LifeBuoy,
   MessageSquare,
@@ -90,12 +89,6 @@ export const sidebarLinks: SidebarLink[] = [
     section: 'build',
   },
   {
-    to: '/guardrails',
-    label: 'Guardrails',
-    icon: ShieldCheck,
-    section: 'build',
-  },
-  {
     to: '/traces',
     label: 'Traces',
     tooltip: 'Traces',
@@ -130,6 +123,12 @@ export const sidebarLinks: SidebarLink[] = [
     section: 'resources',
   },
   { to: '/tools', label: 'MCP Tools', icon: Plug, section: 'resources' },
+  {
+    to: '/guardrails',
+    label: 'Guardrails',
+    icon: ShieldCheck,
+    section: 'resources',
+  },
 
   { to: '/agent-store', label: 'Agents', icon: BookOpen, section: 'marketplace' },
   {
@@ -140,7 +139,6 @@ export const sidebarLinks: SidebarLink[] = [
   },
 
   { to: '/vault', label: 'Vault', icon: KeyRound, section: 'manage' },
-  { to: '/platform', label: 'Platform status', icon: Layers, section: 'manage' },
   { to: '/usage', label: 'Usage', icon: CreditCard, section: 'manage' },
 
   {

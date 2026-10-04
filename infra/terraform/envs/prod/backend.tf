@@ -813,12 +813,6 @@ module "user_api" {
   bedrock_model_arns = local.bedrock_lab_model_arns
   # Guardrails page: the user creates/queries/tests their own Bedrock guardrails.
   enable_guardrail_management = true
-  # AgentCore Identity: the /v1/identity routes fetch on-demand OAuth tokens.
-  bedrock_agentcore_arns = [
-    "arn:aws:bedrock-agentcore:${var.aws_region}:aws:token-vault/*",
-    "arn:aws:bedrock-agentcore:${var.aws_region}:aws:workload-identity/*",
-    "arn:aws:bedrock-agentcore:${var.aws_region}:aws:credential-provider/*",
-  ]
 
   # The Playground runs tests in and generates tool code with custom-tools; the
   # evaluation lab retrieves through knowledge-mcp and can run agents via the
@@ -862,11 +856,6 @@ module "user_api" {
     BEDROCK_PROFILE_EVAL      = var.bedrock_profile_eval
     BEDROCK_PROFILE_INGESTION = var.bedrock_profile_ingestion
     GUARDRAIL_VERSION         = var.guardrail_version
-    # AgentCore Identity (managed OAuth token vault) for the identity routes.
-    AGENT_WORKLOAD_IDENTITY_ARN = local.workload_identity_arn
-    AGENT_TOKEN_VAULT_ID        = local.token_vault_id
-    AGENT_IDENTITY_PROVIDERS    = join(",", local.identity_provider_arns)
-    AGENT_IDENTITY_RETURN_URL   = var.agent_identity_return_url
     # The Playground turn route generates in a background invocation of this
     # same function, so it can outlive the 30s API Gateway integration cap.
     CUSTOM_TOOLS_GENERATE_MAX_TOKENS            = "32000"
