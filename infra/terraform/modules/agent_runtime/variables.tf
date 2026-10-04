@@ -87,6 +87,12 @@ variable "kms_key_arns" {
   description = "KMS keys the runtime may decrypt (Vault provider secrets)"
 }
 
+variable "bedrock_model_arns" {
+  type        = list(string)
+  default     = []
+  description = "Bedrock model/inference-profile ARNs the runtime may invoke"
+}
+
 variable "runtime_environment" {
   type        = map(string)
   default     = {}

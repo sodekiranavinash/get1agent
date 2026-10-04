@@ -1,5 +1,5 @@
 {
-  "Comment": "Ingest one document: Extract (VPC) -> Embed (no VPC) -> Index (VPC). Any stage failure records which stage failed, then marks the document failed. Runs as STANDARD so long ingestions are not cut off by the EXPRESS 5-minute cap; TimeoutSeconds is the safety bound.",
+  "Comment": "Ingest one document: Extract -> Embed -> Index. Any stage failure records which stage failed, then marks the document failed. Runs as STANDARD so long ingestions are not cut off by the EXPRESS 5-minute cap; TimeoutSeconds is the safety bound.",
   "StartAt": "Extract",
   "TimeoutSeconds": 3600,
   "States": {

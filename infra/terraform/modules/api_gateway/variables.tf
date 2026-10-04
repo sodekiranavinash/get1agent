@@ -14,12 +14,12 @@ variable "enable_custom_domain" {
   description = "Create ACM cert + api.<domain> mapping (requires DNS validation CNAME in Cloudflare)"
 }
 
-variable "auth0_domain" {
+variable "auth_domain" {
   type        = string
   description = "Auth0 tenant domain (e.g. get1agent.us.auth0.com)"
 }
 
-variable "auth0_audience" {
+variable "auth_audience" {
   type        = string
   description = "Auth0 API identifier — must match frontend authorizationParams.audience"
 }

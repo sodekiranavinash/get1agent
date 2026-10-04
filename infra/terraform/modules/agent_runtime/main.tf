@@ -21,6 +21,39 @@ resource "aws_ecr_repository" "worker" {
   tags = var.tags
 }
 
+# Keep image storage bounded: each deploy pushes a new tag, so retain only the
+# few most recent tagged worker images and drop untagged build layers quickly.
+resource "aws_ecr_lifecycle_policy" "worker" {
+  repository = aws_ecr_repository.worker.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Expire untagged images after 2 days"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 2
+        }
+        action = { type = "expire" }
+      },
+      {
+        rulePriority = 2
+        description  = "Keep only the 3 most recent tagged worker images"
+        selection = {
+          tagStatus      = "tagged"
+          tagPatternList = ["*"]
+          countType      = "imageCountMoreThan"
+          countNumber    = 3
+        }
+        action = { type = "expire" }
+      },
+    ]
+  })
+}
+
 # --- Runtime execution role --------------------------------------------------
 
 data "aws_caller_identity" "current" {}
@@ -103,6 +136,16 @@ resource "aws_iam_role_policy" "runtime" {
         Resource = var.kms_key_arns
       },
       {
+        # The platform model gateway is Amazon Bedrock (Converse / InvokeModel).
+        Sid    = "BedrockModels"
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream",
+        ]
+        Resource = var.bedrock_model_arns
+      },
+      {
         Sid      = "Logs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
@@ -112,6 +155,37 @@ resource "aws_iam_role_policy" "runtime" {
         Sid      = "XRay"
         Effect   = "Allow"
         Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"]
+        Resource = "*"
+      },
+      {
+        # AgentCore Memory (short + long term) and Policy (tool-call decisions).
+        Sid    = "BedrockAgentCoreMemoryPolicy"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:CreateEvent",
+          "bedrock-agentcore:ListEvents",
+          "bedrock-agentcore:GetEvent",
+          "bedrock-agentcore:RetrieveMemoryRecords",
+          "bedrock-agentcore:ListMemoryRecords",
+          "bedrock-agentcore:GetMemoryRecord",
+          "bedrock-agentcore:DeleteMemoryRecord",
+          "bedrock-agentcore:GetMemory",
+          "bedrock-agentcore:GetMemoryStrategy",
+          "bedrock-agentcore:AuthorizeAction",
+          "bedrock-agentcore:EvaluatePolicy",
+        ]
+        Resource = "*"
+      },
+      {
+        # AgentCore Identity: fetch a user's third-party OAuth token on demand.
+        Sid    = "BedrockAgentCoreIdentity"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:GetResourceOauth2Token",
+          "bedrock-agentcore:GetWorkloadAccessToken",
+          "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
+          "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
+        ]
         Resource = "*"
       },
       {
@@ -339,8 +413,8 @@ resource "aws_lambdamicrovms_image" "agent_run" {
     AGENT_RUNTIME_ARN         = aws_bedrockagentcore_agent_runtime.worker[0].agent_runtime_arn
     AGENT_RUNTIME_QUALIFIER   = "DEFAULT"
     AGENT_RUN_TIMEOUT_SECONDS = tostring(var.microvm_max_run_seconds)
-    AUTH0_DISCOVERY_URL       = var.jwt_discovery_url
-    AUTH0_AUDIENCE            = join(",", var.jwt_allowed_audience)
+    AUTH_DISCOVERY_URL        = var.jwt_discovery_url
+    AUTH_AUDIENCE             = join(",", var.jwt_allowed_audience)
     AGENT_RUN_ALLOWED_ORIGINS = join(",", var.allowed_origins)
     # AWS_REGION / AWS_DEFAULT_REGION are reserved (Lambda injects them), so the
     # region is passed under our own key and read with a fallback.
@@ -352,12 +426,9 @@ resource "aws_lambdamicrovms_image" "agent_run" {
   # The image build reads the zip from S3, so upload it first.
   depends_on = [aws_s3_object.microvm_artifact]
 
-  # Rebuild the image whenever the artifact changes (the `code_artifact.uri` is
-  # stable, so Terraform would otherwise not detect a new zip).
-  lifecycle {
-    replace_triggered_by = [aws_s3_object.microvm_artifact]
-  }
-
+  # The caller content-addresses `microvm_artifact_key`, so a changed zip yields a
+  # new `code_artifact.uri` and the provider applies it as a new image version in
+  # place. (A forced replace would collide on the stable image name.)
   timeouts {
     create = "20m"
   }

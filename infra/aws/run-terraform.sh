@@ -117,28 +117,48 @@ run_env() {
       need_backend=true
     else
       case "$PROD_TARGETS" in
-        *layer_base*|*layer_genai*|*layer_extra_tools*|*user_api*|*knowledge_mcp*|*ingestion*|*mcp_tester*|*code_interpreter*|*web_search*|*http_fetch*|*mcp_connections*)
+        *user_api*|*knowledge_mcp*|*ingestion*|*mcp_tester*|*code_interpreter*|*http_fetch*|*custom_tools*|*mcp_connections*|*browser*|*scheduler*)
           need_backend=true
           ;;
       esac
     fi
 
-    check_zip "$ROOT/backend/services/dependency-layers/base/dist/layer.zip" "base layer" "bash infra/aws/build-backend-layers.sh"
-    check_zip "$ROOT/backend/services/dependency-layers/genai/dist/layer.zip" "genai layer" "bash infra/aws/build-backend-layers.sh"
-    check_zip "$ROOT/backend/services/dependency-layers/extra-tools/dist/layer.zip" "extra-tools layer" "bash infra/aws/build-backend-layers.sh"
-    check_zip "$ROOT/backend/services/user-api/dist/function.zip" "user-api" "make -C backend/services/user-api package"
-    check_zip "$ROOT/backend/services/knowledge-mcp/dist/function.zip" "knowledge-mcp" "make -C backend/services/knowledge-mcp package"
-    check_zip "$ROOT/backend/services/ingestion-dispatcher/dist/function.zip" "ingestion-dispatcher" "make -C backend/services/ingestion-dispatcher package"
-    check_zip "$ROOT/backend/services/ingestion-extract/dist/function.zip" "ingestion-extract" "make -C backend/services/ingestion-extract package"
-    check_zip "$ROOT/backend/services/ingestion-embed/dist/function.zip" "ingestion-embed" "make -C backend/services/ingestion-embed package"
-    check_zip "$ROOT/backend/services/ingestion-index/dist/function.zip" "ingestion-index" "make -C backend/services/ingestion-index package"
-    check_zip "$ROOT/backend/services/ingestion-mark-failed/dist/function.zip" "ingestion-mark-failed" "make -C backend/services/ingestion-mark-failed package"
-    check_zip "$ROOT/backend/services/ingestion-watchdog/dist/function.zip" "ingestion-watchdog" "make -C backend/services/ingestion-watchdog package"
-    check_zip "$ROOT/backend/services/mcp-tester/dist/function.zip" "mcp-tester" "make -C backend/services/mcp-tester package"
-    check_zip "$ROOT/backend/services/code-interpreter/dist/function.zip" "code-interpreter" "make -C backend/services/code-interpreter package"
-    check_zip "$ROOT/backend/services/web-search/dist/function.zip" "web-search" "make -C backend/services/web-search package"
-    check_zip "$ROOT/backend/services/http-fetch/dist/function.zip" "http-fetch" "make -C backend/services/http-fetch package"
-    check_zip "$ROOT/backend/services/mcp-connections/dist/function.zip" "mcp-connections" "make -C backend/services/mcp-connections package"
+    # Note: Lambda layers are deprecated. Dependencies are now bundled with each Lambda.
+    # See MIGRATION_SUMMARY.md for details.
+    check_zip "$ROOT/backend/services/apis/user-api/dist/function.zip" "user-api" "make -C backend/services/apis/user-api package"
+    check_zip "$ROOT/backend/services/mcp/knowledge-mcp/dist/function.zip" "knowledge-mcp" "make -C backend/services/mcp/knowledge-mcp package"
+    check_zip "$ROOT/backend/services/ingestion/ingestion-dispatcher/dist/function.zip" "ingestion-dispatcher" "make -C backend/services/ingestion/ingestion-dispatcher package"
+    check_zip "$ROOT/backend/services/ingestion/ingestion-extract/dist/function.zip" "ingestion-extract" "make -C backend/services/ingestion/ingestion-extract package"
+    check_zip "$ROOT/backend/services/ingestion/ingestion-embed/dist/function.zip" "ingestion-embed" "make -C backend/services/ingestion/ingestion-embed package"
+    check_zip "$ROOT/backend/services/ingestion/ingestion-index/dist/function.zip" "ingestion-index" "make -C backend/services/ingestion/ingestion-index package"
+    check_zip "$ROOT/backend/services/ingestion/ingestion-mark-failed/dist/function.zip" "ingestion-mark-failed" "make -C backend/services/ingestion/ingestion-mark-failed package"
+    check_zip "$ROOT/backend/services/ingestion/ingestion-watchdog/dist/function.zip" "ingestion-watchdog" "make -C backend/services/ingestion/ingestion-watchdog package"
+    check_zip "$ROOT/backend/services/admin/mcp-tester/dist/function.zip" "mcp-tester" "make -C backend/services/admin/mcp-tester package"
+    check_zip "$ROOT/backend/services/mcp/code-interpreter/dist/function.zip" "code-interpreter" "make -C backend/services/mcp/code-interpreter package"
+    check_zip "$ROOT/backend/services/mcp/http-fetch/dist/function.zip" "http-fetch" "make -C backend/services/mcp/http-fetch package"
+    check_zip "$ROOT/backend/services/mcp/mcp-connections/dist/function.zip" "mcp-connections" "make -C backend/services/mcp/mcp-connections package"
+
+    # Never let an unset image URI destroy a deployed AgentCore runtime. An empty
+    # `agent_worker_image_uri` makes module.agent_runtime plan its container-side
+    # resources for destruction (user_api/scheduler depend on that module), so
+    # reuse the currently deployed image unless the caller set one explicitly
+    # (deploy-agent-runtime.sh passes the fresh image with `-var`, which wins).
+    if [[ -z "${TF_VAR_agent_worker_image_uri:-}" ]]; then
+      local region="${AWS_REGION:-ap-south-1}" rid img
+      rid="$(aws bedrock-agentcore-control list-agent-runtimes --region "$region" \
+        --query "items[?name=='get1agent_prod_agent_worker'].agentRuntimeId | [0]" \
+        --output text 2>/dev/null || true)"
+      if [[ -n "$rid" && "$rid" != "None" ]]; then
+        img="$(aws bedrock-agentcore-control get-agent-runtime --region "$region" \
+          --agent-runtime-id "$rid" \
+          --query 'agentRuntimeArtifact.containerConfiguration.containerUri' \
+          --output text 2>/dev/null || true)"
+        if [[ -n "$img" && "$img" != "None" ]]; then
+          export TF_VAR_agent_worker_image_uri="$img"
+          echo "Preserving deployed agent runtime image: $img"
+        fi
+      fi
+    fi
   fi
 
   init_s3

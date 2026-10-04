@@ -21,6 +21,7 @@ repo is mounted read-only at /opt/get1agent.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -82,7 +83,6 @@ FUNCTIONS = {
     "knowledge_mcp": "get1agent-local-knowledge-mcp",
     "mcp_tester": "get1agent-local-mcp-tester",
     "code_interpreter": "get1agent-local-code-interpreter",
-    "web_search": "get1agent-local-web-search",
     "http_fetch": "get1agent-local-http-fetch",
     "mcp_connections": "get1agent-local-mcp-connections",
     "custom_tools": "get1agent-local-custom-tools",
@@ -212,9 +212,7 @@ ROUTES = {
     "knowledge_mcp": [
         ("POST", "/mcp"),
     ],
-    "web_search": [
-        ("POST", "/mcp/web-search"),
-    ],
+
     "code_interpreter": [
         ("POST", "/mcp/code-interpreter"),
     ],
@@ -363,47 +361,61 @@ def ensure_bucket(s3) -> None:
 
 
 def ensure_queues(sqs) -> tuple[str, str]:
+    # Try to get existing queues
+    try:
+        queue_url = sqs.get_queue_url(QueueName=QUEUE_NAME)['QueueUrl']
+        dlq_url = sqs.get_queue_url(QueueName=DLQ_NAME)['QueueUrl']
+        queue_attrs = sqs.get_queue_attributes(
+            QueueUrl=queue_url, AttributeNames=['QueueArn', 'RedrivePolicy']
+        )
+        queue_arn = queue_attrs['Attributes']['QueueArn']
+        log(f'queues {QUEUE_NAME} (+ {DLQ_NAME}) exist')
+        return queue_url, queue_arn
+    except sqs.exceptions.QueueDoesNotExist:
+        pass
+    except Exception:
+        pass  # Fall through to create
+    
+    # Create queues if they don't exist
     dlq = sqs.create_queue(
-        QueueName=DLQ_NAME, Attributes={"MessageRetentionPeriod": "1209600"}
+        QueueName=DLQ_NAME, Attributes={'MessageRetentionPeriod': '1209600'}
     )
     dlq_arn = sqs.get_queue_attributes(
-        QueueUrl=dlq["QueueUrl"], AttributeNames=["QueueArn"]
-    )["Attributes"]["QueueArn"]
+        QueueUrl=dlq['QueueUrl'], AttributeNames=['QueueArn']
+    )['Attributes']['QueueArn']
 
     queue = sqs.create_queue(
         QueueName=QUEUE_NAME,
-        Attributes={"VisibilityTimeout": "300", "MessageRetentionPeriod": "345600"},
+        Attributes={'VisibilityTimeout': '300', 'MessageRetentionPeriod': '345600'},
     )
-    queue_url = queue["QueueUrl"]
+    queue_url = queue['QueueUrl']
     queue_arn = sqs.get_queue_attributes(
-        QueueUrl=queue_url, AttributeNames=["QueueArn"]
-    )["Attributes"]["QueueArn"]
+        QueueUrl=queue_url, AttributeNames=['QueueArn']
+    )['Attributes']['QueueArn']
 
     sqs.set_queue_attributes(
         QueueUrl=queue_url,
         Attributes={
-            "RedrivePolicy": json.dumps(
-                {"deadLetterTargetArn": dlq_arn, "maxReceiveCount": "3"}
+            'RedrivePolicy': json.dumps(
+                {'deadLetterTargetArn': dlq_arn, 'maxReceiveCount': '3'}
             ),
-            "Policy": json.dumps(
+            'Policy': json.dumps(
                 {
-                    "Version": "2012-10-17",
-                    "Statement": [
+                    'Version': '2012-10-17',
+                    'Statement': [
                         {
-                            "Effect": "Allow",
-                            "Principal": {"Service": "events.amazonaws.com"},
-                            "Action": "sqs:SendMessage",
-                            "Resource": queue_arn,
+                            'Effect': 'Allow',
+                            'Principal': {'Service': 'events.amazonaws.com'},
+                            'Action': 'sqs:SendMessage',
+                            'Resource': queue_arn,
                         }
                     ],
                 }
             ),
         },
     )
-    log(f"created queues {QUEUE_NAME} (+ {DLQ_NAME})")
+    log(f'created queues {QUEUE_NAME} (+ {DLQ_NAME})')
     return queue_url, queue_arn
-
-
 def ensure_rule(events, queue_arn: str) -> None:
     pattern = json.dumps(
         {
@@ -481,15 +493,9 @@ def ensure_scheduler_rule(events, function_arn: str) -> None:
 
 
 def ensure_layer(lm, name: str, zip_path: str) -> str:
-    with open(zip_path, "rb") as handle:
-        content = handle.read()
-    response = lm.publish_layer_version(
-        LayerName=name,
-        Content={"ZipFile": content},
-        CompatibleRuntimes=[RUNTIME],
-    )
-    log(f"published layer {name} {response['LayerVersionArn']}")
-    return response["LayerVersionArn"]
+    log(f"Note: Lambda layers are deprecated (dependencies are bundled per Lambda)")
+    log(f"Skipping layer {name}")
+    return ""
 
 
 def ensure_function(
@@ -503,6 +509,25 @@ def ensure_function(
     timeout: int,
     memory: int,
 ) -> str:
+    # Track checksums in a file to avoid unnecessary updates
+    # Store in /tmp (cleared on container restart) - this is fine since checksums
+    # are only needed within a single session. If Floci restarts, we'll update all Lambdas once.
+    CHECKSUM_FILE = "/tmp/floci-lambda-checksums.json"
+    
+    def load_checksums():
+        if os.path.exists(CHECKSUM_FILE):
+            with open(CHECKSUM_FILE, 'r') as f:
+                return json.load(f)
+        return {}
+    
+    def save_checksums(checksums):
+        with open(CHECKSUM_FILE, 'w') as f:
+            json.dump(checksums, f)
+    
+    def compute_checksum(filepath):
+        with open(filepath, 'rb') as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    
     with open(zip_path, "rb") as handle:
         code = handle.read()
     config = {
@@ -521,13 +546,32 @@ def ensure_function(
             **config,
         )
         log(f"created function {name}")
+        # Save checksum for newly created function
+        checksums = load_checksums()
+        checksums[name] = compute_checksum(zip_path)
+        save_checksums(checksums)
     except ClientError as exc:
         if exc.response["Error"]["Code"] != "ResourceConflictException":
             raise
-        lm.update_function_code(FunctionName=name, ZipFile=code)
-        lm.get_waiter("function_updated").wait(FunctionName=name)
+        
+        # Check if we need to update based on checksum
+        checksums = load_checksums()
+        current_checksum = compute_checksum(zip_path)
+        
+        if name in checksums and checksums[name] == current_checksum:
+            # Checksum hasn't changed, skip code update
+            log(f"skipped function {name} code update (no changes)")
+        else:
+            # Checksum changed or function not tracked yet
+            lm.update_function_code(FunctionName=name, ZipFile=code)
+            log(f"updated function {name} code")
+            # Save new checksum
+            checksums[name] = current_checksum
+            save_checksums(checksums)
+        
+        # Always update configuration (env vars may have changed)
         lm.update_function_configuration(FunctionName=name, **config)
-        log(f"updated function {name}")
+        log(f"updated function {name} configuration")
     return lm.get_function(FunctionName=name)["Configuration"]["FunctionArn"]
 
 
@@ -608,10 +652,13 @@ def ensure_event_source_mapping(lm, function_name: str, queue_arn: str) -> None:
 
 
 def ensure_http_api(apigw, function_arns: dict[str, str]) -> str:
+    # Try to reuse existing API
     for api in apigw.get_apis().get("Items", []):
         if api["Name"] == API_NAME:
-            apigw.delete_api(ApiId=api["ApiId"])
-
+            log(f"reusing existing HTTP API {api['ApiId']}")
+            return api["ApiId"]
+    
+    # If not found, create new
     api = apigw.create_api(
         Name=API_NAME,
         ProtocolType="HTTP",
@@ -672,22 +719,22 @@ def ensure_http_api(apigw, function_arns: dict[str, str]) -> str:
 
 def main() -> int:
     required = [
-        f"{ROOT}/backend/services/dependency-layers/base/dist/layer.zip",
-        f"{ROOT}/backend/services/dependency-layers/genai/dist/layer.zip",
-        f"{ROOT}/backend/services/dependency-layers/extra-tools/dist/layer.zip",
-        f"{ROOT}/backend/services/user-api/dist/function.zip",
-        f"{ROOT}/backend/services/knowledge-mcp/dist/function.zip",
-        f"{ROOT}/backend/services/mcp-tester/dist/function.zip",
-        f"{ROOT}/backend/services/web-search/dist/function.zip",
-        f"{ROOT}/backend/services/code-interpreter/dist/function.zip",
-        f"{ROOT}/backend/services/http-fetch/dist/function.zip",
-        f"{ROOT}/backend/services/mcp-connections/dist/function.zip",
-        f"{ROOT}/backend/services/ingestion-dispatcher/dist/function.zip",
-        f"{ROOT}/backend/services/ingestion-extract/dist/function.zip",
-        f"{ROOT}/backend/services/ingestion-embed/dist/function.zip",
-        f"{ROOT}/backend/services/ingestion-index/dist/function.zip",
-        f"{ROOT}/backend/services/ingestion-mark-failed/dist/function.zip",
-        f"{ROOT}/backend/services/ingestion-watchdog/dist/function.zip",
+        # Layer zips are no longer needed (dependencies bundled per Lambda)
+        # f"{ROOT}/backend/services/dependency-layers/base/dist/layer.zip",
+        # f"{ROOT}/backend/services/dependency-layers/genai/dist/layer.zip",
+        # f"{ROOT}/backend/services/dependency-layers/extra-tools/dist/layer.zip",
+        f"{ROOT}/backend/services/apis/user-api/dist/function.zip",
+        f"{ROOT}/backend/services/mcp/knowledge-mcp/dist/function.zip",
+        f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
+        f"{ROOT}/backend/services/mcp/code-interpreter/dist/function.zip",
+        f"{ROOT}/backend/services/mcp/http-fetch/dist/function.zip",
+        f"{ROOT}/backend/services/mcp/mcp-connections/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-dispatcher/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-extract/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-embed/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-index/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-mark-failed/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-watchdog/dist/function.zip",
     ]
     for path in required:
         if not os.path.exists(path):
@@ -708,21 +755,10 @@ def main() -> int:
     queue_url, queue_arn = ensure_queues(sqs)
     ensure_rule(events, queue_arn)
 
-    base_layer_arn = ensure_layer(
-        lm,
-        "get1agent-local-layer-base",
-        f"{ROOT}/backend/services/dependency-layers/base/dist/layer.zip",
-    )
-    genai_layer_arn = ensure_layer(
-        lm,
-        "get1agent-local-layer-genai",
-        f"{ROOT}/backend/services/dependency-layers/genai/dist/layer.zip",
-    )
-    extra_tools_layer_arn = ensure_layer(
-        lm,
-        "get1agent-local-layer-extra-tools",
-        f"{ROOT}/backend/services/dependency-layers/extra-tools/dist/layer.zip",
-    )
+    # No layers for local development - dependencies are bundled per Lambda
+    base_layer_arn = ""
+    genai_layer_arn = ""
+    extra_tools_layer_arn = ""
 
     ddb_env = {
         "DYNAMODB_TABLE": DYNAMODB_TABLE,
@@ -769,9 +805,9 @@ def main() -> int:
     ensure_function(
         lm,
         FUNCTIONS["extract"],
-        f"{ROOT}/backend/services/ingestion-extract/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-extract/dist/function.zip",
         handler="handler.lambda_handler",
-        layers=[extra_tools_layer_arn],
+        layers=[],
         environment=worker_env,
         timeout=300,
         memory=1024,
@@ -779,7 +815,7 @@ def main() -> int:
     ensure_function(
         lm,
         FUNCTIONS["embed"],
-        f"{ROOT}/backend/services/ingestion-embed/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-embed/dist/function.zip",
         handler="handler.lambda_handler",
         layers=[],
         environment=worker_env,
@@ -789,7 +825,7 @@ def main() -> int:
     ensure_function(
         lm,
         FUNCTIONS["index"],
-        f"{ROOT}/backend/services/ingestion-index/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-index/dist/function.zip",
         handler="handler.lambda_handler",
         layers=[],
         environment=worker_env,
@@ -799,7 +835,7 @@ def main() -> int:
     ensure_function(
         lm,
         FUNCTIONS["mark_failed"],
-        f"{ROOT}/backend/services/ingestion-mark-failed/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-mark-failed/dist/function.zip",
         handler="handler.lambda_handler",
         layers=[],
         environment=worker_env,
@@ -809,7 +845,7 @@ def main() -> int:
     watchdog_arn = ensure_function(
         lm,
         FUNCTIONS["watchdog"],
-        f"{ROOT}/backend/services/ingestion-watchdog/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-watchdog/dist/function.zip",
         handler="handler.lambda_handler",
         layers=[],
         environment={**worker_env, "STALL_THRESHOLD_MINUTES": "75"},
@@ -823,7 +859,7 @@ def main() -> int:
     ensure_function(
         lm,
         FUNCTIONS["dispatcher"],
-        f"{ROOT}/backend/services/ingestion-dispatcher/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-dispatcher/dist/function.zip",
         handler="handler.lambda_handler",
         layers=[],
         environment={
@@ -911,9 +947,9 @@ def main() -> int:
     user_api_arn = ensure_function(
         lm,
         FUNCTIONS["user_api"],
-        f"{ROOT}/backend/services/user-api/dist/function.zip",
+        f"{ROOT}/backend/services/apis/user-api/dist/function.zip",
         handler="handler.lambda_handler",
-        layers=[base_layer_arn],
+        layers=[],
         environment=api_env,
         timeout=300,
         memory=512,
@@ -926,7 +962,7 @@ def main() -> int:
         FUNCTIONS["scheduler"],
         f"{ROOT}/backend/services/scheduler/dist/function.zip",
         handler="handler.lambda_handler",
-        layers=[base_layer_arn],
+        layers=[],
         environment={
             "DYNAMODB_TABLE": DYNAMODB_TABLE,
             "DYNAMODB_ENDPOINT_URL": DYNAMODB_ENDPOINT_URL,
@@ -950,9 +986,9 @@ def main() -> int:
     mcp_arn = ensure_function(
         lm,
         FUNCTIONS["knowledge_mcp"],
-        f"{ROOT}/backend/services/knowledge-mcp/dist/function.zip",
+        f"{ROOT}/backend/services/mcp/knowledge-mcp/dist/function.zip",
         handler="handler.lambda_handler",
-        layers=[base_layer_arn, genai_layer_arn],
+        layers=[],
         environment={
             **worker_env,
             "RERANK_MODE": RERANK_MODE,
@@ -968,9 +1004,9 @@ def main() -> int:
     code_interpreter_arn = ensure_function(
         lm,
         FUNCTIONS["code_interpreter"],
-        f"{ROOT}/backend/services/code-interpreter/dist/function.zip",
+        f"{ROOT}/backend/services/mcp/code-interpreter/dist/function.zip",
         handler="handler.lambda_handler",
-        layers=[base_layer_arn, genai_layer_arn],
+        layers=[],
         environment={
             "CODE_INTERPRETER_MODE": "local",
             "CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS": "120",
@@ -988,9 +1024,9 @@ def main() -> int:
     custom_tools_arn = ensure_function(
         lm,
         FUNCTIONS["custom_tools"],
-        f"{ROOT}/backend/services/custom-tools/dist/function.zip",
+        f"{ROOT}/backend/services/mcp/custom-tools/dist/function.zip",
         handler="handler.lambda_handler",
-        layers=[base_layer_arn, genai_layer_arn],
+        layers=[],
         environment={
             "CUSTOM_TOOLS_MODE": "local",
             "CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS": "60",
@@ -1009,34 +1045,15 @@ def main() -> int:
         timeout=180,
         memory=1024,
     )
-    # Exa is a public HTTPS API, so the local tool calls it directly with the
-    # host EXA_API_KEY (no emulation branch).
-    web_search_arn = ensure_function(
-        lm,
-        FUNCTIONS["web_search"],
-        f"{ROOT}/backend/services/web-search/dist/function.zip",
-        handler="handler.lambda_handler",
-        layers=[base_layer_arn, genai_layer_arn],
-        environment={
-            "EXA_API_KEY": os.environ.get("EXA_API_KEY", ""),
-            "EXA_API_BASE_URL": os.environ.get("EXA_API_BASE_URL", "https://api.exa.ai"),
-            "WEB_SEARCH_TIMEOUT_SECONDS": "45",
-            "WEB_SEARCH_MAX_RESULTS": "25",
-            "AWS_REGION": REGION,
-            "AWS_DEFAULT_REGION": REGION,
-        },
-        timeout=60,
-        memory=512,
-    )
     # Trusted web fetch + user storage access. Runs outside a VPC and reaches
     # public HTTPS directly (with a per-request SSRF guard); stores results in
     # the user's S3 storage area, so it needs the table + bucket.
     http_fetch_arn = ensure_function(
         lm,
         FUNCTIONS["http_fetch"],
-        f"{ROOT}/backend/services/http-fetch/dist/function.zip",
+        f"{ROOT}/backend/services/mcp/http-fetch/dist/function.zip",
         handler="handler.lambda_handler",
-        layers=[base_layer_arn, genai_layer_arn],
+        layers=[],
         environment={
             "DYNAMODB_TABLE": DYNAMODB_TABLE,
             "DYNAMODB_ENDPOINT_URL": DYNAMODB_ENDPOINT_URL,
@@ -1054,7 +1071,7 @@ def main() -> int:
     mcp_tester_arn = ensure_function(
         lm,
         FUNCTIONS["mcp_tester"],
-        f"{ROOT}/backend/services/mcp-tester/dist/function.zip",
+        f"{ROOT}/backend/services/admin/mcp-tester/dist/function.zip",
         handler="handler.lambda_handler",
         layers=[],
         environment={
@@ -1062,7 +1079,6 @@ def main() -> int:
             "MCP_FUNCTIONS": ",".join(
                 [
                     FUNCTIONS["knowledge_mcp"],
-                    FUNCTIONS["web_search"],
                     FUNCTIONS["code_interpreter"],
                     FUNCTIONS["http_fetch"],
                 ]
@@ -1076,13 +1092,13 @@ def main() -> int:
 
     # Remote MCP connections: OAuth broker + per-user token store + aggregator.
     # It reaches arbitrary HTTPS MCP servers directly from the container, like
-    # the web-search tool reaches Exa.
+    # Web search is handled by the AgentCore Gateway's built-in connector, not a local Lambda.
     mcp_connections_arn = ensure_function(
         lm,
         FUNCTIONS["mcp_connections"],
-        f"{ROOT}/backend/services/mcp-connections/dist/function.zip",
+        f"{ROOT}/backend/services/mcp/mcp-connections/dist/function.zip",
         handler="handler.lambda_handler",
-        layers=[base_layer_arn, genai_layer_arn],
+        layers=[],
         environment={
             **api_env,
             "MCP_CONNECTIONS_KMS_KEY_ARN": mcp_kms_key_arn,
@@ -1103,7 +1119,6 @@ def main() -> int:
         {
             "user_api": user_api_arn,
             "knowledge_mcp": mcp_arn,
-            "web_search": web_search_arn,
             "code_interpreter": code_interpreter_arn,
             "http_fetch": http_fetch_arn,
             "custom_tools": custom_tools_arn,

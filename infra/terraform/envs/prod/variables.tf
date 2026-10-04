@@ -13,7 +13,7 @@ variable "enable_api_gateway" {
 variable "enable_backend_lambdas" {
   type        = bool
   default     = false
-  description = "Terraform backend Lambdas (DynamoDB + S3; no VPC/RDS)"
+  description = "Terraform backend Lambdas (DynamoDB + S3)"
 }
 
 variable "enable_ingestion" {
@@ -39,12 +39,12 @@ variable "api_hostname" {
   default = "api.get1agent.com"
 }
 
-variable "auth0_domain" {
+variable "auth_domain" {
   type    = string
   default = "get1agent.us.auth0.com"
 }
 
-variable "auth0_audience" {
+variable "auth_audience" {
   type    = string
   default = "https://api.get1agent.com"
 }
@@ -62,36 +62,23 @@ variable "agent_service_client_secret" {
   description = "Auth0 M2M client secret for the eval worker's service token"
 }
 
-variable "auth0_token_url" {
+variable "auth_mgmt_client_id" {
   type        = string
   default     = ""
-  description = "Auth0 token endpoint for client-credentials; defaults to https://<auth0_domain>/oauth/token"
+  description = "Auth0 Management API M2M client id (scope delete:users) for automatic identity erasure"
 }
 
-variable "upstash_redis_rest_url" {
-  type        = string
-  default     = ""
-  description = "Upstash Redis REST URL for the best-effort cache (embeddings + search)"
-}
-
-variable "upstash_redis_rest_token" {
+variable "auth_mgmt_client_secret" {
   type        = string
   default     = ""
   sensitive   = true
-  description = "Upstash Redis REST token for the best-effort cache"
+  description = "Auth0 Management API M2M client secret for automatic identity erasure"
 }
 
-variable "upstash_vector_rest_url" {
+variable "auth_token_url" {
   type        = string
   default     = ""
-  description = "Upstash Vector REST URL for the semantic cache"
-}
-
-variable "upstash_vector_rest_token" {
-  type        = string
-  default     = ""
-  sensitive   = true
-  description = "Upstash Vector REST token for the semantic cache"
+  description = "Auth0 token endpoint for client-credentials; defaults to https://<auth_domain>/oauth/token"
 }
 
 variable "enable_api_custom_domain" {
@@ -121,37 +108,6 @@ variable "enable_xray" {
   type        = bool
   default     = true
   description = "X-Ray tracing on the ingestion workers and state machine (records sampled traces)"
-}
-
-variable "voyage_api_key" {
-  type        = string
-  default     = ""
-  sensitive   = true
-  description = "Voyage AI API key for embeddings (set via TF_VAR_voyage_api_key)"
-}
-
-variable "voyage_api_base_url" {
-  type        = string
-  default     = "https://api.voyageai.com/v1"
-  description = "Voyage AI API base URL (override for the MongoDB Atlas endpoint)"
-}
-
-variable "voyage_text_model" {
-  type        = string
-  default     = "voyage-4-large"
-  description = "Voyage text embedding model"
-}
-
-variable "voyage_multimodal_model" {
-  type        = string
-  default     = "voyage-multimodal-3.5"
-  description = "Voyage multimodal embedding model"
-}
-
-variable "voyage_rerank_model" {
-  type        = string
-  default     = "rerank-3"
-  description = "Voyage rerank model (opt-in per request)"
 }
 
 variable "rerank_region" {
@@ -190,29 +146,10 @@ variable "code_interpreter_max_sessions_per_user" {
   description = "Maximum active AgentCore Code Interpreter sessions per user"
 }
 
-variable "exa_api_key" {
+variable "web_search_connector_region" {
   type        = string
-  default     = ""
-  sensitive   = true
-  description = "Exa Search API key for the web-search tool (set via TF_VAR_exa_api_key)"
-}
-
-variable "exa_api_base_url" {
-  type        = string
-  default     = "https://api.exa.ai"
-  description = "Exa API base URL (override for testing)"
-}
-
-variable "web_search_timeout_seconds" {
-  type        = number
-  default     = 60
-  description = "Lambda timeout for the web-search MCP tool (deep search can take ~40s)"
-}
-
-variable "web_search_max_results" {
-  type        = number
-  default     = 25
-  description = "Hard cap on Exa results per web-search call (cost guard)"
+  default     = "ap-northeast-1"
+  description = "Region hosting the built-in AgentCore Web Search connector + its gateway (us-east-1, eu-west-1 or ap-northeast-1; not ap-south-1)"
 }
 
 variable "http_fetch_timeout_seconds" {
@@ -239,17 +176,17 @@ variable "frontend_url" {
   description = "SPA origin the OAuth callback redirects back to"
 }
 
-variable "GITHUB_MCP_CLIENT_ID" {
+variable "MCP_GITHUB_CLIENT_ID" {
   type        = string
   default     = ""
   description = "Client ID of the get1agent GitHub OAuth App (for the GitHub remote MCP server)"
 }
 
-variable "GITHUB_MCP_CLIENT_SECRET" {
+variable "MCP_GITHUB_CLIENT_SECRET" {
   type        = string
   default     = ""
   sensitive   = true
-  description = "Client secret of the get1agent GitHub OAuth App (set via TF_VAR_GITHUB_MCP_CLIENT_SECRET)"
+  description = "Client secret of the get1agent GitHub OAuth App (set via TF_VAR_MCP_GITHUB_CLIENT_SECRET)"
 }
 
 variable "enable_agent_runtime" {
@@ -264,43 +201,151 @@ variable "agent_worker_image_uri" {
   description = "ARM64 ECR image URI for the agent worker container (push the image before apply)"
 }
 
-variable "opencode_api_key" {
-  type        = string
-  default     = ""
-  sensitive   = true
-  description = "OpenCode Go API key for agent LLMs (set via TF_VAR_opencode_api_key)"
-}
-
-variable "opencode_base_url" {
-  type        = string
-  default     = "https://opencode.ai/zen/go/v1"
-  description = "OpenCode Go OpenAI-compatible base URL"
-}
-
-variable "enable_langfuse" {
+variable "enable_tracing" {
   type        = bool
   default     = true
-  description = "Send agent-runtime traces to Langfuse (disables AgentCore's ADOT exporter for the runtime)"
+  description = "Export agent-runtime traces to CloudWatch/X-Ray via AgentCore's ADOT collector"
 }
 
-variable "langfuse_host" {
+variable "agent_identity_return_url" {
   type        = string
-  default     = "https://cloud.langfuse.com"
-  description = "Langfuse base URL (US: https://us.cloud.langfuse.com; self-hosted: your URL)"
+  default     = "https://api.get1agent.com/v1/identity/callback"
+  description = "Public URL AgentCore Identity may redirect a user back to"
 }
 
-variable "langfuse_public_key" {
+variable "identity_google_client_id" {
+  type        = string
+  default     = ""
+  description = "Google OAuth client id for AgentCore Identity (empty disables the provider)"
+}
+
+variable "identity_google_client_secret" {
   type        = string
   default     = ""
   sensitive   = true
-  description = "Langfuse public key for agent tracing (set via TF_VAR_langfuse_public_key)"
+  description = "Google OAuth client secret for AgentCore Identity"
 }
 
-variable "langfuse_secret_key" {
+variable "identity_github_client_id" {
+  type        = string
+  default     = ""
+  description = "GitHub OAuth client id for AgentCore Identity (empty disables the provider)"
+}
+
+variable "identity_github_client_secret" {
   type        = string
   default     = ""
   sensitive   = true
-  description = "Langfuse secret key for agent tracing (set via TF_VAR_langfuse_secret_key)"
+  description = "GitHub OAuth client secret for AgentCore Identity"
+}
+
+variable "identity_slack_client_id" {
+  type        = string
+  default     = ""
+  description = "Slack OAuth client id for AgentCore Identity (empty disables the provider)"
+}
+
+variable "identity_slack_client_secret" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Slack OAuth client secret for AgentCore Identity"
+}
+
+variable "browser_allowed_domains" {
+  type        = string
+  default     = ""
+  description = "Comma-separated domain suffixes the AgentCore Browser may open (empty denies all)"
+}
+
+variable "bedrock_prompt_cache" {
+  type        = string
+  default     = "auto"
+  description = "Prompt caching mode (auto|anthropic|off)"
+}
+
+variable "bedrock_prompt_cache_ttl" {
+  type        = string
+  default     = ""
+  description = "Prompt cache TTL (e.g. 5m, 1h); empty uses the Bedrock default"
+}
+
+variable "bedrock_service_tier" {
+  type        = string
+  default     = "standard"
+  description = "Bedrock service tier for chat/agent calls (standard|flex|priority)"
+}
+
+variable "bedrock_ingestion_service_tier" {
+  type        = string
+  default     = "flex"
+  description = "Bedrock service tier for ingestion embedding (flex is ~50% cheaper)"
+}
+
+variable "bedrock_prompt_router_arn" {
+  type        = string
+  default     = ""
+  description = "Intelligent prompt router ARN; empty disables routing"
+}
+
+variable "enable_nova_prompt_router" {
+  type        = bool
+  default     = true
+  description = "Create the default Nova prompt router (Lite <-> Pro cost routing)"
+}
+
+variable "bedrock_profile_chat" {
+  type        = string
+  default     = ""
+  description = "Application inference profile ARN for chat (per-feature billing)"
+}
+
+variable "bedrock_profile_eval" {
+  type        = string
+  default     = ""
+  description = "Application inference profile ARN for evaluations"
+}
+
+variable "bedrock_profile_ingestion" {
+  type        = string
+  default     = ""
+  description = "Application inference profile ARN for ingestion embeddings"
+}
+
+variable "enable_guardrail_iaC" {
+  type        = bool
+  default     = true
+  description = "Create the Bedrock guardrail as Terraform (else use an existing GUARDRAIL_ID)"
+}
+
+variable "enable_browser" {
+  type        = bool
+  default     = true
+  description = "Create the AgentCore Browser resource + browser tool"
+}
+
+variable "online_evaluation_sampling_percentage" {
+  type        = number
+  default     = 5
+  description = "Percentage of live agent traces sampled by AgentCore Evaluations"
+}
+
+variable "agent_policy_deny_tools" {
+  type        = string
+  default     = ""
+  description = "Comma-separated tool names the AgentCore Policy always denies"
+}
+
+variable "guardrail_id" {
+  type        = string
+  default     = ""
+  description = "Bedrock Guardrail id applied to agent runs (empty disables guardrails)"
+}
+
+variable "guardrail_version" {
+  type        = string
+  default     = "DRAFT"
+  description = "Bedrock Guardrail version applied to agent runs"
 }
 
 variable "trace_link_secret" {

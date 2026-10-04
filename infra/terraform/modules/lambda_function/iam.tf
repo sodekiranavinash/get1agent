@@ -170,17 +170,31 @@ resource "aws_iam_role_policy" "bedrock_agentcore" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid    = "CodeInterpreterSessions"
-      Effect = "Allow"
-      Action = [
-        "bedrock-agentcore:StartCodeInterpreterSession",
-        "bedrock-agentcore:InvokeCodeInterpreter",
-        "bedrock-agentcore:StopCodeInterpreterSession",
-        "bedrock-agentcore:GetCodeInterpreterSession",
-      ]
-      Resource = var.bedrock_agentcore_arns
-    }]
+    Statement = [
+      {
+        Sid    = "CodeInterpreterSessions"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:StartCodeInterpreterSession",
+          "bedrock-agentcore:InvokeCodeInterpreter",
+          "bedrock-agentcore:StopCodeInterpreterSession",
+          "bedrock-agentcore:GetCodeInterpreterSession",
+        ]
+        Resource = var.bedrock_agentcore_arns
+      },
+      {
+        # AgentCore Identity: fetch a user's third-party OAuth token on demand.
+        Sid    = "IdentityToken"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:GetResourceOauth2Token",
+          "bedrock-agentcore:GetWorkloadAccessToken",
+          "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
+          "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
+        ]
+        Resource = "*"
+      },
+    ]
   })
 }
 

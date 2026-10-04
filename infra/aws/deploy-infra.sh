@@ -16,43 +16,22 @@ fi
 
 bash "$ROOT/infra/aws/write-prod-tfvars.sh"
 
-if [[ ! -s "$ROOT/backend/services/dependency-layers/base/dist/layer.zip" ]]; then
-  echo "Building backend layers..."
-  bash "$ROOT/infra/aws/build-backend-layers.sh"
-fi
+# Note: Lambda layers are deprecated. Dependencies are now bundled with each Lambda.
+# See MIGRATION_SUMMARY.md for details.
 
-for service in user-api knowledge-mcp ingestion-dispatcher ingestion-extract \
-  ingestion-embed ingestion-index ingestion-mark-failed ingestion-watchdog; do
-  if [[ ! -s "$ROOT/backend/services/$service/dist/function.zip" ]]; then
-    echo "Packaging backend $service Lambda zip..."
-    make -C "$ROOT/backend/services/$service" package
+# Package every backend Lambda zip that is missing. Paths come from
+# backend/registry.json, so moving a service never requires editing this script.
+while IFS= read -r dir; do
+  if [[ ! -s "$ROOT/$dir/dist/function.zip" ]]; then
+    echo "Packaging $dir Lambda zip..."
+    make -C "$ROOT/$dir" package
   fi
-done
-
-if [[ ! -s "$ROOT/backend/services/mcp-tester/dist/function.zip" ]]; then
-  echo "Packaging backend mcp-tester Lambda zip..."
-  make -C "$ROOT/backend/services/mcp-tester" package
-fi
-
-if [[ ! -s "$ROOT/backend/services/code-interpreter/dist/function.zip" ]]; then
-  echo "Packaging code-interpreter Lambda zip..."
-  make -C "$ROOT/backend/services/code-interpreter" package
-fi
-
-if [[ ! -s "$ROOT/backend/services/web-search/dist/function.zip" ]]; then
-  echo "Packaging web-search Lambda zip..."
-  make -C "$ROOT/backend/services/web-search" package
-fi
-
-if [[ ! -s "$ROOT/backend/services/http-fetch/dist/function.zip" ]]; then
-  echo "Packaging http-fetch Lambda zip..."
-  make -C "$ROOT/backend/services/http-fetch" package
-fi
-
-if [[ ! -s "$ROOT/backend/services/mcp-connections/dist/function.zip" ]]; then
-  echo "Packaging mcp-connections Lambda zip..."
-  make -C "$ROOT/backend/services/mcp-connections" package
-fi
+done < <(python3 -c "
+import json, os
+with open(os.path.join('$ROOT', 'backend', 'registry.json'), encoding='utf-8') as f:
+    for app in json.load(f)['apps']:
+        print(app['dir'])
+")
 
 bash "$ROOT/infra/aws/run-terraform.sh" bootstrap "$MODE"
 bash "$ROOT/infra/aws/run-terraform.sh" web "$MODE"

@@ -22,8 +22,8 @@ resource "aws_apigatewayv2_authorizer" "auth0" {
   name             = "auth0"
 
   jwt_configuration {
-    audience = [var.auth0_audience]
-    issuer   = "https://${var.auth0_domain}/"
+    audience = [var.auth_audience]
+    issuer   = "https://${var.auth_domain}/"
   }
 }
 

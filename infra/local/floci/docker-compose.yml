@@ -38,52 +38,57 @@ services:
       # Browser-reachable hostname. Floci's embedded DNS resolves it inside
       # Lambda containers, and it resolves to 127.0.0.1 from the host/browser,
       # so presigned S3 URLs and the execute-api host work from both.
-      FLOCI_HOSTNAME: localhost.floci.io
+      FLOCI_HOSTNAME: ${FLOCI_HOSTNAME:-localhost.floci.io}
       # Persist S3/Lambda/API state to the /app/data volume so restarts keep
       # uploaded documents and the retrieval index (see `floci_data` below).
-      FLOCI_STORAGE_MODE: persistent
-      FLOCI_INIT_HOOKS_TIMEOUT_SECONDS: "300"
+      FLOCI_STORAGE_MODE: ${FLOCI_STORAGE_MODE:-persistent}
+      FLOCI_INIT_HOOKS_TIMEOUT_SECONDS: "${FLOCI_INIT_HOOKS_TIMEOUT_SECONDS:-300}"
+      FLOCI_DEFAULT_ACCOUNT_ID: ${FLOCI_DEFAULT_ACCOUNT_ID:-000000000000}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      # Real AWS credentials, resolved from your host chain and exported by
+      # `make floci-up` (shell env wins over .env). `test` is the emulator
+      # default when none are supplied. Forwarded into the Lambda containers by
+      # the init hook so non-emulated services (Bedrock) reach real AWS.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
       # Read by the init hook (infra/local/floci/init/ready.d/10-provision.py).
       KB_BUCKET: ${S3_BUCKET:-get1agent-local}
       DYNAMODB_TABLE: ${DYNAMODB_TABLE:-get1agent-local}
       DYNAMODB_ENDPOINT_URL: ${DYNAMODB_ENDPOINT_URL:-http://dynamodb:8000}
-      AUTH0_ISSUER: ${AUTH0_ISSUER:-https://get1agent.us.auth0.com/}
-      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.get1agent.com}
-      OLLAMA_URL: http://ollama:11434
+      AUTH_ISSUER: ${AUTH_ISSUER:-https://get1agent.us.auth0.com/}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-https://api.get1agent.com}
+      # Auth0 M2M apps (platform service + Management API). The init hook
+      # forwards these onto the user-api/scheduler Lambdas.
+      AGENT_SERVICE_CLIENT_ID: ${AGENT_SERVICE_CLIENT_ID:-}
+      AGENT_SERVICE_CLIENT_SECRET: ${AGENT_SERVICE_CLIENT_SECRET:-}
+      AUTH_MGMT_CLIENT_ID: ${AUTH_MGMT_CLIENT_ID:-}
+      AUTH_MGMT_CLIENT_SECRET: ${AUTH_MGMT_CLIENT_SECRET:-}
+      AGENT_RUN_FUNCTION: ${AGENT_RUN_FUNCTION:-}
+      LOCAL_EMBED_URL: ${LOCAL_EMBED_URL:-http://ollama:11434}
       LOCAL_EMBED_MODEL: ${LOCAL_EMBED_MODEL:-mxbai-embed-large}
-      # Embedding backend: voyage (Voyage AI) | local (Ollama) | bedrock.
-      EMBED_MODE: ${EMBED_MODE:-voyage}
-      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
-      VOYAGE_API_BASE_URL: ${VOYAGE_API_BASE_URL:-https://api.voyageai.com/v1}
-      VOYAGE_TEXT_MODEL: ${VOYAGE_TEXT_MODEL:-voyage-4-large}
-      VOYAGE_MULTIMODAL_MODEL: ${VOYAGE_MULTIMODAL_MODEL:-voyage-multimodal-3.5}
-      VOYAGE_RERANK_MODEL: ${VOYAGE_RERANK_MODEL:-rerank-3}
-      # Rerank backend: voyage (Voyage AI) | local (TEI) | none | bedrock.
-      RERANK_MODE: ${RERANK_MODE:-voyage}
-      LOCAL_RERANK_URL: http://reranker:80/rerank
-      # Exa web-search tool (public HTTPS API, no emulation).
-      EXA_API_KEY: ${EXA_API_KEY:-}
-      EXA_API_BASE_URL: ${EXA_API_BASE_URL:-https://api.exa.ai}
+      # Embedding backend: local (Ollama, offline) | bedrock (real Titan).
+      EMBED_MODE: ${EMBED_MODE:-local}
+      TEXT_EMBED_MODEL: ${TEXT_EMBED_MODEL:-amazon.titan-embed-text-v2:0}
+      IMAGE_EMBED_MODEL: ${IMAGE_EMBED_MODEL:-amazon.titan-embed-image-v1}
+      EMBED_IMAGES: ${EMBED_IMAGES:-false}
+      # Rerank backend: local (TEI) | none | bedrock (cross-region).
+      RERANK_MODE: ${RERANK_MODE:-none}
+      RERANK_REGION: ${RERANK_REGION:-us-west-2}
+      RERANK_MODEL_ARN: ${RERANK_MODEL_ARN:-arn:aws:bedrock:us-west-2::foundation-model/amazon.rerank-v1:0}
+      LOCAL_RERANK_URL: ${LOCAL_RERANK_URL:-http://reranker:80/rerank}
       # Remote MCP connections (GitHub OAuth App + callback overrides).
-      GITHUB_MCP_CLIENT_ID: ${GITHUB_MCP_CLIENT_ID:-}
-      GITHUB_MCP_CLIENT_SECRET: ${GITHUB_MCP_CLIENT_SECRET:-}
+      MCP_GITHUB_CLIENT_ID: ${MCP_GITHUB_CLIENT_ID:-}
+      MCP_GITHUB_CLIENT_SECRET: ${MCP_GITHUB_CLIENT_SECRET:-}
       MCP_OAUTH_REDIRECT_URI: ${MCP_OAUTH_REDIRECT_URI:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       # HMAC secret for signed, expiring public trace links (user-api).
       TRACE_LINK_SECRET: ${TRACE_LINK_SECRET:-}
-      # Mirrors run feedback to Langfuse as a score (user-api).
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-https://cloud.langfuse.com}
-      # Best-effort cache (Upstash Redis REST) for embeddings + search.
-      CACHE_BACKEND: ${CACHE_BACKEND:-redis}
-      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
-      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      # Best-effort cache (DynamoDB TTL) for embeddings + search.
+      CACHE_BACKEND: ${CACHE_BACKEND:-dynamodb}
       CACHE_SEARCH_TTL_SECONDS: ${CACHE_SEARCH_TTL_SECONDS:-300}
       CACHE_EMBEDDING_TTL_SECONDS: ${CACHE_EMBEDDING_TTL_SECONDS:-2592000}
-      # Semantic cache (Upstash Vector, per-user namespace).
-      UPSTASH_VECTOR_REST_URL: ${UPSTASH_VECTOR_REST_URL:-}
-      UPSTASH_VECTOR_REST_TOKEN: ${UPSTASH_VECTOR_REST_TOKEN:-}
+      # Semantic cache: S3 Vectors ANN (per-user) + DynamoDB payload.
       SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED:-true}
       SEMANTIC_CACHE_THRESHOLD: ${SEMANTIC_CACHE_THRESHOLD:-0.95}
       SEMANTIC_CACHE_TTL_SECONDS: ${SEMANTIC_CACHE_TTL_SECONDS:-600}
@@ -91,14 +96,61 @@ services:
       SINGLE_FLIGHT_ENABLED: ${SINGLE_FLIGHT_ENABLED:-true}
       SINGLE_FLIGHT_LOCK_SECONDS: ${SINGLE_FLIGHT_LOCK_SECONDS:-20}
       SINGLE_FLIGHT_WAIT_SECONDS: ${SINGLE_FLIGHT_WAIT_SECONDS:-6}
-      # Playground custom-tool code generation (user-api). Reuses the OpenCode
-      # Go key the agent runtime uses; empty means "not configured".
-      OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
-      OPENCODE_BASE_URL: ${OPENCODE_BASE_URL:-https://opencode.ai/zen/go/v1}
-      CUSTOM_TOOLS_GENERATOR_MODEL: ${CUSTOM_TOOLS_GENERATOR_MODEL:-deepseek-v4-flash-vision-exp}
+      # Playground custom-tool code generation + evals (user-api) run on Amazon
+      # Bedrock (IAM-authenticated; local containers need AWS credentials).
+      BEDROCK_REGION: ${BEDROCK_REGION:-ap-south-1}
+      BEDROCK_CHAT_MODEL: ${BEDROCK_CHAT_MODEL:-zai.glm-4.7-flash}
+      AGENT_MEMORY_BACKEND: ${AGENT_MEMORY_BACKEND:-dynamo}
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-aggregator}
+      AGENT_WORKLOAD_IDENTITY_ARN: ${AGENT_WORKLOAD_IDENTITY_ARN:-}
+      AGENT_TOKEN_VAULT_ID: ${AGENT_TOKEN_VAULT_ID:-}
+      AGENT_IDENTITY_PROVIDERS: ${AGENT_IDENTITY_PROVIDERS:-}
+      AGENT_IDENTITY_RETURN_URL: ${AGENT_IDENTITY_RETURN_URL:-}
+      MCP_GATEWAY_URL: ${MCP_GATEWAY_URL:-}
+      AGENTCORE_MEMORY_ID: ${AGENTCORE_MEMORY_ID:-}
+      AGENT_POLICY_ENGINE: ${AGENT_POLICY_ENGINE:-}
+      AGENT_POLICY_MODE: ${AGENT_POLICY_MODE:-enforce}
+      AGENT_POLICY_DENY_TOOLS: ${AGENT_POLICY_DENY_TOOLS:-}
+      GUARDRAIL_ID: ${GUARDRAIL_ID:-}
+      GUARDRAIL_VERSION: ${GUARDRAIL_VERSION:-DRAFT}
+      CUSTOM_TOOLS_GENERATOR_MODEL: ${CUSTOM_TOOLS_GENERATOR_MODEL:-zai.glm-4.7-flash}
       CUSTOM_TOOLS_GENERATE_MAX_TOKENS: ${CUSTOM_TOOLS_GENERATE_MAX_TOKENS:-32000}
       CUSTOM_TOOLS_GENERATE_TIMEOUT_SECONDS: ${CUSTOM_TOOLS_GENERATE_TIMEOUT_SECONDS:-25}
       CUSTOM_TOOLS_GENERATE_ASYNC_TIMEOUT_SECONDS: ${CUSTOM_TOOLS_GENERATE_ASYNC_TIMEOUT_SECONDS:-240}
+      # Eval lab models + limits.
+      EVAL_ANSWER_MODEL: ${EVAL_ANSWER_MODEL:-amazon.nova-2-lite-v1:0}
+      EVAL_JUDGE_MODEL: ${EVAL_JUDGE_MODEL:-amazon.nova-2-lite-v1:0}
+      EVAL_MAX_CASES_PER_RUN: ${EVAL_MAX_CASES_PER_RUN:-20}
+      # Local embeddings tunables (ingestion).
+      EMBED_DIM: ${EMBED_DIM:-1024}
+      EMBED_MAX_WORKERS: ${EMBED_MAX_WORKERS:-4}
+      EMBED_MAX_ATTEMPTS: ${EMBED_MAX_ATTEMPTS:-6}
+      # Local reranker (TEI) knobs.
+      LOCAL_RERANK_TIMEOUT_SECONDS: ${LOCAL_RERANK_TIMEOUT_SECONDS:-60}
+      LOCAL_RERANK_BATCH_SIZE: ${LOCAL_RERANK_BATCH_SIZE:-32}
+      # HTTP fetch (optional host allowlist; empty allows any public host).
+      HTTP_FETCH_ALLOWED_DOMAINS: ${HTTP_FETCH_ALLOWED_DOMAINS:-}
+      # Vault (allows testing a local provider key, e.g. Ollama).
+      VAULT_TEST_TIMEOUT_SECONDS: ${VAULT_TEST_TIMEOUT_SECONDS:-15}
+      VAULT_ALLOW_PRIVATE_URLS: ${VAULT_ALLOW_PRIVATE_URLS:-true}
+      # Code interpreter + custom tools (Floci runs both as guarded subprocesses).
+      CODE_INTERPRETER_MODE: ${CODE_INTERPRETER_MODE:-local}
+      CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS: ${CODE_INTERPRETER_EXEC_TIMEOUT_SECONDS:-120}
+      CUSTOM_TOOLS_MODE: ${CUSTOM_TOOLS_MODE:-local}
+      CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS: ${CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS:-60}
+      CUSTOM_TOOLS_SESSION_TIMEOUT_SECONDS: ${CUSTOM_TOOLS_SESSION_TIMEOUT_SECONDS:-900}
+      CUSTOM_TOOLS_MAX_SESSIONS_PER_USER: ${CUSTOM_TOOLS_MAX_SESSIONS_PER_USER:-1}
+      CUSTOM_TOOLS_MAX_CODE_BYTES: ${CUSTOM_TOOLS_MAX_CODE_BYTES:-65536}
+      CUSTOM_TOOLS_MAX_OUTPUT_CHARS: ${CUSTOM_TOOLS_MAX_OUTPUT_CHARS:-50000}
+      CUSTOM_TOOLS_MAX_RESULT_CHARS: ${CUSTOM_TOOLS_MAX_RESULT_CHARS:-20000}
+      BLOCKED_MODULES: ${BLOCKED_MODULES:-}
+      ALLOWED_MODULES: ${ALLOWED_MODULES:-}
+      # Registries (optional overrides; code defaults apply when blank).
+      MCP_REGISTRY_URL: ${MCP_REGISTRY_URL:-https://registry.modelcontextprotocol.io}
+      SKILLS_REGISTRY_URL: ${SKILLS_REGISTRY_URL:-https://api.claude-plugins.dev}
+      # Scheduler + watchdog rules (AgentCore is not emulated locally; leave off).
+      ENABLE_LOCAL_SCHEDULER: ${ENABLE_LOCAL_SCHEDULER:-false}
+      ENABLE_LOCAL_WATCHDOG: ${ENABLE_LOCAL_WATCHDOG:-false}
     ports:
       - "${FLOCI_PORT:-4566}:4566"
     volumes:
@@ -110,19 +162,51 @@ services:
     networks:
       - get1agent
 
+  # Agent runtime (the AgentCore app) running continuously like the Lambdas, so
+  # there is no `make agent`. It starts with the stack; after agent-side code
+  # changes run `make floci-reload` (rebuilds this image + re-provisions Floci).
+  agent:
+    build:
+      context: ../../../backend
+      dockerfile: agents/Dockerfile
+    depends_on:
+      - dynamodb
+      - floci
+    # All local agent config comes from the repo-root .env …
+    env_file:
+      - ../../../.env
+    environment:
+      # … with the compose-network endpoints overriding the host-oriented ones.
+      DYNAMODB_ENDPOINT_URL: http://dynamodb:8000
+      AWS_ENDPOINT_URL: http://floci:4566
+      S3_ENDPOINT_URL: http://floci:4566
+      # X-Ray is real AWS, not Floci: override the global endpoint for it only.
+      AWS_ENDPOINT_URL_XRAY: https://xray.us-east-1.amazonaws.com
+      # Docker can't resolve the virtual-host style bucket host, so use path style.
+      S3_ADDRESSING_STYLE: path
+      AGENT_PORT: "8080"
+      # Real AWS credentials (Bedrock + X-Ray), exported by `make floci-up`.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    ports:
+      - "${AGENT_PORT:-8090}:8080"
+    networks:
+      - get1agent
+
   # Real text embeddings for local ingestion (1024-dim, matches the schema).
   # Opt-in profile: only started for EMBED_MODE=local.
   ollama:
     image: ollama/ollama:latest
     profiles: ["local-embeddings"]
     ports:
-      - "${OLLAMA_PORT:-11434}:11434"
+      - "${LOCAL_EMBED_PORT:-11434}:11434"
     volumes:
       - ollama_models:/root/.ollama
     networks:
       - get1agent
 
-  # Real cross-encoder reranker for local retrieval (mirrors Voyage/Bedrock
+  # Real cross-encoder reranker for local retrieval (mirrors Bedrock Rerank
   # Rerank). HuggingFace Text Embeddings Inference serves POST /rerank. Opt-in
   # profile: only started for RERANK_MODE=local.
   reranker:

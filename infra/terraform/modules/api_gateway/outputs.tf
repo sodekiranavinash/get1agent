@@ -32,8 +32,8 @@ output "acm_validation_records" {
   } : {}
 }
 
-output "auth0_audience" {
-  value = var.auth0_audience
+output "auth_audience" {
+  value = var.auth_audience
 }
 
 output "jwt_authorizer_id" {

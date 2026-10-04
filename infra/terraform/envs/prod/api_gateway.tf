@@ -4,8 +4,8 @@ module "api_gateway" {
 
   name_prefix          = "get1agent-prod"
   api_hostname         = var.api_hostname
-  auth0_domain         = var.auth0_domain
-  auth0_audience       = var.auth0_audience
+  auth_domain          = var.auth_domain
+  auth_audience        = var.auth_audience
   enable_custom_domain = var.enable_api_custom_domain
 
   cors_allow_origins = [
@@ -482,6 +482,34 @@ module "api_gateway" {
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
+    notifications_list = {
+      method               = "GET"
+      path                 = "/v1/notifications"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    notifications_mark_all_read = {
+      method               = "POST"
+      path                 = "/v1/notifications/read-all"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    notification_mark_read = {
+      method               = "POST"
+      path                 = "/v1/notifications/{id}/read"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    notification_delete = {
+      method               = "DELETE"
+      path                 = "/v1/notifications/{id}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
     security_reports_list = {
       method               = "GET"
       path                 = "/v1/security/reports"
@@ -492,6 +520,27 @@ module "api_gateway" {
     security_reports_create = {
       method               = "POST"
       path                 = "/v1/security/reports"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    guardrails_status = {
+      method               = "GET"
+      path                 = "/v1/guardrails"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    guardrails_config = {
+      method               = "PUT"
+      path                 = "/v1/guardrails/config"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    guardrails_test = {
+      method               = "POST"
+      path                 = "/v1/guardrails/test"
       lambda_invoke_arn    = module.user_api[0].invoke_arn
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
@@ -608,7 +657,7 @@ module "api_gateway" {
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
-    # Public, unauthenticated: signed + expiring Langfuse trace links.
+    # Public, unauthenticated: signed + expiring CloudWatch/X-Ray trace links.
     trace_link = {
       method               = "GET"
       path                 = "/v1/traces/{token}"
@@ -842,15 +891,6 @@ module "api_gateway" {
       throttle_burst_limit = 40
       throttle_rate_limit  = 20
     }
-    web_search_mcp = {
-      method               = "POST"
-      path                 = "/mcp/web-search"
-      lambda_invoke_arn    = module.web_search[0].invoke_arn
-      lambda_function_name = module.web_search[0].function_name
-      authorization_type   = "JWT"
-      throttle_burst_limit = 20
-      throttle_rate_limit  = 10
-    }
     code_interpreter_mcp = {
       method               = "POST"
       path                 = "/mcp/code-interpreter"
@@ -877,6 +917,15 @@ module "api_gateway" {
       authorization_type   = "JWT"
       throttle_burst_limit = 20
       throttle_rate_limit  = 10
+    }
+    browser_mcp = {
+      method               = "POST"
+      path                 = "/mcp/browser"
+      lambda_invoke_arn    = length(module.browser) > 0 ? module.browser[0].invoke_arn : ""
+      lambda_function_name = length(module.browser) > 0 ? module.browser[0].function_name : ""
+      authorization_type   = "JWT"
+      throttle_burst_limit = 10
+      throttle_rate_limit  = 5
     }
     admin_mcp_tools = {
       method               = "GET"

@@ -26,9 +26,19 @@ output "acm_validation_records" {
   value       = try(module.api_gateway[0].acm_validation_records, null)
 }
 
-output "auth0_audience" {
+output "auth_audience" {
   description = "Auth0 API audience (must match frontend + Auth0 API identifier)"
-  value       = try(module.api_gateway[0].auth0_audience, null)
+  value       = try(module.api_gateway[0].auth_audience, null)
+}
+
+output "web_search_gateway_url" {
+  description = "AgentCore Web Search connector gateway URL (set WEB_SEARCH_GATEWAY_URL to enable web search locally)"
+  value       = try(aws_bedrockagentcore_gateway.web_search[0].gateway_url, null)
+}
+
+output "web_search_gateway_region" {
+  description = "Region of the Web Search connector gateway"
+  value       = var.web_search_connector_region
 }
 
 output "knowledge_bases_bucket_name" {

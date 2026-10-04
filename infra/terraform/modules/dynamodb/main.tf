@@ -1,4 +1,4 @@
-# Single-table operational store (design/design-b-dynamodb-s3.md Part 6).
+# Single-table operational store (docs/design/design-b-dynamodb-s3.md Part 6).
 #
 # Keys are pk/sk (adjacency list); three sparse overloaded GSIs resolve entities
 # by id, list them per user/type, and serve the watchdog + events feed. Vectors,
