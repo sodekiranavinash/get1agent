@@ -243,8 +243,8 @@ jobs:
           TF_VAR_agent_service_client_secret: ${{ secrets.AGENT_SERVICE_CLIENT_SECRET }}
           # Auth0 Management API M2M (scope delete:users): erases the Auth0
           # identity on account deletion. Optional; blank = manual step.
-          TF_VAR_auth_mgmt_client_id: ${{ secrets.AUTH_MGMT_CLIENT_ID || secrets.AUTH0_MGMT_CLIENT_ID }}
-          TF_VAR_auth_mgmt_client_secret: ${{ secrets.AUTH_MGMT_CLIENT_SECRET || secrets.AUTH0_MGMT_CLIENT_SECRET }}
+          TF_VAR_auth_mgmt_client_id: ${{ secrets.AUTH_MGMT_CLIENT_ID }}
+          TF_VAR_auth_mgmt_client_secret: ${{ secrets.AUTH_MGMT_CLIENT_SECRET }}
         run: bash infra/aws/apply-prod.sh
 
       - name: Agent runtime (build + push image, deploy)

@@ -55,11 +55,11 @@ ui:
 architecture:
 	cd frontend && npm run gen:architecture
 
-# Run the AgentCore agent runtime locally on :8080 against the local Floci stack.
-# Installs the venv on first run; loads the repo-root .env for the OpenCode Go key.
-# The agent runtime runs continuously as the `agent` service in the Floci stack
-# (started by `make floci`; rebuilt by `make floci-reload`). This target just
-# (re)builds + starts that container — the old host-run `make agent` is gone.
+# Run the AgentCore agent runtime locally on :8090 against the local Floci stack.
+# Installs the venv on first run; forwards your AWS credentials (Bedrock) from the
+# repo-root .env / host chain. The agent runtime runs continuously as the `agent`
+# service in the Floci stack (started by `make floci`; rebuilt by
+# `make floci-reload`). This target just (re)builds + starts that container.
 agent: floci-env
 	@eval "$$(aws configure export-credentials --format env 2>/dev/null)" 2>/dev/null || true; \
 	$(COMPOSE) up -d --build agent
@@ -245,8 +245,8 @@ floci-reload: floci-env
 floci-embed: floci-env
 	@mode=$$(grep -E '^EMBED_MODE=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
 	model=$$(grep -E '^LOCAL_EMBED_MODEL=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
-	if [ "$${mode:-voyage}" != "local" ]; then \
-		echo "EMBED_MODE=$${mode:-voyage}; skipping Ollama (not needed)."; \
+	if [ "$${mode:-local}" != "local" ]; then \
+		echo "EMBED_MODE=$${mode:-local}; skipping Ollama (not needed)."; \
 	else \
 		$(COMPOSE) --profile local-embeddings up -d ollama; \
 		echo "waiting for ollama..."; \
@@ -258,8 +258,8 @@ floci-embed: floci-env
 floci-rerank: floci-env
 	@mode=$$(grep -E '^RERANK_MODE=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
 	rport=$$(grep -E '^RERANKER_PORT=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
-	if [ "$${mode:-voyage}" != "local" ]; then \
-		echo "RERANK_MODE=$${mode:-voyage}; skipping local reranker (not needed)."; \
+	if [ "$${mode:-none}" != "local" ]; then \
+		echo "RERANK_MODE=$${mode:-none}; skipping local reranker (not needed)."; \
 	else \
 		$(COMPOSE) --profile local-rerank up -d reranker; \
 		echo "waiting for reranker (first run downloads the model)..."; \

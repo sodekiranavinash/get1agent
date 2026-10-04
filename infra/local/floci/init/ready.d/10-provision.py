@@ -47,24 +47,15 @@ STATE_MACHINE_NAME = "get1agent-local-ingestion"
 # Local embedding backend (real vectors, no Bedrock).
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 LOCAL_EMBED_MODEL = os.environ.get("LOCAL_EMBED_MODEL", "mxbai-embed-large")
-# Embedding backend: voyage (Voyage AI) | local (Ollama) | bedrock.
-EMBED_MODE = os.environ.get("EMBED_MODE", "voyage").strip().lower()
-VOYAGE_API_KEY = os.environ.get("VOYAGE_API_KEY", "")
-VOYAGE_API_BASE_URL = os.environ.get(
-    "VOYAGE_API_BASE_URL", "https://api.voyageai.com/v1"
-)
-VOYAGE_TEXT_MODEL = os.environ.get("VOYAGE_TEXT_MODEL", "voyage-4-large")
-VOYAGE_MULTIMODAL_MODEL = os.environ.get(
-    "VOYAGE_MULTIMODAL_MODEL", "voyage-multimodal-3.5"
-)
-VOYAGE_RERANK_MODEL = os.environ.get("VOYAGE_RERANK_MODEL", "rerank-3")
-# Rerank backend: voyage (Voyage AI) | local (TEI) | none | bedrock.
-RERANK_MODE = os.environ.get("RERANK_MODE", "voyage").strip().lower()
+# Embedding backend: local (Ollama) | bedrock. Floci defaults to local vectors.
+EMBED_MODE = os.environ.get("EMBED_MODE", "local").strip().lower()
+# Rerank backend: local (TEI) | none | bedrock. Rerank is opt-in per request.
+RERANK_MODE = os.environ.get("RERANK_MODE", "none").strip().lower()
 # Local cross-encoder reranker (TEI), mirrors Bedrock Rerank.
 RERANK_URL = os.environ.get("LOCAL_RERANK_URL", "http://reranker:80/rerank")
 
-AUTH0_ISSUER = os.environ.get("AUTH0_ISSUER", "https://get1agent.us.auth0.com/")
-AUTH0_AUDIENCE = os.environ.get("AUTH0_AUDIENCE", "https://api.get1agent.com")
+AUTH_ISSUER = os.environ.get("AUTH_ISSUER", "https://get1agent.us.auth0.com/")
+AUTH_AUDIENCE = os.environ.get("AUTH_AUDIENCE", "https://api.get1agent.com")
 API_NAME = "get1agent-local"
 API_ID = "get1agent"  # pinned via the reserved floci:override-id tag
 
@@ -680,10 +671,10 @@ def ensure_http_api(apigw, function_arns: dict[str, str]) -> str:
         Name="auth0",
         AuthorizerType="JWT",
         IdentitySource=["$request.header.Authorization"],
-        JwtConfiguration={"Issuer": AUTH0_ISSUER},
+        JwtConfiguration={"Issuer": AUTH_ISSUER},
     )
     authorizer_id = authorizer["AuthorizerId"]
-    log(f"created JWT authorizer (issuer={AUTH0_ISSUER}; audience not enforced)")
+    log(f"created JWT authorizer (issuer={AUTH_ISSUER}; audience not enforced)")
 
     # There is no `/health` route (the app does not call one).
 
@@ -772,26 +763,18 @@ def main() -> int:
         "LOCAL_EMBED_URL": OLLAMA_URL,
         "LOCAL_EMBED_MODEL": LOCAL_EMBED_MODEL,
         "TEXT_EMBED_MODEL": LOCAL_EMBED_MODEL,
-        "VOYAGE_API_KEY": VOYAGE_API_KEY,
-        "VOYAGE_API_BASE_URL": VOYAGE_API_BASE_URL,
-        "VOYAGE_TEXT_MODEL": VOYAGE_TEXT_MODEL,
-        "VOYAGE_MULTIMODAL_MODEL": VOYAGE_MULTIMODAL_MODEL,
         "VECTOR_STORE": "local",
-        # Best-effort cache for embeddings + search (Upstash Redis over REST).
-        "CACHE_BACKEND": os.environ.get("CACHE_BACKEND", "redis"),
-        "UPSTASH_REDIS_REST_URL": os.environ.get("UPSTASH_REDIS_REST_URL", ""),
-        "UPSTASH_REDIS_REST_TOKEN": os.environ.get("UPSTASH_REDIS_REST_TOKEN", ""),
+        # Best-effort cache for embeddings + search (DynamoDB TTL).
+        "CACHE_BACKEND": os.environ.get("CACHE_BACKEND", "dynamodb"),
         "CACHE_SEARCH_TTL_SECONDS": os.environ.get("CACHE_SEARCH_TTL_SECONDS", "300"),
         "CACHE_EMBEDDING_TTL_SECONDS": os.environ.get(
             "CACHE_EMBEDDING_TTL_SECONDS", "2592000"
         ),
-        # Semantic cache (Upstash Vector, per-user namespace).
-        "UPSTASH_VECTOR_REST_URL": os.environ.get("UPSTASH_VECTOR_REST_URL", ""),
-        "UPSTASH_VECTOR_REST_TOKEN": os.environ.get("UPSTASH_VECTOR_REST_TOKEN", ""),
+        # Semantic cache: S3 Vectors ANN (per-user) + DynamoDB payload.
         "SEMANTIC_CACHE_ENABLED": os.environ.get("SEMANTIC_CACHE_ENABLED", "true"),
         "SEMANTIC_CACHE_THRESHOLD": os.environ.get("SEMANTIC_CACHE_THRESHOLD", "0.95"),
         "SEMANTIC_CACHE_TTL_SECONDS": os.environ.get("SEMANTIC_CACHE_TTL_SECONDS", "600"),
-        # Single-flight locks (Upstash Redis) to dedupe concurrent identical work.
+        # Single-flight locks (DynamoDB conditional write) dedupe concurrent work.
         "SINGLE_FLIGHT_ENABLED": os.environ.get("SINGLE_FLIGHT_ENABLED", "true"),
         "SINGLE_FLIGHT_LOCK_SECONDS": os.environ.get(
             "SINGLE_FLIGHT_LOCK_SECONDS", "20"
@@ -888,31 +871,20 @@ def main() -> int:
         "S3_REGION": REGION,
         "VECTOR_STORE": "local",
         "EMBED_MODE": EMBED_MODE,
-        "VOYAGE_API_KEY": VOYAGE_API_KEY,
-        "VOYAGE_API_BASE_URL": VOYAGE_API_BASE_URL,
-        "VOYAGE_TEXT_MODEL": VOYAGE_TEXT_MODEL,
-        "VOYAGE_MULTIMODAL_MODEL": VOYAGE_MULTIMODAL_MODEL,
         "TRACE_LINK_SECRET": os.environ.get("TRACE_LINK_SECRET", ""),
         # Evaluation lab: run agents server-side via service auth. Locally the
         # AgentCore runtime is not emulated, so agent-task runs are unavailable.
         "AGENT_RUN_FUNCTION": os.environ.get("AGENT_RUN_FUNCTION", ""),
         "AGENT_SERVICE_CLIENT_ID": os.environ.get("AGENT_SERVICE_CLIENT_ID", ""),
         "AGENT_SERVICE_CLIENT_SECRET": os.environ.get("AGENT_SERVICE_CLIENT_SECRET", ""),
-        "AUTH0_AUDIENCE": os.environ.get("AUTH0_AUDIENCE", AUTH0_AUDIENCE),
-        "AUTH0_TOKEN_URL": os.environ.get(
-            "AUTH0_TOKEN_URL", f"{AUTH0_ISSUER.rstrip('/')}/oauth/token"
+        "AUTH_AUDIENCE": os.environ.get("AUTH_AUDIENCE", AUTH_AUDIENCE),
+        "AUTH_TOKEN_URL": os.environ.get(
+            "AUTH_TOKEN_URL", f"{AUTH_ISSUER.rstrip('/')}/oauth/token"
         ),
-        "LANGFUSE_PUBLIC_KEY": os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
-        "LANGFUSE_SECRET_KEY": os.environ.get("LANGFUSE_SECRET_KEY", ""),
-        "LANGFUSE_BASE_URL": os.environ.get("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
         # Playground: run tests in + generate tool code with the custom-tools Lambda.
         "CUSTOM_TOOLS_FUNCTION": FUNCTIONS["custom_tools"],
         "CUSTOM_TOOLS_GENERATOR_MODEL": os.environ.get(
-            "CUSTOM_TOOLS_GENERATOR_MODEL", "deepseek-v4-flash-vision-exp"
-        ),
-        "OPENCODE_API_KEY": os.environ.get("OPENCODE_API_KEY", ""),
-        "OPENCODE_BASE_URL": os.environ.get(
-            "OPENCODE_BASE_URL", "https://opencode.ai/zen/go/v1"
+            "CUSTOM_TOOLS_GENERATOR_MODEL", "zai.glm-4.7-flash"
         ),
         "CUSTOM_TOOLS_GENERATE_MAX_TOKENS": os.environ.get(
             "CUSTOM_TOOLS_GENERATE_MAX_TOKENS", "32000"
@@ -932,13 +904,13 @@ def main() -> int:
         "VAULT_TEST_TIMEOUT_SECONDS": os.environ.get("VAULT_TEST_TIMEOUT_SECONDS", "15"),
         "VAULT_ALLOW_PRIVATE_URLS": os.environ.get("VAULT_ALLOW_PRIVATE_URLS", "true"),
         # Evaluation lab: retrieve through knowledge-mcp (direct invoke) and
-        # answer/judge through the OpenCode Go gateway (same key as above).
+        # answer/judge through Amazon Bedrock (Converse).
         "KNOWLEDGE_MCP_FUNCTION": FUNCTIONS["knowledge_mcp"],
         "EVAL_ANSWER_MODEL": os.environ.get(
-            "EVAL_ANSWER_MODEL", "deepseek-v4-flash-vision-exp"
+            "EVAL_ANSWER_MODEL", "amazon.nova-2-lite-v1:0"
         ),
         "EVAL_JUDGE_MODEL": os.environ.get(
-            "EVAL_JUDGE_MODEL", "deepseek-v4-flash-vision-exp"
+            "EVAL_JUDGE_MODEL", "amazon.nova-2-lite-v1:0"
         ),
         "EVAL_MAX_CASES_PER_RUN": os.environ.get("EVAL_MAX_CASES_PER_RUN", "20"),
         "AWS_REGION": REGION,
@@ -971,9 +943,9 @@ def main() -> int:
             "AGENT_SERVICE_CLIENT_SECRET": os.environ.get(
                 "AGENT_SERVICE_CLIENT_SECRET", ""
             ),
-            "AUTH0_AUDIENCE": os.environ.get("AUTH0_AUDIENCE", AUTH0_AUDIENCE),
-            "AUTH0_TOKEN_URL": os.environ.get(
-                "AUTH0_TOKEN_URL", f"{AUTH0_ISSUER.rstrip('/')}/oauth/token"
+            "AUTH_AUDIENCE": os.environ.get("AUTH_AUDIENCE", AUTH_AUDIENCE),
+            "AUTH_TOKEN_URL": os.environ.get(
+                "AUTH_TOKEN_URL", f"{AUTH_ISSUER.rstrip('/')}/oauth/token"
             ),
             "AWS_REGION": REGION,
             "AWS_DEFAULT_REGION": REGION,
@@ -992,7 +964,6 @@ def main() -> int:
         environment={
             **worker_env,
             "RERANK_MODE": RERANK_MODE,
-            "VOYAGE_RERANK_MODEL": VOYAGE_RERANK_MODEL,
             # Optional offline cross-encoder; used when RERANK_MODE=local.
             "LOCAL_RERANK_URL": RERANK_URL,
         },
