@@ -5,7 +5,7 @@ An agent is a single item: its graph + settings live in the ``config`` map
 node/edge graph and an optional schedule). KBs/skills/servers are referenced by
 id, never embedded.
 
-Keys (single table, see design/design-b-dynamodb-s3.md Part 6):
+Keys (single table, see docs/design/design-b-dynamodb-s3.md Part 6):
 
     Agent           USER#<userId>    AGENT#<lowerName>
     GSI1 byId       AGENT#<agentId>  #META

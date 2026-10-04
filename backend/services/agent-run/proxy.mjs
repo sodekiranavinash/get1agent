@@ -15,9 +15,9 @@
  *   AGENT_RUNTIME_ARN            AgentCore runtime ARN (required)
  *   AGENT_RUNTIME_QUALIFIER      AgentCore endpoint/alias (default DEFAULT)
  *   AGENT_RUN_TIMEOUT_SECONDS    Abort the upstream stream after this (default 1500)
- *   AUTH0_DISCOVERY_URL          OIDC discovery document (required)
- *   AUTH0_AUDIENCE               Comma-separated allowed audiences
- *   AUTH0_ISSUER                 Optional issuer override
+ *   AUTH_DISCOVERY_URL          OIDC discovery document (required)
+ *   AUTH_AUDIENCE               Comma-separated allowed audiences
+ *   AUTH_ISSUER                 Optional issuer override
  *   AWS_REGION / AWS_DEFAULT_REGION
  */
 
@@ -88,8 +88,8 @@ async function discovery() {
   if (discoveryCache.doc && now - discoveryCache.at < DISCOVERY_TTL_MS) {
     return discoveryCache.doc
   }
-  const url = (process.env.AUTH0_DISCOVERY_URL || '').trim()
-  if (!url) throw new Error('AUTH0_DISCOVERY_URL is not configured')
+  const url = (process.env.AUTH_DISCOVERY_URL || '').trim()
+  if (!url) throw new Error('AUTH_DISCOVERY_URL is not configured')
   const doc = await fetchJson(url)
   discoveryCache = { doc, at: now }
   return doc
@@ -106,7 +106,7 @@ async function jwks() {
 }
 
 function audiences() {
-  return (process.env.AUTH0_AUDIENCE || '')
+  return (process.env.AUTH_AUDIENCE || '')
     .split(',')
     .map((part) => part.trim())
     .filter(Boolean)
@@ -150,7 +150,7 @@ export async function verifyToken(token, options = {}) {
   if (claims.nbf !== undefined && claims.nbf > now) throw new Error('token not yet valid')
 
   const issuer =
-    options.issuer ?? process.env.AUTH0_ISSUER ?? String((await discovery()).issuer || '')
+    options.issuer ?? process.env.AUTH_ISSUER ?? String((await discovery()).issuer || '')
   if (issuer && claims.iss !== issuer) throw new Error('invalid issuer')
 
   const audience = options.audience ?? audiences()

@@ -2,7 +2,7 @@
 
 One small item per run (``USER#<userId>`` / ``FEEDBACK#<runId>``). Feedback is
 addressed by the run id (unique per turn) so it works the same in the chat and
-the builder history. The API layer mirrors it to Langfuse as a score.
+the builder history. The API layer emits it as a CloudWatch metric.
 """
 
 from __future__ import annotations

@@ -1,27 +1,10 @@
 {
-  "layers": [
-    {
-      "name": "base",
-      "dir": "backend/services/dependency-layers/base"
-    },
-    {
-      "name": "genai",
-      "dir": "backend/services/dependency-layers/genai"
-    },
-    {
-      "name": "extra-tools",
-      "dir": "backend/services/dependency-layers/extra-tools"
-    },
-    {
-      "name": "ml",
-      "dir": "backend/services/dependency-layers/ml"
-    }
-  ],
+  "layers": [],
   "apps": [
     {
       "name": "user-api",
       "group": "user-apis",
-      "dir": "backend/services/user-api",
+      "dir": "backend/services/apis/user-api",
       "function_name": "get1agent-prod-user-api",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -30,14 +13,12 @@
         "data",
         "retrieval"
       ],
-      "layers": [
-        "base"
-      ]
+      "layers": []
     },
     {
       "name": "knowledge-mcp",
       "group": "knowledge-mcp",
-      "dir": "backend/services/knowledge-mcp",
+      "dir": "backend/services/mcp/knowledge-mcp",
       "function_name": "get1agent-prod-knowledge-mcp",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -46,15 +27,12 @@
         "data",
         "retrieval"
       ],
-      "layers": [
-        "base",
-        "genai"
-      ]
+      "layers": []
     },
     {
       "name": "mcp-tester",
       "group": "admin-apis",
-      "dir": "backend/services/mcp-tester",
+      "dir": "backend/services/admin/mcp-tester",
       "function_name": "get1agent-prod-mcp-tester",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -65,24 +43,9 @@
       "layers": []
     },
     {
-      "name": "web-search",
-      "group": "mcp-tools",
-      "dir": "backend/services/web-search",
-      "function_name": "get1agent-prod-web-search",
-      "handler": "handler.lambda_handler",
-      "runtime": "python3.14",
-      "packages": [
-        "core"
-      ],
-      "layers": [
-        "base",
-        "genai"
-      ]
-    },
-    {
       "name": "code-interpreter",
       "group": "mcp-tools",
-      "dir": "backend/services/code-interpreter",
+      "dir": "backend/services/mcp/code-interpreter",
       "function_name": "get1agent-prod-code-interpreter",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -90,15 +53,12 @@
         "core",
         "data"
       ],
-      "layers": [
-        "base",
-        "genai"
-      ]
+      "layers": []
     },
     {
       "name": "http-fetch",
       "group": "mcp-tools",
-      "dir": "backend/services/http-fetch",
+      "dir": "backend/services/mcp/http-fetch",
       "function_name": "get1agent-prod-http-fetch",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -107,15 +67,25 @@
         "data",
         "retrieval"
       ],
-      "layers": [
-        "base",
-        "genai"
-      ]
+      "layers": []
+    },
+    {
+      "name": "browser",
+      "group": "mcp-tools",
+      "dir": "backend/services/mcp/browser",
+      "function_name": "get1agent-prod-browser",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data"
+      ],
+      "layers": []
     },
     {
       "name": "custom-tools",
       "group": "mcp-tools",
-      "dir": "backend/services/custom-tools",
+      "dir": "backend/services/mcp/custom-tools",
       "function_name": "get1agent-prod-custom-tools",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -123,15 +93,12 @@
         "core",
         "data"
       ],
-      "layers": [
-        "base",
-        "genai"
-      ]
+      "layers": []
     },
     {
       "name": "mcp-connections",
       "group": "mcp-tools",
-      "dir": "backend/services/mcp-connections",
+      "dir": "backend/services/mcp/mcp-connections",
       "function_name": "get1agent-prod-mcp-connections",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -139,15 +106,12 @@
         "core",
         "data"
       ],
-      "layers": [
-        "base",
-        "genai"
-      ]
+      "layers": []
     },
     {
       "name": "ingestion-dispatcher",
       "group": "ingestion-apis",
-      "dir": "backend/services/ingestion-dispatcher",
+      "dir": "backend/services/ingestion/ingestion-dispatcher",
       "function_name": "get1agent-prod-ingestion-dispatcher",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -157,7 +121,7 @@
     {
       "name": "ingestion-extract",
       "group": "ingestion-apis",
-      "dir": "backend/services/ingestion-extract",
+      "dir": "backend/services/ingestion/ingestion-extract",
       "function_name": "get1agent-prod-ingestion-extract",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -167,14 +131,12 @@
         "retrieval",
         "ingestion"
       ],
-      "layers": [
-        "extra-tools"
-      ]
+      "layers": []
     },
     {
       "name": "ingestion-embed",
       "group": "ingestion-apis",
-      "dir": "backend/services/ingestion-embed",
+      "dir": "backend/services/ingestion/ingestion-embed",
       "function_name": "get1agent-prod-ingestion-embed",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -189,7 +151,7 @@
     {
       "name": "ingestion-index",
       "group": "ingestion-apis",
-      "dir": "backend/services/ingestion-index",
+      "dir": "backend/services/ingestion/ingestion-index",
       "function_name": "get1agent-prod-ingestion-index",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -204,7 +166,7 @@
     {
       "name": "ingestion-mark-failed",
       "group": "ingestion-apis",
-      "dir": "backend/services/ingestion-mark-failed",
+      "dir": "backend/services/ingestion/ingestion-mark-failed",
       "function_name": "get1agent-prod-ingestion-mark-failed",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -219,7 +181,7 @@
     {
       "name": "ingestion-watchdog",
       "group": "ingestion-apis",
-      "dir": "backend/services/ingestion-watchdog",
+      "dir": "backend/services/ingestion/ingestion-watchdog",
       "function_name": "get1agent-prod-ingestion-watchdog",
       "handler": "handler.lambda_handler",
       "runtime": "python3.14",
@@ -242,9 +204,7 @@
         "core",
         "data"
       ],
-      "layers": [
-        "base"
-      ]
+      "layers": []
     }
   ]
 }

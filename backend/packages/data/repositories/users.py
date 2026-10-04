@@ -4,7 +4,17 @@ import secrets
 from typing import Any
 
 from data.client import now_iso, table
-from data.keys import GSI3, IDENTITY_SK, PROFILE_SK, sub_pk, user_pk
+from data.keys import (
+    EVAL_RUN_PREFIX,
+    GSI3,
+    IDENTITY_SK,
+    PROFILE_SK,
+    SUPPORT_PREFIX,
+    eval_results_pk,
+    sub_pk,
+    support_partition_pk,
+    user_pk,
+)
 
 # Shared GSI3 partition listing every user profile (admin console). Sparse: an
 # item only appears once it carries the ``gsi3pk`` attribute.
@@ -234,3 +244,78 @@ def get_or_create_user(claims: dict[str, Any]) -> dict[str, Any]:
     # Admins get a larger application-token budget ($20 vs the $2 default).
     quotas.ensure_quota(user_id, is_admin=is_admin_claims(claims))
     return profile
+
+
+# --- account closure (DPDP right to erasure) ----------------------------------
+
+
+def list_user_items(user_id: str) -> list[dict[str, Any]]:
+    """Every item in the user's partition, paginated (never a Scan)."""
+    items: list[dict[str, Any]] = []
+    kwargs: dict[str, Any] = {
+        "KeyConditionExpression": "pk = :pk",
+        "ExpressionAttributeValues": {":pk": user_pk(user_id)},
+    }
+    while True:
+        response = table().query(**kwargs)
+        items.extend(response.get("Items") or [])
+        if "LastEvaluatedKey" not in response:
+            break
+        kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+    return items
+
+
+def _delete_partition(pk: str) -> int:
+    """Delete every item under one partition; returns how many were removed."""
+    deleted = 0
+    kwargs: dict[str, Any] = {
+        "KeyConditionExpression": "pk = :pk",
+        "ExpressionAttributeValues": {":pk": pk},
+    }
+    while True:
+        response = table().query(**kwargs)
+        for item in response.get("Items") or []:
+            table().delete_item(Key={"pk": item["pk"], "sk": item["sk"]})
+            deleted += 1
+        if "LastEvaluatedKey" not in response:
+            break
+        kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+    return deleted
+
+
+def delete_user_data(user_id: str) -> dict[str, int]:
+    """Erase every item owned by the user.
+
+    The user's dataset hangs off ``USER#<userId>`` plus the
+    ``EVALRUN#<runId>`` and ``SUPPORT#<ticketId>`` partitions those items point
+    at (per-case eval results and support messages live in their own
+    partitions). Everything is deleted item-by-item via targeted queries — no
+    ``Scan``.
+    """
+    items = list_user_items(user_id)
+
+    eval_run_ids: list[str] = []
+    ticket_ids: list[str] = []
+    for item in items:
+        sk = str(item.get("sk") or "")
+        if sk.startswith(EVAL_RUN_PREFIX):
+            eval_run_ids.append(sk[len(EVAL_RUN_PREFIX):])
+        elif sk.startswith(SUPPORT_PREFIX):
+            ticket_ids.append(sk[len(SUPPORT_PREFIX):])
+
+    deleted = {"userItems": 0, "evalRunItems": 0, "supportItems": 0}
+    for run_id in eval_run_ids:
+        deleted["evalRunItems"] += _delete_partition(eval_results_pk(run_id))
+    for ticket_id in ticket_ids:
+        deleted["supportItems"] += _delete_partition(support_partition_pk(ticket_id))
+    for item in items:
+        table().delete_item(Key={"pk": item["pk"], "sk": item["sk"]})
+        deleted["userItems"] += 1
+    return deleted
+
+
+def delete_identity(sub: str) -> None:
+    """Remove the ``sub -> userId`` binding so a later login starts fresh."""
+    normalized = str(sub or "").strip()
+    if normalized:
+        table().delete_item(Key={"pk": sub_pk(normalized), "sk": IDENTITY_SK})

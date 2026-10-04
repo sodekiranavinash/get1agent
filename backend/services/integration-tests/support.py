@@ -41,6 +41,13 @@ class FakeStorage:
             self.data.pop(key, None)
             self.etags.pop(key, None)
 
+    def list_keys(self, prefix: str) -> list[str]:
+        return [key for key in self.data if key.startswith(prefix)]
+
+    def delete_many(self, keys: list[str]) -> None:
+        for key in keys:
+            self.delete(key)
+
     # --- presign / head ------------------------------------------------------
     def presign_put(self, key: str, content_type: str, expires_in: int = 3600) -> str:
         return f"https://s3.test/{key}"

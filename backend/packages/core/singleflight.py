@@ -1,12 +1,13 @@
-"""Best-effort single-flight locks (Upstash Redis REST).
+"""Best-effort single-flight locks.
 
 Deduplicate expensive work: when several concurrent identical requests arrive,
 one runs the work and the rest wait for its cached result instead of recomputing.
 This is **cost deduplication, not rate limiting** — rate limiting lives at the
 API Gateway (stage + per-route throttling).
 
-Reuses :mod:`core.cache` for the Upstash REST client. Disabled without
-credentials (or ``SINGLE_FLIGHT_ENABLED=false``); every call is best-effort.
+Reuses the configured :mod:`core.cache` DynamoDB backend for the lock primitive.
+Disabled without a backend (or ``SINGLE_FLIGHT_ENABLED=false``); every call is
+best-effort.
 """
 
 from __future__ import annotations
@@ -52,19 +53,16 @@ def wait_seconds() -> float:
 
 
 def acquire(lock_key: str, ttl_seconds: int) -> bool:
-    """Try to take a ``SET NX EX`` lock. True when this caller owns it."""
+    """Try to take the lock. True when this caller owns it."""
     if not enabled():
         return True
-    result = cache._command(  # noqa: SLF001 - shared REST client
-        "SET", lock_key, "1", "NX", "EX", max(int(ttl_seconds), 1)
-    )
-    return str(result).upper() == "OK"
+    return cache.set_nx(lock_key, max(int(ttl_seconds), 1))
 
 
 def release(lock_key: str) -> None:
     if not enabled():
         return
-    cache._command("DEL", lock_key)  # noqa: SLF001
+    cache.delete(lock_key)
 
 
 def single_flight(

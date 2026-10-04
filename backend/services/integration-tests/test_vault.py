@@ -11,7 +11,7 @@ import pytest
 from data.repositories import vault as repo
 from support import load_module, patch_lambda_storage
 
-handler = load_module("backend/services/user-api/handler.py", "user_api_handler_vault")
+handler = load_module("backend/services/apis/user-api/handler.py", "user_api_handler_vault")
 
 USER = "u_7k3f9qz2mpx8n4rq"
 SUB = "auth0|vaulttest"
@@ -230,7 +230,7 @@ def test_settings_exposes_budget_and_pricing(fake_storage, monkeypatch):
     assert payload["budget"]["spentUsd"] == 0.0
     assert payload["budget"]["unlimited"] is False
     assert payload["pricing"]["__default__"]["input"] >= 0
-    assert "mimo-v2.5" in payload["pricing"]
+    assert "nvidia.nemotron-nano-3-30b" in payload["pricing"]
 
 
 def test_vault_usage_reports_runs_and_tokens(fake_storage, monkeypatch, vault_key):

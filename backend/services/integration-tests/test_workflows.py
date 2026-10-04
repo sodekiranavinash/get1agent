@@ -6,7 +6,7 @@ import json
 
 from support import load_module, patch_lambda_storage
 
-handler = load_module("backend/services/user-api/handler.py", "user_api_handler")
+handler = load_module("backend/services/apis/user-api/handler.py", "user_api_handler")
 
 SUB = "auth0|workflowtest"
 
@@ -48,7 +48,7 @@ def _agent_payload(name: str = "researcher") -> dict:
         "config": {
             "version": 2,
             "prompt": "You research topics and report concise findings.",
-            "model": "mimo-v2.5",
+            "model": "nvidia.nemotron-nano-3-30b",
             "reasoning": "medium",
             "outputFormat": "markdown",
             "input": {"query": "", "fileIds": []},
@@ -84,14 +84,14 @@ def _workflow_payload(agent_id: str, *, mode: str = "graph") -> dict:
                     "data": {
                         "query": "Summarize the topic",
                         "prompt": "You coordinate a research team.",
-                        "model": "mimo-v2.5",
+                        "model": "nvidia.nemotron-nano-3-30b",
                     },
                 },
                 {
                     "id": "researcher",
                     "type": "agent",
                     "position": {"x": 780, "y": 60},
-                    "data": {"agentId": agent_id, "agentName": "researcher", "overrides": {"model": "kimi-k2.6"}},
+                    "data": {"agentId": agent_id, "agentName": "researcher", "overrides": {"model": "deepseek.v3.2"}},
                 },
                 {"id": "output", "type": "output", "position": {"x": 360, "y": 500}, "data": {"format": "markdown", "instructions": "Be concise."}},
                 {
@@ -129,7 +129,7 @@ def test_workflow_crud_and_verify(fake_storage, monkeypatch):
     assert listed["usage"]["limits"]["workflows"] == 50
 
     detail = _call("GET", f"/v1/workflows/{created['id']}")
-    assert detail["config"]["nodes"][1]["data"]["overrides"]["model"] == "kimi-k2.6"
+    assert detail["config"]["nodes"][1]["data"]["overrides"]["model"] == "deepseek.v3.2"
     assert detail["config"]["schedule"] == {"enabled": True, "cron": "0 9 * * 1-5", "timezone": "UTC"}
 
     verified = _call("POST", f"/v1/workflows/{created['id']}/verify")
@@ -142,7 +142,7 @@ def test_workflow_crud_and_verify(fake_storage, monkeypatch):
     swarm_created = _call("POST", "/v1/workflows", swarm, expect=201)
     assert swarm_created["config"]["mode"] == "swarm"
     assert swarm_created["config"]["input"]["prompt"] == "You coordinate a research team."
-    assert swarm_created["config"]["input"]["model"] == "mimo-v2.5"
+    assert swarm_created["config"]["input"]["model"] == "nvidia.nemotron-nano-3-30b"
     assert "hostNodeId" not in swarm_created["config"]
 
     updated = _call(

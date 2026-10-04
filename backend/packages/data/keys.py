@@ -1,12 +1,13 @@
 """Key builders for the single-table design.
 
-Layout (see design/design-b-dynamodb-s3.md Part 6):
+Layout (see docs/design/design-b-dynamodb-s3.md Part 6):
 
     Identity      SUB#<sub>        #IDENTITY     (sub -> internal userId)
     User          USER#<userId>    #PROFILE      (userId is a short base32 id)
     Settings      USER#<userId>    #SETTINGS
     Notifications USER#<userId>    #NOTIF
     Quota         USER#<userId>    #QUOTA
+    Consent       USER#<userId>    #CONSENT     (DPDP consent record)
     KnowledgeBase USER#<userId>    KB#<name>
     Document      KB#<kbId>        DOC#<lowerFileName>
     Tag           DOC#<docId>      TAG#<lowerName>
@@ -29,6 +30,7 @@ Layout (see design/design-b-dynamodb-s3.md Part 6):
     Support ticket USER#<userId>   SUPPORT#<ticketId> (metadata; GSI3 SUPPORT#all)
     Support message SUPPORT#<ticketId> MSG#<createdAt>#<seq>
     Security report USER#<userId>  SREPORT#<reportId> (one-way; GSI3 SREPORT#all)
+    Notification  USER#<userId>    NOTIF#<id>        (feed item; TTL 90 days)
 
 Conversations are numbered by a single global atomic counter
 (``COUNTER#conversations`` / ``#SEQ``); the item carries a byUser GSI2 key
@@ -62,6 +64,9 @@ IDENTITY_SK = "#IDENTITY"
 SETTINGS_SK = "#SETTINGS"
 NOTIF_SK = "#NOTIF"
 QUOTA_SK = "#QUOTA"
+# DPDP consent record (separate from the profile so the login upsert cannot
+# clobber it).
+CONSENT_SK = "#CONSENT"
 
 KB_PREFIX = "KB#"
 DOC_PREFIX = "DOC#"
@@ -81,13 +86,17 @@ FEEDBACK_PREFIX = "FEEDBACK#"
 MCPCONN_PREFIX = "MCPCONN#"
 MCPSTATE_PREFIX = "MCPSTATE#"
 EVAL_RUN_PREFIX = "EVALRUN#"
+TRACE_PREFIX = "TRACE#"
 SCHEDULE_PREFIX = "SCHEDULE#"
 # User support threads (user <-> admin) and one-way security reports.
 SUPPORT_PREFIX = "SUPPORT#"
 SUPPORT_MESSAGE_PREFIX = "MSG#"
 SECURITY_REPORT_PREFIX = "SREPORT#"
+# User notifications feed (one small item per notification under USER#<userId>).
+# Distinct from the `#NOTIF` notification-*preferences* item.
+NOTIFICATION_PREFIX = "NOTIF#"
 # Sort-key prefix for per-case run results under an ``EVALRUN#<runId>`` partition.
-# (Curated datasets/cases live in Langfuse, not DynamoDB.)
+# (Curated datasets/cases live in the LAB# DynamoDB partition.)
 EVAL_CASE_PREFIX = "CASE#"
 USER_PREFIX = "USER#"
 SUB_PREFIX = "SUB#"
@@ -100,6 +109,8 @@ CONV_COUNTER_SK = "#SEQ"
 # Overloaded GSI1 partition for "an agent's conversations" (builder history).
 CHAT_AGENT_PK_PREFIX = "CHATAGENT#"
 
+# Overloaded GSI1 partition for "an agent's traces" (trace explorer filter).
+TRACE_AGENT_PK_PREFIX = "TRACEAGENT#"
 # Zero-pad the numeric id so the base-table sort key stays lexically ordered.
 _CONV_ID_WIDTH = 12
 
@@ -262,6 +273,29 @@ def eval_case_sk(case_id: str) -> str:
     return f"{EVAL_CASE_PREFIX}{case_id}"
 
 
+# --- agent-run traces ---------------------------------------------------------
+
+
+def trace_sk(trace_id: str) -> str:
+    """Base-table sort key for one run's trace index item (owned by the user)."""
+    return f"{TRACE_PREFIX}{trace_id}"
+
+
+def trace_by_user_sk(started_at: str, trace_id: str) -> str:
+    """GSI2 ``byUser`` sort key: the traces list is ordered by recency."""
+    return f"{TRACE_PREFIX}{started_at}#{trace_id}"
+
+
+def trace_by_agent_sk(started_at: str, trace_id: str) -> str:
+    """GSI1 ``byId`` sort key: an agent's traces (``<startedAt>#<traceId>``)."""
+    return f"{started_at}#{trace_id}"
+
+
+def trace_agent_pk(agent_id: str) -> str:
+    """Overloaded GSI1 partition listing one agent's traces."""
+    return f"{TRACE_AGENT_PK_PREFIX}{agent_id}"
+
+
 def schedule_sk(kind: str, target_id: str) -> str:
     """One schedule registry row: the cron for an agent or workflow."""
     return f"{SCHEDULE_PREFIX}{kind}#{target_id}"
@@ -293,6 +327,11 @@ def support_message_sk(created_at: str, seq: str) -> str:
 def support_all_sk(updated_at: str, ticket_id: str) -> str:
     """GSI3 ``byStatus`` sort key: ``<updatedAt>#<ticketId>`` (newest first)."""
     return f"{updated_at}#{ticket_id}"
+
+
+def notification_sk(notification_id: str) -> str:
+    """One user notification under the user's partition (the feed item)."""
+    return f"{NOTIFICATION_PREFIX}{notification_id}"
 
 
 def security_report_sk(report_id: str) -> str:

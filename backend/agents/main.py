@@ -9,7 +9,7 @@ will be added as a sibling package and dispatched here.
 
 Run locally:
 
-    OPENCODE_API_KEY=... DYNAMODB_ENDPOINT_URL=http://localhost:8000 python main.py
+    BEDROCK_REGION=ap-south-1 DYNAMODB_ENDPOINT_URL=http://localhost:8000 python main.py
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from agentflow.run import run_agent_stream
 from workflow.run import run_workflow_stream
 
 # Must run before BedrockAgentCoreApp() so the AgentCore baggage span processor
-# (and every Strands tracer) registers on the Langfuse tracer provider.
+# (and every Strands tracer) registers on the OTel tracer provider (ADOT → CloudWatch).
 init_tracing()
 
 app = BedrockAgentCoreApp()
@@ -41,4 +41,4 @@ async def invoke(payload, context=None):
 if __name__ == "__main__":
     # AgentCore requires port 8080 in the container; AGENT_PORT lets local dev
     # move off it (the Floci reranker also maps host 8080).
-    app.run(port=int(os.environ.get("AGENT_PORT", "8080")))
+    app.run(port=int(os.environ.get("AGENT_PORT") or "8080"))

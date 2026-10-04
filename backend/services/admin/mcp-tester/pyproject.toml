@@ -1,0 +1,10 @@
+[project]
+name = "get1agent-mcp-tester"
+version = "0.1.0"
+description = "Admin MCP client and admin API routes"
+requires-python = ">=3.14"
+dependencies = [
+    "boto3>=1.43.31",
+    "python-dateutil>=2.8.2",
+    "tzdata>=2024.1",
+]

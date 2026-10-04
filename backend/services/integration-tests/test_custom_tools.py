@@ -6,7 +6,7 @@ import json
 
 from support import load_module, patch_lambda_storage
 
-handler = load_module("backend/services/user-api/handler.py", "user_api_custom_tools")
+handler = load_module("backend/services/apis/user-api/handler.py", "user_api_custom_tools")
 
 SUB = "auth0|customtools"
 

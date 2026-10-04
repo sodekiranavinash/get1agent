@@ -15,8 +15,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Cap each attachment so one large file cannot blow the context window.
-MAX_ATTACHMENT_CHARS = int(os.environ.get("AGENT_ATTACHMENT_MAX_CHARS", "20000"))
-MAX_ATTACHMENTS = int(os.environ.get("AGENT_MAX_ATTACHMENTS", "5"))
+MAX_ATTACHMENT_CHARS = int(os.environ.get("AGENT_ATTACHMENT_MAX_CHARS") or "20000")
+MAX_ATTACHMENTS = int(os.environ.get("AGENT_MAX_ATTACHMENTS") or "5")
 
 
 def resolve_file_ids(payload: dict[str, Any], agent_config: dict[str, Any]) -> list[str]:

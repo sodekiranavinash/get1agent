@@ -1,4 +1,4 @@
-"""Evaluation lab (Langfuse-native) routes: traces, datasets, queues."""
+"""Evaluation lab (AWS-native) routes: traces, datasets, queues."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 
 from support import load_module, patch_lambda_storage
 
-handler = load_module("backend/services/user-api/handler.py", "user_api_handler_lab")
+handler = load_module("backend/services/apis/user-api/handler.py", "user_api_handler_lab")
 
 SUB = "auth0|labtest"
 
@@ -39,17 +39,20 @@ def _call(method, path, body=None, expect=200):
     return json.loads(response["body"])
 
 
-def test_lab_not_configured(monkeypatch):
-    monkeypatch.setattr(handler, "_langfuse_auth", lambda: None)
+def test_lab_not_configured(monkeypatch, fake_storage):
+    # The Lab store is AWS-native, so it is always "configured"; a brand-new
+    # user simply has no traces yet.
+    patch_lambda_storage(monkeypatch, handler, fake_storage)
     traces = _call("GET", "/v1/lab/traces")
-    assert traces == {"configured": False, "traces": []}
-    assert _call("GET", "/v1/lab/datasets")["configured"] is False
-    assert _call("GET", "/v1/lab/queues")["configured"] is False
+    assert traces["configured"] is True
+    assert traces["traces"] == []
+    assert _call("GET", "/v1/lab/datasets")["configured"] is True
+    assert _call("GET", "/v1/lab/queues")["configured"] is True
 
 
 def test_lab_traces_datasets_and_queues(monkeypatch, fake_storage):
     patch_lambda_storage(monkeypatch, handler, fake_storage)
-    monkeypatch.setattr(handler, "_langfuse_auth", lambda: ("https://lf.example", "tok"))
+    pass  # AWS-native Lab store is always configured
 
     calls: list[tuple] = []
 
@@ -73,7 +76,7 @@ def test_lab_traces_datasets_and_queues(monkeypatch, fake_storage):
                     },
                     {"id": "t2", "name": "eval:dataset:abc", "userId": uid},
                 ],
-                "meta": {"page": 1, "totalPages": 2, "totalItems": 3},
+                "meta": {"cursor": "CUR2"},
             }
         if method == "GET" and path.startswith("/datasets"):
             return {
@@ -102,7 +105,7 @@ def test_lab_traces_datasets_and_queues(monkeypatch, fake_storage):
     traces = _call("GET", "/v1/lab/traces")
     assert traces["configured"] is True
     assert [trace["id"] for trace in traces["traces"]] == ["t1"]
-    assert traces["totalPages"] == 2
+    assert traces["nextCursor"] == "CUR2"
 
     from data.repositories.users import get_user_by_sub
 
@@ -153,7 +156,7 @@ def test_lab_traces_datasets_and_queues(monkeypatch, fake_storage):
 
 def test_lab_queue_review(monkeypatch, fake_storage):
     patch_lambda_storage(monkeypatch, handler, fake_storage)
-    monkeypatch.setattr(handler, "_langfuse_auth", lambda: ("https://lf.example", "tok"))
+    pass  # AWS-native Lab store is always configured
 
     calls: list[tuple] = []
 
@@ -172,7 +175,7 @@ def test_lab_queue_review(monkeypatch, fake_storage):
             }
         if method == "GET" and path == "/annotation-queues/q1/items/qi1":
             return {"id": "qi1", "objectId": "t1", "status": "PENDING"}
-        if method == "GET" and path == "/traces/t1":
+        if method == "GET" and path.startswith("/traces/t1"):
             return {
                 "id": "t1",
                 "name": "agent",
@@ -219,7 +222,7 @@ def test_lab_queue_review(monkeypatch, fake_storage):
 
 def test_lab_metrics(monkeypatch, fake_storage):
     patch_lambda_storage(monkeypatch, handler, fake_storage)
-    monkeypatch.setattr(handler, "_langfuse_auth", lambda: ("https://lf.example", "tok"))
+    pass  # AWS-native Lab store is always configured
 
     import json as _json
     import urllib.parse
@@ -281,14 +284,14 @@ def test_lab_metrics(monkeypatch, fake_storage):
 
 def test_lab_add_trace_creates_missing_dataset(monkeypatch, fake_storage):
     patch_lambda_storage(monkeypatch, handler, fake_storage)
-    monkeypatch.setattr(handler, "_langfuse_auth", lambda: ("https://lf.example", "tok"))
+    pass  # AWS-native Lab store is always configured
 
     calls: list[tuple] = []
 
     def fake_request(method, path, payload=None):
         calls.append((method, path, payload))
         if method == "GET" and path.startswith("/datasets/"):
-            raise handler.ApiError(502, "Langfuse error (404): not found")
+            raise handler.ApiError(404, "Dataset not found")
         if method == "POST" and path == "/datasets":
             return {"id": "d1", "name": payload["name"]}
         if method == "POST" and path == "/dataset-items":
@@ -324,7 +327,7 @@ def test_lab_playground_run(monkeypatch, fake_storage):
     result = _call(
         "POST",
         "/v1/lab/playground/run",
-        {"model": "glm-5.3-flash", "messages": [{"role": "user", "content": "q"}]},
+        {"model": "zai.glm-4.7-flash", "messages": [{"role": "user", "content": "q"}]},
     )
     assert result["results"][0]["output"] == "hi"
     assert captured["messages"][0]["content"] == "q"
@@ -335,12 +338,12 @@ def test_lab_playground_run(monkeypatch, fake_storage):
         "/v1/lab/playground/run",
         {
             "runs": [
-                {"model": "glm-5.3-flash", "messages": [{"role": "user", "content": "q"}]},
-                {"model": "kimi-k2.6", "messages": [{"role": "user", "content": "q"}]},
+                {"model": "zai.glm-4.7-flash", "messages": [{"role": "user", "content": "q"}]},
+                {"model": "deepseek.v3.2", "messages": [{"role": "user", "content": "q"}]},
             ]
         },
     )
-    assert [entry["model"] for entry in ab["results"]] == ["glm-5.3-flash", "kimi-k2.6"]
+    assert [entry["model"] for entry in ab["results"]] == ["zai.glm-4.7-flash", "deepseek.v3.2"]
 
     # A model the playground does not offer is rejected before any call.
     _call("POST", "/v1/lab/playground/run", {"model": "nope", "messages": []}, expect=400)

@@ -12,9 +12,9 @@ process.env.AGENT_RUNTIME_ARN =
   'arn:aws:bedrock-agentcore:ap-south-1:626829991663:runtime/get1agent_prod_agent_worker-iEEOf0F1gr'
 process.env.AGENT_RUNTIME_QUALIFIER = 'DEFAULT'
 process.env.AGENT_RUN_TIMEOUT_SECONDS = '30'
-process.env.AUTH0_DISCOVERY_URL = 'https://example.test/.well-known/openid-configuration'
-process.env.AUTH0_AUDIENCE = 'https://api.get1agent.com'
-process.env.AUTH0_ISSUER = 'https://example.test/'
+process.env.AUTH_DISCOVERY_URL = 'https://example.test/.well-known/openid-configuration'
+process.env.AUTH_AUDIENCE = 'https://api.get1agent.com'
+process.env.AUTH_ISSUER = 'https://example.test/'
 
 const { handleInvocation, sessionId, verifyToken } = await import('../proxy.mjs')
 

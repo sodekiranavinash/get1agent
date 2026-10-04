@@ -1,25 +1,19 @@
-"""Langfuse tracing for the agent runtime.
+"""OpenTelemetry tracing for the agent runtime (AWS-native).
 
-Langfuse is the single tracing backend for the AgentCore worker. The Langfuse
-SDK owns the OpenTelemetry ``TracerProvider``, so Strands' auto-instrumented
-spans (the agent loop, generations and tool calls) attach to it automatically —
-there is no separate ``StrandsTelemetry`` exporter. AgentCore's own ADOT
-exporter is turned off with ``DISABLE_ADOT_OBSERVABILITY=true`` so traces are
-not double-exported.
+Strands auto-instruments the agent loop; this module opens **one root span per
+run** and tags it with user/session/agent metadata. Export is handled by the
+AgentCore Runtime's ADOT collector → **CloudWatch + X-Ray**, so no observability
+vendor SDK is involved and there are no credentials to configure.
 
-Tracing is opt-in through the environment: without ``LANGFUSE_PUBLIC_KEY`` and
-``LANGFUSE_SECRET_KEY`` every function here is a no-op, so local dev and unit
-tests are unaffected.
-
-``LANGFUSE_BASE_URL`` must be set (even to the cloud default) because Strands
-detects Langfuse by looking for the string "langfuse" in ``LANGFUSE_BASE_URL`` /
-``OTEL_EXPORTER_OTLP_ENDPOINT``; that is what switches it to Langfuse-friendly
-span attributes.
+Set ``AGENT_TRACING_ENABLED=false`` to force a no-op (local unit tests). When no
+OTel ``TracerProvider`` is configured the OpenTelemetry API returns a non-recording
+span, so every helper here is naturally a safe no-op.
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
 from typing import Any, Iterator
@@ -28,87 +22,203 @@ _initialized = False
 
 
 def _quiet_known_noise() -> None:
-    """Silence two known-benign logs that would otherwise spam every run.
-
-    * ``opentelemetry.context``: the runtime streams through an async generator
-      that AgentCore bridges across a worker loop. When a client disconnects the
-      generator is closed (``GeneratorExit``) in a different execution context,
-      so OpenTelemetry's public ``context.detach`` logs "Token was created in a
-      different Context" for every open span (ours and Strands'). The detach is
-      best-effort and the leaked attachment lives in a per-request task context
-      that is discarded. Strands uses the public ``use_span`` internally, so the
-      only place to silence it is the logger.
-    * ``strands.models.openai``: warns that ``reasoningContent`` is dropped in
-      multi-turn Chat Completions calls. Strands filters those blocks itself, so
-      the warning is expected noise on every follow-up turn.
-    """
+    """Silence benign logs that would otherwise spam every run."""
     logging.getLogger("opentelemetry.context").setLevel(logging.CRITICAL)
     logging.getLogger("strands.models.openai").setLevel(logging.ERROR)
 
 
 def enabled() -> bool:
-    """True when Langfuse credentials are configured."""
-    return bool(
-        (os.environ.get("LANGFUSE_PUBLIC_KEY") or "").strip()
-        and (os.environ.get("LANGFUSE_SECRET_KEY") or "").strip()
+    """Tracing is on unless explicitly disabled."""
+    return (os.environ.get("AGENT_TRACING_ENABLED") or "true").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
     )
 
 
-def init_tracing() -> None:
-    """Initialise Langfuse tracing once, before the AgentCore app is created.
+def _xray_direct_enabled() -> bool:
+    """Local dev: export spans straight to X-Ray with the ambient credentials.
 
-    Must run before ``BedrockAgentCoreApp()`` so the AgentCore baggage span
-    processor registers on the Langfuse tracer provider, and before any Strands
-    ``Agent`` is built so its tracer picks up that provider.
+    Deployed runtimes rely on AgentCore's ADOT collector, so this is off unless
+    ``AGENT_XRAY_EXPORT=true`` (set locally).
+    """
+    return (os.environ.get("AGENT_XRAY_EXPORT") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _xray_trace_id(otel_trace_id: int) -> str:
+    """Map a W3C (32-hex) trace id onto X-Ray's dashed ``1-xxxxxxxx-…`` id."""
+    hex32 = format(otel_trace_id & ((1 << 128) - 1), "032x")
+    return f"1-{hex32[:8]}-{hex32[8:]}"
+
+
+class _XRaySpanExporter:
+    """A minimal OTel exporter that writes span documents to X-Ray."""
+
+    def __init__(self, region: str) -> None:
+        self._region = region
+        self._client: Any = None
+
+    def _xray(self) -> Any:
+        if self._client is None:
+            import boto3
+
+            self._client = boto3.client("xray", region_name=self._region)
+        return self._client
+
+    def export(self, spans: Any) -> Any:
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        documents: list[str] = []
+        for span in spans:
+            try:
+                documents.append(self._document(span))
+            except Exception:  # noqa: BLE001 - one bad span must not drop the batch
+                continue
+        if not documents:
+            return SpanExportResult.SUCCESS
+        try:
+            self._xray().put_trace_segments(TraceSegmentDocuments=documents)
+            return SpanExportResult.SUCCESS
+        except Exception:  # noqa: BLE001 - X-Ray unavailability must not break a run
+            return SpanExportResult.FAILURE
+
+    @staticmethod
+    def _document(span: Any) -> str:
+        context = span.context
+        start = (span.start_time or 0) / 1e9
+        end = (span.end_time or span.start_time or 0) / 1e9
+        document: dict[str, Any] = {
+            "name": (span.name or "span")[:200],
+            "id": format(context.span_id, "016x"),
+            "trace_id": _xray_trace_id(context.trace_id),
+            "start_time": start,
+            "end_time": end,
+        }
+        parent = getattr(span, "parent", None)
+        if parent is not None and getattr(parent, "span_id", 0):
+            document["parent_id"] = format(parent.span_id, "016x")
+        annotations: dict[str, Any] = {}
+        for key, value in (span.attributes or {}).items():
+            if len(annotations) >= 50:
+                break
+            if isinstance(value, bool):
+                annotations[str(key)[:50]] = value
+            elif isinstance(value, (int, float)):
+                annotations[str(key)[:50]] = value
+            elif isinstance(value, str):
+                annotations[str(key)[:50]] = value[:1000]
+        if annotations:
+            document["annotations"] = annotations
+        status = getattr(span, "status", None)
+        if status is not None and getattr(status, "status_code", None) == 2:  # ERROR
+            document["error"] = True
+        return json.dumps(document)
+
+    def shutdown(self) -> None:
+        return None
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return True
+
+
+def _install_xray_exporter() -> None:
+    """Install a TracerProvider that exports to X-Ray (local dev only)."""
+    try:
+        from opentelemetry import trace as otel_trace
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except Exception:  # noqa: BLE001
+        return
+    region = (
+        os.environ.get("AGENT_XRAY_REGION")
+        or os.environ.get("BEDROCK_REGION")
+        or os.environ.get("AWS_REGION")
+        or "ap-south-1"
+    )
+    service = os.environ.get("OTEL_SERVICE_NAME", "get1agent-agent-worker")
+    provider = TracerProvider(resource=Resource.create({"service.name": service}))
+    provider.add_span_processor(BatchSpanProcessor(_XRaySpanExporter(region)))
+    otel_trace.set_tracer_provider(provider)
+
+
+def init_tracing() -> None:
+    """Initialise tracing attributes once, before the AgentCore app is created.
+
+    Deployed: the TracerProvider/exporter is owned by AgentCore's ADOT runtime;
+    we only set a service name (if unset) and quiet known noise. Local dev
+    (``AGENT_XRAY_EXPORT=true``): install a direct X-Ray exporter so local runs
+    produce real, pullable traces.
     """
     global _initialized
     if _initialized:
         return
     _initialized = True
     _quiet_known_noise()
-    if not enabled():
-        return
-    try:
-        from langfuse import get_client
-
-        get_client()
-    except Exception as exc:  # noqa: BLE001 - tracing must never block a run
-        print(f"[observability] Langfuse init failed: {exc}", flush=True)
-        return
-    _install_public_processor()
+    os.environ.setdefault("OTEL_SERVICE_NAME", "get1agent-agent-worker")
+    if _xray_direct_enabled():
+        _install_xray_exporter()
 
 
-def _install_public_processor() -> None:
-    """Stamp every span with ``langfuse.trace.public = true``.
-
-    Langfuse decides a trace's ``public`` flag from the observations it ingests,
-    and only reliably honors it when the flag is present on the span it sees
-    first. Our root observation ends last, so a child that arrives before it
-    would leave the trace non-public. Stamping every span makes the flag
-    independent of export order (and of which span is the root).
-    """
+def _current_span() -> Any:
     try:
         from opentelemetry import trace as otel_trace
-        from opentelemetry.sdk.trace import SpanProcessor
 
-        class _PublicSpanProcessor(SpanProcessor):
-            def on_start(self, span: Any, parent_context: Any = None) -> None:
-                try:
-                    span.set_attribute("langfuse.trace.public", True)
-                except Exception:  # noqa: BLE001 - must never break a run
-                    pass
-
-        provider = otel_trace.get_tracer_provider()
-        provider.add_span_processor(_PublicSpanProcessor())
-    except Exception as exc:  # noqa: BLE001 - best-effort
-        print(f"[observability] Public-trace processor not installed: {exc}", flush=True)
+        return otel_trace.get_current_span()
+    except Exception:  # noqa: BLE001 - tracing must never break a run
+        return None
 
 
-class _NoopObservation:
-    """Stand-in for a Langfuse observation when tracing is disabled."""
-
-    def update(self, **_: Any) -> None:
+def _set(span: Any, key: str, value: Any) -> None:
+    if span is None or value is None:
+        return
+    try:
+        if isinstance(value, (bool, int, float, str)):
+            span.set_attribute(key, value)
+        elif isinstance(value, (list, tuple, set)):
+            span.set_attribute(key, [str(item) for item in value])
+        else:
+            span.set_attribute(key, str(value))
+    except Exception:  # noqa: BLE001
         pass
+
+
+def _tag_span(
+    span: Any,
+    *,
+    user_id: str | None,
+    session_id: str | None,
+    tags: list[str] | None,
+    metadata: dict[str, Any] | None,
+    trace_name: str | None,
+) -> None:
+    _set(span, "get1agent.user_id", user_id)
+    _set(span, "get1agent.session_id", session_id)
+    _set(span, "get1agent.trace_name", trace_name)
+    if tags:
+        _set(span, "get1agent.tags", tags)
+    if metadata:
+        try:
+            _set(span, "get1agent.metadata", json.dumps(metadata)[:4000])
+        except (TypeError, ValueError):
+            pass
+
+
+class _Observation:
+    """Thin wrapper over an OTel span with a vendor-neutral ``update``."""
+
+    def __init__(self, span: Any) -> None:
+        self.span = span
+
+    def update(self, **attributes: Any) -> None:
+        for key, value in attributes.items():
+            _set(self.span, f"get1agent.{key}", value)
 
 
 @contextlib.contextmanager
@@ -120,41 +230,16 @@ def trace_attributes(
     metadata: dict[str, Any] | None = None,
     trace_name: str | None = None,
 ) -> Iterator[None]:
-    """Propagate user/session/tags/metadata/name to the trace and its observations."""
-    if not enabled():
-        yield
-        return
-
-    cm = None
-    try:
-        from langfuse import get_client
-
-        try:
-            from langfuse import propagate_attributes
-
-            cm = propagate_attributes(
-                user_id=user_id,
-                session_id=session_id,
-                tags=tags,
-                metadata=metadata,
-                trace_name=trace_name,
-            )
-        except ImportError:
-            # Older SDKs have no propagate_attributes; set them on the trace.
-            get_client().update_current_trace(
-                user_id=user_id,
-                session_id=session_id,
-                tags=tags,
-                metadata=metadata,
-            )
-    except Exception:  # noqa: BLE001 - attribute propagation is best-effort
-        cm = None
-
-    if cm is None:
-        yield
-        return
-    with cm:
-        yield
+    """Tag the current span (best-effort); yields immediately."""
+    _tag_span(
+        _current_span(),
+        user_id=user_id,
+        session_id=session_id,
+        tags=tags,
+        metadata=metadata,
+        trace_name=trace_name,
+    )
+    yield
 
 
 @contextlib.contextmanager
@@ -166,127 +251,68 @@ def run_trace(
     session_id: str | None = None,
     tags: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
-) -> Iterator[Any]:
-    """Root observation for one agent run; yields a span-like object.
-
-    Everything created inside the ``with`` block (the planner, model calls, tool
-    invocations) nests under this trace. Yields a no-op object when tracing is
-    off, so callers can always call ``.update(...)``.
-    """
+) -> Iterator[_Observation]:
+    """Root span for one agent run; everything inside nests under it."""
     if not enabled():
-        yield _NoopObservation()
+        yield _Observation(None)
         return
-
     try:
-        from langfuse import get_client
-
-        langfuse = get_client()
-    except Exception as exc:  # noqa: BLE001
-        print(f"[observability] Langfuse unavailable: {exc}", flush=True)
-        yield _NoopObservation()
-        return
-
-    with trace_attributes(
-        user_id=user_id,
-        session_id=session_id,
-        tags=tags,
-        metadata=metadata,
-        trace_name=name,
-    ):
-        try:
-            # A manual observation (not the context-manager variant): we attach
-            # its span context ourselves so the detach can be done *safely*.
-            observation = langfuse.start_observation(
-                as_type="agent", name=name, input=input
-            )
-        except Exception as exc:  # noqa: BLE001
-            print(f"[observability] Trace start failed: {exc}", flush=True)
-            yield _NoopObservation()
-            return
-        token = _attach_span(observation)
-        try:
-            yield observation
-        finally:
-            try:
-                observation.end()
-            except Exception:  # noqa: BLE001
-                pass
-            _detach_safely(token)
-
-
-def _attach_span(observation: Any) -> Any:
-    """Make ``observation`` the current span so child spans nest under it."""
-    try:
-        from opentelemetry import context as otel_context
         from opentelemetry import trace as otel_trace
 
-        otel_span = getattr(observation, "_otel_span", None)
-        if otel_span is None:
-            return None
-        return otel_context.attach(otel_trace.set_span_in_context(otel_span))
-    except Exception:  # noqa: BLE001 - tracing must never break a run
-        return None
-
-
-def _detach_safely(token: Any) -> None:
-    """Detach an OTel context token without the public helper's error logging.
-
-    OpenTelemetry tokens must be detached in the same execution context they
-    were attached in. Our root span is attached inside an async generator that
-    the AgentCore runtime drives across a worker loop; when the client
-    disconnects, the generator is closed (``GeneratorExit``) in a different
-    context and the public ``context.detach`` logs "Token was created in a
-    different Context". The detach is best-effort and the leaked attachment lives
-    in a per-request task context that is discarded, so we detach via the runtime
-    directly and swallow the failure (the Langfuse SDK does the same for
-    ``propagate_attributes``).
-    """
-    if token is None:
+        tracer = otel_trace.get_tracer("get1agent.agentflow")
+    except Exception:  # noqa: BLE001
+        yield _Observation(None)
         return
-    try:
-        from opentelemetry.context import _RUNTIME_CONTEXT
 
-        _RUNTIME_CONTEXT.detach(token)
-    except Exception:  # noqa: BLE001 - harmless, per-request context
-        pass
+    with tracer.start_as_current_span(name) as span:
+        _tag_span(
+            span,
+            user_id=user_id,
+            session_id=session_id,
+            tags=tags,
+            metadata=metadata,
+            trace_name=name,
+        )
+        if input is not None:
+            _set(span, "get1agent.input", str(input)[:4000])
+        yield _Observation(span)
 
 
 def flush() -> None:
-    """Flush buffered spans (call at the end of a run; the container can suspend)."""
-    if not enabled():
-        return
+    """Flush buffered spans (the container can suspend between turns)."""
     try:
-        from langfuse import get_client
+        from opentelemetry import trace as otel_trace
 
-        get_client().flush()
+        provider = otel_trace.get_tracer_provider()
+        force_flush = getattr(provider, "force_flush", None)
+        if callable(force_flush):
+            force_flush()
     except Exception:  # noqa: BLE001
         pass
 
 
 def trace_identity(
-    observation: Any, *, make_public: bool = True
+    observation: Any = None, *, make_public: bool = True
 ) -> tuple[str | None, str | None]:
     """Return ``(trace_id, trace_url)`` for the active run.
 
-    Marks the trace public (so its URL opens without a Langfuse login) when
-    ``make_public`` is set. Call while the root observation is still recording.
-    Best-effort: returns ``(None, None)`` on any failure.
+    ``trace_url`` is ``None``: the trace lives in CloudWatch/X-Ray, and user-api
+    mints a signed, expiring link for it. Best-effort: ``(None, None)`` on failure.
     """
-    if not enabled():
+    del make_public  # CloudWatch traces are not "published"; user-api signs links.
+    span = getattr(observation, "span", None) or _current_span()
+    if span is None:
         return None, None
     try:
-        from langfuse import get_client
-
-        langfuse = get_client()
-        if make_public:
-            try:
-                observation.set_trace_as_public()
-            except Exception:  # noqa: BLE001 - public flag is best-effort
-                pass
-        trace_id = langfuse.get_current_trace_id()
+        context = span.get_span_context()
+        trace_id = getattr(context, "trace_id", 0)
         if not trace_id:
             return None, None
-        url = langfuse.get_trace_url(trace_id=trace_id)
-        return str(trace_id), (str(url) if url else None)
-    except Exception:  # noqa: BLE001 - tracing must never break a run
+        # Local direct-to-X-Ray export uses the X-Ray dashed id (so the stored
+        # id matches what BatchGetTraces expects); deployed runtimes keep the
+        # plain OTel id (AgentCore's ADOT collector owns the mapping).
+        if _xray_direct_enabled():
+            return _xray_trace_id(trace_id), None
+        return format(trace_id, "032x"), None
+    except Exception:  # noqa: BLE001
         return None, None

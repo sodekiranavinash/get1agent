@@ -7,10 +7,10 @@ this is the fail-fast gate in front of it.
 
 Configuration (environment):
 
-* ``AUTH0_DISCOVERY_URL`` — OIDC discovery document (required). The issuer and
+* ``AUTH_DISCOVERY_URL`` — OIDC discovery document (required). The issuer and
   ``jwks_uri`` are read from it.
-* ``AUTH0_AUDIENCE`` — comma-separated allowed audiences (the API identifier).
-* ``AUTH0_ISSUER`` — optional issuer override (handy for tests/local dev).
+* ``AUTH_AUDIENCE`` — comma-separated allowed audiences (the API identifier).
+* ``AUTH_ISSUER`` — optional issuer override (handy for tests/local dev).
 """
 
 from __future__ import annotations
@@ -47,14 +47,14 @@ def _env(name: str, default: str = "") -> str:
 
 
 def _audience() -> list[str]:
-    raw = _env("AUTH0_AUDIENCE")
+    raw = _env("AUTH_AUDIENCE")
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
 def _discovery_url() -> str:
-    url = _env("AUTH0_DISCOVERY_URL")
+    url = _env("AUTH_DISCOVERY_URL")
     if not url:
-        raise TokenError("AUTH0_DISCOVERY_URL is not configured")
+        raise TokenError("AUTH_DISCOVERY_URL is not configured")
     return url
 
 
@@ -92,7 +92,7 @@ def _fetch_jwks() -> dict[str, Any]:
 
 
 def _issuer() -> str:
-    override = _env("AUTH0_ISSUER")
+    override = _env("AUTH_ISSUER")
     if override:
         return override
     return str(_discovery().get("issuer") or "")

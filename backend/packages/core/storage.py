@@ -46,11 +46,13 @@ class Storage:
 
                     # Virtual-hosted addressing makes boto3 sign against the
                     # bucket's regional endpoint instead of the global
-                    # s3.amazonaws.com one.
+                    # s3.amazonaws.com one. A custom endpoint (Floci, MinIO…) is
+                    # usually path-style; set ``S3_ADDRESSING_STYLE=path`` there.
+                    style = (os.environ.get("S3_ADDRESSING_STYLE") or "virtual").strip().lower()
                     self._client = boto3.client(
                         "s3",
                         region_name=self.region,
-                        config=Config(s3={"addressing_style": "virtual"}),
+                        config=Config(s3={"addressing_style": style}),
                     )
                 client = self._client
         return client

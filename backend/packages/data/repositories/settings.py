@@ -59,7 +59,14 @@ def ensure_notification_preferences(sub: str) -> None:
         pass
 
 
-def update_settings(sub: str, *, preferred_theme: str | None, timezone: str | None) -> None:
+def update_settings(
+    sub: str,
+    *,
+    preferred_theme: str | None = None,
+    timezone: str | None = None,
+    guardrail_id: str | None = None,
+    guardrail_version: str | None = None,
+) -> None:
     updates: list[str] = []
     names: dict[str, str] = {}
     values: dict[str, Any] = {":updated": now_iso()}
@@ -70,6 +77,12 @@ def update_settings(sub: str, *, preferred_theme: str | None, timezone: str | No
         updates.append("#tz = :tz")
         names["#tz"] = "timezone"
         values[":tz"] = timezone
+    if guardrail_id is not None:
+        updates.append("guardrailId = :grid")
+        values[":grid"] = guardrail_id
+    if guardrail_version is not None:
+        updates.append("guardrailVersion = :grver")
+        values[":grver"] = guardrail_version
     if not updates:
         return
     updates.append("updatedAt = :updated")

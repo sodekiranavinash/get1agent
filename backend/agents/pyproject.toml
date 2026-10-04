@@ -6,7 +6,6 @@ requires-python = ">=3.13"
 dependencies = [
     "bedrock-agentcore>=1.10.0",
     "strands-agents[openai,otel]>=1.5.0",
-    "langfuse>=3",
     "boto3>=1.35",
     # Attachment text extraction (the agent container downloads storage files at
     # run time and extracts their text; these mirror the `extra-tools` layer).

@@ -1,77 +1,59 @@
-"""Reranker: the Voyage backend (payloads, mapping, graceful fallback)."""
+"""Reranker: the Bedrock backend (default), local TEI, and graceful fallback."""
 
 from __future__ import annotations
 
-import io
-import json
-import urllib.error
-import urllib.request
-
 from src.search import rerank
-
-
-class _FakeResponse:
-    def __init__(self, body: bytes) -> None:
-        self._body = body
-
-    def read(self) -> bytes:
-        return self._body
-
-    def __enter__(self) -> "_FakeResponse":
-        return self
-
-    def __exit__(self, *args) -> bool:
-        return False
 
 
 def _candidates() -> list[dict]:
     return [{"content": "alpha"}, {"content": "beta"}]
 
 
-def test_rerank_mode_defaults_to_voyage(monkeypatch) -> None:
-    monkeypatch.delenv("RERANK_MODE", raising=False)
+class _FakeBedrockRuntime:
+    def __init__(self, scores: list[float]) -> None:
+        self.scores = scores
+        self.calls: list[dict] = []
 
-    assert rerank.rerank_mode() == "voyage"
-
-
-def test_rerank_voyage_builds_request_and_maps_scores(monkeypatch) -> None:
-    monkeypatch.setenv("VOYAGE_API_KEY", "test-key")
-    captured: dict = {}
-
-    def fake_urlopen(request, timeout=None):
-        captured["url"] = request.full_url
-        captured["payload"] = json.loads(request.data)
-        captured["auth"] = request.get_header("Authorization")
-        body = {
-            "data": [
-                {"index": 1, "relevance_score": 0.9},
-                {"index": 0, "relevance_score": 0.1},
+    def rerank(self, **kwargs):
+        self.calls.append(kwargs)
+        return {
+            "results": [
+                {"index": index, "relevanceScore": score}
+                for index, score in enumerate(self.scores)
             ]
         }
-        return _FakeResponse(json.dumps(body).encode())
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-
-    ranked = rerank._rerank_voyage("q", _candidates(), 2)
-
-    assert [candidate["content"] for candidate in ranked] == ["beta", "alpha"]
-    assert ranked[0]["rerankScore"] == 0.9
-    assert captured["url"].endswith("/rerank")
-    assert captured["auth"] == "Bearer test-key"
-    assert captured["payload"]["documents"] == ["alpha", "beta"]
-    assert captured["payload"]["model"] == "rerank-3"
-    assert captured["payload"]["top_k"] == 2
 
 
-def test_rerank_candidates_applies_voyage(monkeypatch) -> None:
-    monkeypatch.setenv("RERANK_MODE", "voyage")
-    monkeypatch.setenv("VOYAGE_API_KEY", "test-key")
+def test_rerank_mode_defaults_to_bedrock(monkeypatch) -> None:
+    monkeypatch.delenv("RERANK_MODE", raising=False)
 
-    def fake_urlopen(request, timeout=None):
-        body = {"data": [{"index": 1, "relevance_score": 0.9}]}
-        return _FakeResponse(json.dumps(body).encode())
+    assert rerank.rerank_mode() == "bedrock"
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+def test_rerank_bedrock_maps_scores(monkeypatch) -> None:
+    fake = _FakeBedrockRuntime([0.1, 0.9])
+    import boto3
+
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: fake)
+
+    ranked = rerank._rerank_bedrock(
+        "q", _candidates(), 2, "arn:aws:bedrock:us-west-2::foundation-model/amazon.rerank-v1:0", "us-west-2"
+    )
+
+    assert [candidate["content"] for candidate in ranked] == ["alpha", "beta"]
+    assert ranked[0]["rerankScore"] == 0.1
+    assert fake.calls[0]["rerankingConfiguration"]["bedrockRerankingConfiguration"][
+        "modelConfiguration"
+    ]["modelArn"].endswith("amazon.rerank-v1:0")
+
+
+def test_rerank_candidates_applies_bedrock(monkeypatch) -> None:
+    monkeypatch.setenv("RERANK_MODE", "bedrock")
+    monkeypatch.setattr(
+        rerank,
+        "_rerank_bedrock",
+        lambda q, c, k, arn, region: [dict(c[1], rerankScore=0.9)],
+    )
 
     ranked, applied = rerank.rerank_candidates("q", _candidates(), 1)
 
@@ -79,9 +61,13 @@ def test_rerank_candidates_applies_voyage(monkeypatch) -> None:
     assert [candidate["content"] for candidate in ranked] == ["beta"]
 
 
-def test_rerank_candidates_falls_back_without_api_key(monkeypatch) -> None:
-    monkeypatch.setenv("RERANK_MODE", "voyage")
-    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+def test_rerank_candidates_falls_back_on_error(monkeypatch) -> None:
+    monkeypatch.setenv("RERANK_MODE", "bedrock")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("throttled")
+
+    monkeypatch.setattr(rerank, "_rerank_bedrock", boom)
 
     ranked, applied = rerank.rerank_candidates("q", _candidates(), 2)
 
@@ -89,25 +75,16 @@ def test_rerank_candidates_falls_back_without_api_key(monkeypatch) -> None:
     assert [candidate["content"] for candidate in ranked] == ["alpha", "beta"]
 
 
-def test_rerank_candidates_falls_back_on_http_error(monkeypatch) -> None:
-    monkeypatch.setenv("RERANK_MODE", "voyage")
-    monkeypatch.setenv("VOYAGE_API_KEY", "test-key")
+def test_rerank_candidates_local_uses_tei(monkeypatch) -> None:
+    monkeypatch.setenv("RERANK_MODE", "local")
+    monkeypatch.setattr(
+        rerank, "_rank", lambda q, c, k, url: [dict(c[1], rerankScore=0.5)]
+    )
 
-    def fake_urlopen(request, timeout=None):
-        raise urllib.error.HTTPError(
-            request.full_url,
-            429,
-            "Too Many Requests",
-            {},
-            io.BytesIO(b'{"detail": "rate limited"}'),
-        )
+    ranked, applied = rerank.rerank_candidates("q", _candidates(), 1)
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-
-    ranked, applied = rerank.rerank_candidates("q", _candidates(), 2)
-
-    assert applied is False
-    assert [candidate["content"] for candidate in ranked] == ["alpha", "beta"]
+    assert applied is True
+    assert [candidate["content"] for candidate in ranked] == ["beta"]
 
 
 def test_rerank_candidates_none_is_a_passthrough(monkeypatch) -> None:

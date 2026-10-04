@@ -63,7 +63,6 @@ DENY_MODULES: frozenset[str] = frozenset(
         "boto3",
         "botocore",
         "sagemaker",
-        "redis",
         "pymongo",
         "psycopg2",
         "pymysql",

@@ -38,10 +38,10 @@ def _env(name: str) -> str:
 
 
 def _token_url() -> str:
-    url = _env("AUTH0_TOKEN_URL")
+    url = _env("AUTH_TOKEN_URL")
     if url:
         return url
-    domain = _env("AUTH0_DOMAIN") or _env("AUTH0_ISSUER_BASE_URL")
+    domain = _env("AUTH_DOMAIN") or _env("AUTH_ISSUER_BASE_URL")
     if domain and not domain.startswith("http"):
         domain = f"https://{domain}"
     return f"{domain.rstrip('/')}/oauth/token" if domain else ""
@@ -55,7 +55,7 @@ def _service_token() -> str:
     url = _token_url()
     client_id = _env("AGENT_SERVICE_CLIENT_ID")
     client_secret = _env("AGENT_SERVICE_CLIENT_SECRET")
-    audience = _env("AUTH0_AUDIENCE")
+    audience = _env("AUTH_AUDIENCE")
     if not (url and client_id and client_secret and audience):
         raise AgentRunError("Agent service auth is not configured")
 

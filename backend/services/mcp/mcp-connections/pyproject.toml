@@ -1,0 +1,11 @@
+[project]
+name = "get1agent-mcp-connections"
+version = "0.1.0"
+description = "OAuth broker and connection store for remote MCP servers"
+requires-python = ">=3.14"
+dependencies = [
+    "awslabs.mcp-lambda-handler==0.1.15",
+    "boto3>=1.43.31",
+    "python-dateutil>=2.8.2",
+    "tzdata>=2024.1",
+]

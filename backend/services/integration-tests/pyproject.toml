@@ -13,10 +13,17 @@ dependencies = [
 
 [tool.pytest.ini_options]
 # Import the shared get1agent package plus each Lambda's own package.
+#
+# Only services that are loaded via support.load_module() need to be here, and
+# `src` is a top-level package name shared by several services: user-api and
+# knowledge-mcp ship a NAMESPACE src/ (no __init__.py) so they merge and coexist,
+# while the mcp/* services ship a REGULAR src/ that would hijack `src` for the
+# whole process. So list only the handlers the suite actually loads here.
 pythonpath = [
     "../../packages",
-    "../user-api",
-    "../knowledge-mcp",
+    "../apis/user-api",
+    "../mcp/knowledge-mcp",
+    "../admin/mcp-tester",
 ]
 testpaths = ["."]
 addopts = "-q"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from typing import Any, AsyncIterator
 
@@ -12,6 +13,7 @@ from agentflow.config import load_config
 from agentflow.context import TruncatingModel
 from agentflow.conversations import persist_turn
 from agentflow.events import normalize_many
+from agentflow.guardrails import load_default_guardrail, resolve_guardrail
 from agentflow.hitl import (
     ASK_USER_TOOL,
     build_ask_user_tool,
@@ -21,7 +23,7 @@ from agentflow.hitl import (
     tool_use_id_from_interrupt_id,
 )
 from agentflow.identity import resolve_user_id
-from agentflow.memory import DynamoMemoryStore
+from agentflow.memory import build_guard, build_memory_manager
 from agentflow.models import (
     DEFAULT_CONTEXT_WINDOW,
     build_model,
@@ -29,12 +31,13 @@ from agentflow.models import (
     resolve_model_id,
 )
 from agentflow.observability import flush, run_trace, trace_identity
-from agentflow.planner import build_plan, execution_input
+from agentflow.planner import build_plan, ensure_knowledge_plan, execution_input
 from agentflow.provider import record_provider_usage, resolve_model_provider
 from agentflow.prompts import build_system_prompt
 from agentflow.sessions import build_session_manager
 from agentflow.store import load_agent, resolve_knowledge_bases, resolve_skills
 from agentflow.tools import build_tools
+from agentflow.traces import build_trace, persist_trace
 from data.client import now_iso
 from data.repositories import quotas
 
@@ -45,7 +48,7 @@ COMPRESSION_THRESHOLD = float(os.environ.get("AGENT_CONTEXT_COMPRESSION_THRESHOL
 # to start a new conversation and stops accepting messages.
 FULL_RATIO = float(os.environ.get("AGENT_CONTEXT_FULL_RATIO", "0.9"))
 # How many prior turns the planner sees (bounded so planning stays cheap).
-PLANNER_HISTORY_TURNS = int(os.environ.get("AGENT_PLANNER_HISTORY_TURNS", "6"))
+PLANNER_HISTORY_TURNS = int(os.environ.get("AGENT_PLANNER_HISTORY_TURNS") or "6")
 
 
 def _conversation_id(payload: dict[str, Any], context: Any) -> str:
@@ -66,15 +69,21 @@ def _input_text(payload: dict[str, Any], agent_config: dict[str, Any]) -> str:
 
 
 def _record(recorded: list[dict[str, Any]], event: dict[str, Any]) -> None:
-    """Accumulate the run's frames, coalescing streamed text deltas."""
-    if event.get("type") == "text":
-        text = str(event.get("data") or "")
+    """Accumulate the run's frames, coalescing streamed text deltas.
+
+    Every stored frame is stamped with ``_at`` (epoch ms) so the trace builder
+    can reconstruct a timed observation waterfall. ``_at`` is internal only: the
+    client-facing frame is yielded untouched.
+    """
+    stored = event if "_at" in event else {**event, "_at": int(time.time() * 1000)}
+    if stored.get("type") == "text":
+        text = str(stored.get("data") or "")
         if recorded and recorded[-1].get("type") == "text":
             recorded[-1]["data"] = str(recorded[-1].get("data") or "") + text
         else:
-            recorded.append({"type": "text", "data": text})
+            recorded.append({"type": "text", "data": text, "_at": stored["_at"]})
         return
-    recorded.append(event)
+    recorded.append(stored)
 
 
 def _answer_text(recorded: list[dict[str, Any]]) -> str:
@@ -95,7 +104,7 @@ def _trace_tags(
     agent_config: dict[str, Any],
     provider_name: str = "",
 ) -> list[str]:
-    """Langfuse tags: agent, model and the knowledge/MCP surfaces in play."""
+    """Run tags: agent, model and the knowledge/MCP surfaces in play."""
     tags = ["agent"]
     if agent_name:
         tags.append(agent_name)
@@ -178,6 +187,7 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
     user_id: str | None = None
     agent_id = ""
     agent_name = ""
+    agent_config: dict[str, Any] = {}
     conversation_id: str | None = None
     resolved_model = ""
     provider: dict[str, Any] | None = None
@@ -295,6 +305,18 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
 
         file_ids = resolve_file_ids(payload, agent_config)
 
+        # Guardrail: the agent's own choice, else the workspace/platform default.
+        # Our own Vault provider runs on a third-party endpoint, where Bedrock
+        # guardrails do not apply.
+        resolved_guardrail = (
+            None
+            if provider
+            else resolve_guardrail(
+                agent_config.get("guardrail"),
+                default=load_default_guardrail(user_id),
+            )
+        )
+
         yield {
             "type": "run.started",
             "runId": run_id,
@@ -305,8 +327,8 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
             "provider": (provider or {}).get("name"),
         }
 
-        # One Langfuse trace per run: the planner, every model turn and every
-        # tool call nest under it. A no-op unless Langfuse credentials are set.
+        # One trace per run: the planner, every model turn and every tool call
+        # nest under it. Exported by AgentCore's ADOT collector to CloudWatch.
         trace = run_trace(
             f"agent:{agent_name or agent_id}",
             input=user_input,
@@ -351,33 +373,52 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
         from agentflow.skills import build_skills_plugin
         from strands import Agent
         from strands.agent.conversation_manager import SummarizingConversationManager
-        from strands.memory import MemoryManager
 
         memory_enabled = bool((agent_config.get("memory") or {}).get("enabled"))
         memory_manager = None
         if memory_enabled:
-            memory_manager = MemoryManager(
-                stores=[DynamoMemoryStore(user_id, agent_id)],
-                add_tool_config=True,
+            # AgentCore Memory when configured (AGENT_MEMORY_BACKEND=agentcore),
+            # otherwise the in-app DynamoMemoryStore.
+            memory_manager = build_memory_manager(
+                config, user_id, agent_id, conversation_id
             )
+
+        # Deterministic tool-call policy (AgentCore Policy). None disables it.
+        from core import policy
+
+        guard = build_guard(policy.build_evaluator())
 
         # Bound tool output sent to the model (the session keeps the full data).
         model = TruncatingModel(
-            build_model(config, resolved_model, conversation_id, provider=provider)
+            build_model(
+                config,
+                resolved_model,
+                conversation_id,
+                provider=provider,
+                guardrail=resolved_guardrail,
+            )
         )
         tools = build_tools(
             config,
             user_id,
             agent_config,
             [kb["name"] for kb in knowledge],
+            guard=guard,
+            session_id=conversation_id,
         )
         # Chat-only: let the agent pause and ask the user when uncertain. On a
         # resume the tool must be present again so the paused call can replay,
         # even if auto-approve was turned on after the question was asked.
         if human_in_loop or resume_responses:
-            tools.append(build_ask_user_tool())
+            # On a resume the user has already answered once: keep the tool so
+            # the paused call can replay, but refuse a *new* ask (anti-loop cap).
+            tools.append(build_ask_user_tool(allow_new_questions=not resume_responses))
         system_prompt = build_system_prompt(
-            agent_config, skills, human_in_loop=human_in_loop
+            agent_config,
+            skills,
+            # After the user answers, switch to assume-mode so the model does not
+            # try to ask again (the cap above is the hard stop).
+            human_in_loop=False if resume_responses else human_in_loop,
         )
         # Progressive disclosure: the plugin injects skill metadata into the system
         # prompt and exposes the `skills` activation tool. The agent decides which
@@ -425,6 +466,7 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
                 "this run — their text is provided automatically, no tool call is "
                 "needed to read them.)"
             )
+        tool_names = [getattr(tool, "tool_name", "") for tool in tools]
         plan = None
         if config.planner_enabled and budget_ok and not resume_responses:
             try:
@@ -434,7 +476,7 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
                     config,
                     agent_config,
                     planner_input,
-                    [getattr(tool, "tool_name", "") for tool in tools],
+                    tool_names,
                     [kb["name"] for kb in knowledge],
                     skills,
                     conversation_id,
@@ -454,6 +496,15 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
                     flush=True,
                 )
                 plan = None
+
+        # Knowledge bases are mandatory: guarantee a KB step even if the planner
+        # omitted one (or planning was skipped), so the KB tools always run first.
+        if (
+            knowledge
+            and "search-user-knowledge-bases" in tool_names
+            and not resume_responses
+        ):
+            plan = ensure_knowledge_plan(plan, [kb["name"] for kb in knowledge])
 
         if resume_responses:
             # The user answered the pending question: Strands replays the paused
@@ -611,6 +662,10 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
                 pass
         # Persist the turn so the conversation can be reopened (and continued)
         # later. Best-effort: persistence never changes the run's outcome.
+        # A run always has a store key: fall back to the run id when tracing is
+        # off, so the trace explorer and the public link still resolve.
+        if trace_id is None:
+            trace_id = run_id
         try:
             # A paused run is persisted too (so the question survives a reload);
             # the resume replaces that same turn via `replace_run_id`.
@@ -620,6 +675,47 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
                 and agent_id
                 and conversation_id is not None
             ):
+                # Store the Langfuse-style observation tree (S3) + index (DDB).
+                # Isolated: a trace-store failure must not skip the transcript.
+                try:
+                    persist_trace(
+                        config,
+                        user_id,
+                        build_trace(
+                            trace_id=trace_id,
+                            run_id=run_id,
+                            user_id=user_id,
+                            agent_id=agent_id,
+                            agent_name=agent_name,
+                            model=resolved_model,
+                            provider=(provider or {}).get("name"),
+                            conversation_id=conversation_id,
+                            question=original_input,
+                            answer=_answer_text(recorded),
+                            status=status,
+                            started_at=started_at,
+                            ended_at=now_iso(),
+                            events=recorded,
+                            usage=run_usage,
+                            tags=_trace_tags(
+                                agent_name,
+                                resolved_model,
+                                agent_config,
+                                str((provider or {}).get("name") or ""),
+                            ),
+                        ),
+                    )
+                except Exception as exc:  # noqa: BLE001 - tracing never breaks a run
+                    print(
+                        json.dumps(
+                            {
+                                "level": "warning",
+                                "message": "Trace store write failed",
+                                "error": str(exc),
+                            }
+                        ),
+                        flush=True,
+                    )
                 persist_turn(
                     config,
                     user_id,

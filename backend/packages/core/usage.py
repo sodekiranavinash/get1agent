@@ -24,14 +24,18 @@ DEFAULT_PRICE: tuple[float, float] = (
     float(os.environ.get("DEFAULT_MODEL_PRICE_OUT", "0.30")),
 )
 
-# Platform gateway models (keep in sync with agentflow.models.SUPPORTED_MODELS).
+# Platform gateway models (Amazon Bedrock; keep in sync with
+# agentflow.models.SUPPORTED_MODELS). Prices are ap-south-1 (Mumbai) USD per 1M
+# tokens. Nova 2 Lite is reached via the global cross-region profile.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
-    "mimo-v2.5": (0.10, 0.30),
-    "glm-5.3-flash": (0.10, 0.30),
-    "qwen3.8-flash": (0.05, 0.20),
-    "deepseek-v4-flash-vision-exp": (0.14, 0.28),
-    "gpt-5.6-luna": (0.50, 2.00),
-    "kimi-k2.6": (0.20, 0.60),
+    "zai.glm-4.7-flash": (0.08, 0.48),
+    "nvidia.nemotron-nano-3-30b": (0.07, 0.28),
+    "deepseek.v3.2": (0.74, 2.22),
+    "qwen.qwen3-next-80b-a3b": (0.18, 1.41),
+    "global.amazon.nova-2-lite-v1:0": (0.06, 0.24),
+    "amazon.nova-2-lite-v1:0": (0.06, 0.24),
+    "amazon.nova-pro-v1:0": (0.80, 3.20),
+    "amazon.nova-micro-v1:0": (0.035, 0.14),
 }
 
 # Per-user default budget in USD (overridable per user on the quota item).

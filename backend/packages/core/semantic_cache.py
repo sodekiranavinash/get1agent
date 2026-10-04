@@ -1,17 +1,18 @@
 """Semantic cache: return a cached result for the nearest previous query.
 
-Uses **Upstash Vector** (a serverless vector DB, REST/HTTP, no VPC) as the
-approximate-nearest-neighbour index and stores the cached payload in the vector's
-raw ``data`` field. Vectors are isolated by **namespace = userId**, so one user's
-cached answer can never satisfy another's request.
+Uses the platform **S3 Vectors** store (one index per user, the same store the
+knowledge index uses) as the approximate-nearest-neighbour index: cached entries
+carry ``kind="semcache"`` so they never surface in knowledge search, and the
+cached payload lives in the shared cache backend (DynamoDB) referenced by the
+vector's key.
 
 Flow: the caller embeds the query (it already does, for retrieval), asks this
 module for the nearest cached entry above ``SEMANTIC_CACHE_THRESHOLD`` whose
 metadata still matches (e.g. same knowledge-base set) and has not expired, and
 only on a miss runs the real work and stores the result back.
 
-Best-effort like ``core.cache``: disabled without credentials, every error
-swallowed, so it can never break a request.
+Best-effort like ``core.cache``: disabled when the cache backend is off, every
+error swallowed, so it can never break a request.
 """
 
 from __future__ import annotations
@@ -22,20 +23,20 @@ import os
 import re
 import sys
 import time
-import urllib.error
-import urllib.request
 from typing import Any
 
-_TIMEOUT_SECONDS = 2.0
+from retrieval.s3_vectors import VectorRecord, vector_store
+
 _ID_SAFE = re.compile(r"[^A-Za-z0-9_.-]")
+_KIND = "semcache"
 
 
-def _config() -> tuple[str, str] | None:
-    url = (os.environ.get("UPSTASH_VECTOR_REST_URL") or "").strip().rstrip("/")
-    token = (os.environ.get("UPSTASH_VECTOR_REST_TOKEN") or "").strip()
-    if not (url and token):
+def _cache():
+    try:
+        from core import cache
+    except Exception:  # noqa: BLE001 - semantic cache is optional
         return None
-    return url, token
+    return cache
 
 
 def enabled() -> bool:
@@ -46,7 +47,8 @@ def enabled() -> bool:
         "off",
     ):
         return False
-    return _config() is not None
+    cache = _cache()
+    return cache is not None and cache.enabled()
 
 
 def _env_float(name: str, default: float) -> float:
@@ -75,30 +77,15 @@ def _max_bytes() -> int:
     return _env_int("SEMANTIC_CACHE_MAX_BYTES", 200_000)
 
 
-def _namespace(user_id: str) -> str:
-    return _ID_SAFE.sub("_", str(user_id or ""))[:120] or "default"
+def _safe_id(value: str) -> str:
+    return _ID_SAFE.sub("_", str(value or ""))[:64]
 
 
-def _request(path: str, payload: dict[str, Any]) -> Any:
-    config = _config()
-    if config is None:
-        return None
-    url, token = config
-    request = urllib.request.Request(
-        f"{url}{path}",
-        data=json.dumps(payload).encode(),
-        headers={
-            "authorization": f"Bearer {token}",
-            "content-type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
-            return json.loads(response.read() or b"{}")
-    except Exception as exc:  # noqa: BLE001 - cache must never break a request
-        print(f"semantic cache unavailable: {exc!r}", file=sys.stderr)
-        return None
+def _payload_key(user_id: str, vector_id: str) -> str:
+    cache = _cache()
+    if cache is None:
+        return ""
+    return cache.cache_key(_KIND, user_id, vector_id)
 
 
 def lookup(
@@ -110,41 +97,32 @@ def lookup(
     """Return the cached payload for the nearest query above threshold, else None."""
     if not enabled() or not vector:
         return None
-    response = _request(
-        f"/query/{_namespace(user_id)}",
-        {"vector": vector, "topK": 3, "includeMetadata": True, "includeData": True},
-    )
-    hits = (response or {}).get("result") or []
-    if not isinstance(hits, list):
+    filters: dict[str, Any] = {"kind": _KIND}
+    for key, value in (require or {}).items():
+        filters[key] = str(value)
+    try:
+        matches = vector_store().query(user_id, vector, top_k=3, filters=filters)
+    except Exception as exc:  # noqa: BLE001 - cache must never break a request
+        print(f"semantic cache unavailable: {exc!r}", file=sys.stderr)
+        return None
+
+    cache = _cache()
+    if cache is None:
         return None
     cutoff = threshold()
     now = time.time()
-    for hit in hits:
-        if not isinstance(hit, dict):
+    for match in matches:
+        if match.score < cutoff:
             continue
-        try:
-            score = float(hit.get("score") or 0)
-        except (TypeError, ValueError):
-            continue
-        if score < cutoff:
-            continue
-        metadata = hit.get("metadata") or {}
+        metadata = match.metadata or {}
         try:
             if float(metadata.get("expiresAt") or 0) <= now:
                 continue
         except (TypeError, ValueError):
             continue
-        if require and any(
-            str(metadata.get(key)) != str(value) for key, value in require.items()
-        ):
-            continue
-        data = hit.get("data")
-        if not isinstance(data, str) or not data:
-            continue
-        try:
-            return json.loads(data)
-        except ValueError:
-            continue
+        payload = cache.get(_payload_key(user_id, match.key))
+        if payload is not None:
+            return payload
     return None
 
 
@@ -165,16 +143,22 @@ def store(
         return
     if len(data) > _max_bytes():
         return
+    ttl = ttl_seconds()
     metadata: dict[str, Any] = {
-        "expiresAt": int(time.time()) + ttl_seconds(),
-        "createdAt": int(time.time()),
+        "kind": _KIND,
+        "expiresAt": int(time.time()) + ttl,
     }
     for key, item in (require or {}).items():
-        metadata[key] = str(item)
-    safe_id = _ID_SAFE.sub("_", str(vector_id or ""))[:64] or hashlib.sha256(
-        data.encode()
-    ).hexdigest()[:32]
-    _request(
-        f"/upsert/{_namespace(user_id)}",
-        {"id": safe_id, "vector": vector, "metadata": metadata, "data": data},
-    )
+        metadata[str(key)] = str(item)
+    safe_id = _safe_id(vector_id) or hashlib.sha256(data.encode()).hexdigest()[:32]
+    try:
+        vector_store().upsert(
+            user_id,
+            [VectorRecord(key=safe_id, vector=vector, filterable=metadata)],
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"semantic cache store failed: {exc!r}", file=sys.stderr)
+        return
+    cache = _cache()
+    if cache is not None:
+        cache.set(_payload_key(user_id, safe_id), value, ttl)

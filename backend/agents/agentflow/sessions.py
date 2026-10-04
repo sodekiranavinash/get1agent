@@ -22,13 +22,16 @@ def build_session_manager(
 ) -> Any:
     if not config.s3_bucket:
         return None
+    from botocore.config import Config
     from strands.session.s3_session_manager import S3SessionManager
 
     session_id = _safe(f"{user_id}-{agent_id}-{conversation_id}")
+    style = (os.environ.get("S3_ADDRESSING_STYLE") or "virtual").strip().lower()
     return S3SessionManager(
         session_id=session_id,
         bucket=config.s3_bucket,
         prefix=f"{config.session_prefix}{user_id}/{agent_id}/",
         region_name=config.s3_region,
         endpoint_url=os.environ.get("S3_ENDPOINT_URL") or None,
+        boto_client_config=Config(s3={"addressing_style": style}),
     )

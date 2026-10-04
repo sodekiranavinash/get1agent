@@ -20,16 +20,16 @@ def test_default_budget_and_charge() -> None:
     assert not budget.unlimited
 
     cost = quotas.charge_usage(
-        USER, model="mimo-v2.5", input_tokens=1_000_000, output_tokens=0
+        USER, model="nvidia.nemotron-nano-3-30b", input_tokens=1_000_000, output_tokens=0
     )
-    price_in = usage.price_for("mimo-v2.5")[0]
+    price_in = usage.price_for("nvidia.nemotron-nano-3-30b")[0]
     assert cost == int(round(price_in * usage.MICRO_PER_USD))
     assert quotas.get_budget(USER).spent_micro_usd == cost
 
 
 def test_cost_uses_input_and_output_rates() -> None:
-    price_in, price_out = usage.price_for("mimo-v2.5")
-    assert usage.cost_micro_usd("mimo-v2.5", 1_000_000, 1_000_000) == int(
+    price_in, price_out = usage.price_for("nvidia.nemotron-nano-3-30b")
+    assert usage.cost_micro_usd("nvidia.nemotron-nano-3-30b", 1_000_000, 1_000_000) == int(
         round((price_in + price_out) * usage.MICRO_PER_USD)
     )
     # Unknown model falls back to the default price.
@@ -118,4 +118,4 @@ def test_legacy_unlimited_flag_is_cleared_on_relogin() -> None:
 def test_pricing_table_shape() -> None:
     table = usage.pricing_table()
     assert table["__default__"]["input"] >= 0
-    assert "mimo-v2.5" in table
+    assert "nvidia.nemotron-nano-3-30b" in table

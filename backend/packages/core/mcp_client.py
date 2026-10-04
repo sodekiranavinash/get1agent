@@ -10,17 +10,31 @@ needed, and the caller's identity travels in the payload.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
+
+# Protocol version sent on gateway calls. The AgentCore Gateway currently
+# supports ``2025-03-26``; override with ``MCP_PROTOCOL_VERSION`` if it moves.
+MCP_PROTOCOL_VERSION = (os.environ.get("MCP_PROTOCOL_VERSION") or "2025-03-26").strip()
 
 
 class McpClientError(Exception):
     """The MCP Lambda could not be invoked or returned an unusable payload."""
 
 
-def _invoke(function_name: str, message: dict[str, Any], region: str | None) -> dict[str, Any]:
+def _invoke(
+    function_name: str,
+    message: dict[str, Any],
+    region: str | None,
+    user_agent: str | None = None,
+) -> dict[str, Any]:
     import boto3
+    from botocore.config import Config
 
-    client = boto3.client("lambda", region_name=region)
+    kwargs: dict[str, Any] = {"region_name": region}
+    if user_agent:
+        kwargs["config"] = Config(user_agent_extra=user_agent)
+    client = boto3.client("lambda", **kwargs)
     response = client.invoke(
         FunctionName=function_name,
         InvocationType="RequestResponse",
@@ -58,11 +72,130 @@ def call_tool(
     name: str,
     arguments: dict[str, Any],
     region: str | None = None,
+    user_agent: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return ``(request, response)`` for an MCP ``tools/call`` invocation."""
     message = _message("tools/call", {"name": name, "arguments": arguments}, 2)
-    response = _invoke(function_name, {**message, "userId": user_id}, region)
+    response = _invoke(function_name, {**message, "userId": user_id}, region, user_agent)
     return message, response
+
+
+def gateway_call_tool(
+    gateway_url: str,
+    session_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    region: str | None = None,
+) -> dict[str, Any]:
+    """Invoke a tool on the AgentCore Gateway and return its JSON-RPC response.
+
+    The gateway speaks Streamable HTTP MCP with **SigV4** (``AWS_IAM`` authorizer),
+    so the runtime signs the request with its own role. Responses are JSON or an
+    SSE stream; both are normalized to a single JSON-RPC object.
+    """
+    import boto3
+    from botocore.auth import SigV4Auth
+    from botocore.awsrequest import AWSRequest
+    from botocore.exceptions import HTTPClientError
+    from botocore.httpsession import URLLib3Session
+
+    message = _message("tools/call", {"name": tool_name, "arguments": arguments}, 2)
+    body = json.dumps(message).encode("utf-8")
+    headers = {
+        "content-type": "application/json",
+        "accept": "application/json, text/event-stream",
+        "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+    }
+    if session_id:
+        headers["mcp-session-id"] = session_id
+
+    request = AWSRequest(method="POST", url=gateway_url, data=body, headers=headers)
+    credentials = boto3.Session().get_credentials()
+    if credentials is None:
+        raise McpClientError("no AWS credentials for the gateway request")
+    SigV4Auth(credentials, "bedrock-agentcore", region or "ap-south-1").add_auth(request)
+
+    try:
+        response = URLLib3Session().send(request.prepare())
+        raw = response.content
+    except HTTPClientError as exc:  # pragma: no cover - network failure path
+        raise McpClientError(f"gateway request failed: {exc}") from exc
+
+    if response.status_code >= 400:
+        detail = raw[:500].decode("utf-8", "replace")
+        raise McpClientError(f"gateway returned HTTP {response.status_code}: {detail}")
+
+    return _parse_mcp_body(raw)
+
+
+def _parse_mcp_body(raw: bytes) -> dict[str, Any]:
+    """Normalize a JSON or SSE MCP response into one JSON-RPC object."""
+    text = raw.decode("utf-8", "replace").strip()
+    if not text:
+        return {}
+    if text.startswith("{"):
+        try:
+            return json.loads(text)
+        except ValueError as exc:
+            raise McpClientError("gateway returned invalid JSON") from exc
+    # SSE: take the last `data:` frame that parses as a JSON-RPC object.
+    last: dict[str, Any] | None = None
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        chunk = line[len("data:") :].strip()
+        if not chunk or chunk == "[DONE]":
+            continue
+        try:
+            parsed = json.loads(chunk)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict):
+            last = parsed
+    if last is None:
+        raise McpClientError("gateway returned no JSON-RPC payload")
+    return last
+
+
+def gateway_list_tools(
+    gateway_url: str,
+    session_id: str,
+    region: str | None = None,
+) -> dict[str, Any]:
+    """Return the JSON-RPC response for an MCP ``tools/list`` call via gateway."""
+    import boto3
+    from botocore.auth import SigV4Auth
+    from botocore.awsrequest import AWSRequest
+    from botocore.exceptions import HTTPClientError
+    from botocore.httpsession import URLLib3Session
+
+    message = _message("tools/list", {}, 1)
+    body = json.dumps(message).encode("utf-8")
+    headers = {
+        "content-type": "application/json",
+        "accept": "application/json, text/event-stream",
+        "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+    }
+    if session_id:
+        headers["mcp-session-id"] = session_id
+
+    request = AWSRequest(method="POST", url=gateway_url, data=body, headers=headers)
+    credentials = boto3.Session().get_credentials()
+    if credentials is None:
+        raise McpClientError("no AWS credentials for the gateway request")
+    SigV4Auth(credentials, "bedrock-agentcore", region or "ap-south-1").add_auth(request)
+
+    try:
+        response = URLLib3Session().send(request.prepare())
+        raw = response.content
+    except HTTPClientError as exc:  # pragma: no cover - network failure path
+        raise McpClientError(f"gateway request failed: {exc}") from exc
+
+    if response.status_code >= 400:
+        detail = raw[:500].decode("utf-8", "replace")
+        raise McpClientError(f"gateway returned HTTP {response.status_code}: {detail}")
+
+    return _parse_mcp_body(raw)
 
 
 def list_tools_multi(

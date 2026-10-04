@@ -1,15 +1,18 @@
-"""Best-effort response cache (default: Upstash Redis over REST).
+"""Best-effort response cache.
 
 Used on the **normal request path only** (query/document embeddings and
 knowledge search) — never in the Labs (Playground / Evaluations), where fresh
 outputs matter.
 
-Backend is selected by ``CACHE_BACKEND`` (default ``redis``). The Redis backend
-talks to Upstash's REST API (``UPSTASH_REDIS_REST_URL`` +
-``UPSTASH_REDIS_REST_TOKEN``) with ``urllib`` — no VPC, no connection pool,
-nothing to keep warm. When it is not configured every call is a no-op, so local
-dev and tests are unaffected. Every operation swallows errors: the cache must
-never break a request.
+Backend is selected by ``CACHE_BACKEND``:
+
+* ``dynamodb`` (default) — one item per entry in the shared ``get1agent`` table
+  (``pk=CACHE#<prefix><kind>``, ``sk=<sha256>``, TTL ``expiresAt``), so there is
+  no external cache service.
+* ``none`` — disabled.
+
+When it is not configured every call is a no-op, and every operation swallows
+errors: the cache must never break a request.
 """
 
 from __future__ import annotations
@@ -17,33 +20,19 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sys
-import urllib.error
-import urllib.request
+import time
 from typing import Any
 
-_TIMEOUT_SECONDS = 2.0
+_DDB_BATCH = 100
 
 
 def backend() -> str:
-    return (os.environ.get("CACHE_BACKEND") or "redis").strip().lower()
-
-
-def _redis_config() -> tuple[str, str] | None:
-    url = (os.environ.get("UPSTASH_REDIS_REST_URL") or "").strip().rstrip("/")
-    token = (os.environ.get("UPSTASH_REDIS_REST_TOKEN") or "").strip()
-    if not (url and token):
-        return None
-    return url, token
+    return (os.environ.get("CACHE_BACKEND") or "dynamodb").strip().lower()
 
 
 def enabled() -> bool:
     """True when a usable cache backend is configured."""
-    if backend() == "none":
-        return False
-    if backend() == "redis":
-        return _redis_config() is not None
-    return False
+    return backend() not in ("", "none")
 
 
 def prefix() -> str:
@@ -65,55 +54,121 @@ def ttl(kind: str, default: int) -> int:
         return default
 
 
-# --- low-level Upstash REST ---------------------------------------------------
+# --- DynamoDB backend ---------------------------------------------------------
 
 
-def _post(path: str, payload: Any) -> Any:
-    config = _redis_config()
-    if config is None:
+def _table() -> Any:
+    from data import client
+
+    return client.table()
+
+
+def _now() -> int:
+    return int(time.time())
+
+
+def _pk_sk(key: str) -> tuple[str, str]:
+    """Split a cache key into a sharded partition and a sort key."""
+    head, sep, tail = key.rpartition(":")
+    if not sep:
+        return f"CACHE#{prefix()}root", key
+    return f"CACHE#{head}", tail
+
+
+def _unexpired(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not item:
         return None
-    url, token = config
-    request = urllib.request.Request(
-        f"{url}{path}",
-        data=json.dumps(payload).encode(),
-        headers={
-            "authorization": f"Bearer {token}",
-            "content-type": "application/json",
-        },
-        method="POST",
-    )
+    expires_at = item.get("expiresAt")
     try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
-            return json.loads(response.read() or b"[]")
-    except Exception as exc:  # noqa: BLE001 - cache must never break a request
-        print(f"cache unavailable: {exc!r}", file=sys.stderr)
+        if expires_at is not None and int(expires_at) <= _now():
+            return None
+    except (TypeError, ValueError):
+        pass
+    return item
+
+
+def _ddb_get(key: str) -> Any:
+    try:
+        pk, sk = _pk_sk(key)
+        response = _table().get_item(Key={"pk": pk, "sk": sk})
+    except Exception:  # noqa: BLE001
+        return None
+    item = _unexpired(response.get("Item"))
+    if not item:
+        return None
+    return _decode(item.get("payload"))
+
+
+def _ddb_get_many(keys: list[str]) -> list[Any]:
+    out: list[Any] = [None] * len(keys)
+    table = _table()
+    client = table.meta.client
+    name = table.name
+    index: dict[tuple[str, str], int] = {}
+    request_keys: list[dict[str, str]] = []
+    for position, key in enumerate(keys):
+        pk, sk = _pk_sk(key)
+        if (pk, sk) in index:
+            continue
+        index[(pk, sk)] = position
+        request_keys.append({"pk": pk, "sk": sk})
+
+    from boto3.dynamodb.types import TypeDeserializer
+
+    deserializer = TypeDeserializer()
+    for start in range(0, len(request_keys), _DDB_BATCH):
+        chunk = request_keys[start : start + _DDB_BATCH]
+        try:
+            response = client.batch_get_item(RequestItems={name: {"Keys": chunk}})
+        except Exception:  # noqa: BLE001
+            return out
+        for raw in (response.get("Responses") or {}).get(name, []):
+            item = {k: deserializer.deserialize(v) for k, v in raw.items()}
+            position = index.get((item.get("pk"), item.get("sk")))
+            if position is None:
+                continue
+            if _unexpired(item) is None:
+                continue
+            out[position] = _decode(item.get("payload"))
+    return out
+
+
+def _ddb_set(key: str, value: Any, ttl_seconds: int) -> None:
+    encoded = _encode(value)
+    if encoded is None:
+        return
+    pk, sk = _pk_sk(key)
+    item: dict[str, Any] = {"pk": pk, "sk": sk, "payload": encoded}
+    if ttl_seconds > 0:
+        item["expiresAt"] = _now() + ttl_seconds
+    try:
+        _table().put_item(Item=item)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _ddb_set_many(pairs: list[tuple[str, Any]], ttl_seconds: int) -> None:
+    table = _table()
+    with table.batch_writer() as writer:
+        for key, value in pairs:
+            encoded = _encode(value)
+            if encoded is None:
+                continue
+            pk, sk = _pk_sk(key)
+            item: dict[str, Any] = {"pk": pk, "sk": sk, "payload": encoded}
+            if ttl_seconds > 0:
+                item["expiresAt"] = _now() + ttl_seconds
+            writer.put_item(Item=item)
+
+
+def _encode(value: Any) -> str | None:
+    try:
+        return json.dumps(value)
+    except (TypeError, ValueError):
         return None
 
 
-def _command(*args: Any) -> Any:
-    """Run one Redis command; returns the ``result`` (or None on failure)."""
-    response = _post("", list(args))
-    if isinstance(response, dict):
-        return response.get("result")
-    return None
-
-
-def _pipeline(commands: list[list[Any]]) -> list[Any]:
-    if not commands:
-        return []
-    response = _post("/pipeline", commands)
-    if not isinstance(response, list):
-        return [None] * len(commands)
-    return [entry.get("result") if isinstance(entry, dict) else None for entry in response]
-
-
-# --- JSON convenience ---------------------------------------------------------
-
-
-def get(key: str) -> Any:
-    if not enabled():
-        return None
-    raw = _command("GET", key)
+def _decode(raw: Any) -> Any:
     if not isinstance(raw, str) or not raw:
         return None
     try:
@@ -122,46 +177,66 @@ def get(key: str) -> Any:
         return None
 
 
+# --- JSON convenience ---------------------------------------------------------
+
+
+def get(key: str) -> Any:
+    if not enabled():
+        return None
+    return _ddb_get(key)
+
+
 def set(key: str, value: Any, ttl_seconds: int) -> None:  # noqa: A001 - cache API
     if not enabled():
         return
-    try:
-        encoded = json.dumps(value)
-    except (TypeError, ValueError):
-        return
-    command: list[Any] = ["SET", key, encoded]
-    if ttl_seconds > 0:
-        command += ["EX", ttl_seconds]
-    _command(*command)
+    _ddb_set(key, value, ttl_seconds)
 
 
 def get_many(keys: list[str]) -> list[Any]:
     if not keys or not enabled():
         return [None] * len(keys)
-    results = _pipeline([["GET", key] for key in keys])
-    values: list[Any] = []
-    for raw in results:
-        if isinstance(raw, str) and raw:
-            try:
-                values.append(json.loads(raw))
-                continue
-            except ValueError:
-                pass
-        values.append(None)
-    return values
+    return _ddb_get_many(keys)
 
 
 def set_many(pairs: list[tuple[str, Any]], ttl_seconds: int) -> None:
     if not pairs or not enabled():
         return
-    commands: list[list[Any]] = []
-    for key, value in pairs:
+    _ddb_set_many(pairs, ttl_seconds)
+
+
+# --- locks (single-flight) ----------------------------------------------------
+
+
+def set_nx(key: str, ttl_seconds: int) -> bool:
+    """Set ``key`` only if absent. True when this caller created it."""
+    if not enabled():
+        return True
+    pk, sk = _pk_sk(key)
+    item: dict[str, Any] = {"pk": pk, "sk": sk, "payload": "1"}
+    if ttl_seconds > 0:
+        item["expiresAt"] = _now() + ttl_seconds
+    try:
+        _table().put_item(
+            Item=item,
+            ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)",
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001
         try:
-            encoded = json.dumps(value)
-        except (TypeError, ValueError):
-            continue
-        command: list[Any] = ["SET", key, encoded]
-        if ttl_seconds > 0:
-            command += ["EX", ttl_seconds]
-        commands.append(command)
-    _pipeline(commands)
+            from data.client import is_conditional_failure
+
+            if is_conditional_failure(exc):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
+
+def delete(key: str) -> None:
+    if not enabled():
+        return
+    pk, sk = _pk_sk(key)
+    try:
+        _table().delete_item(Key={"pk": pk, "sk": sk})
+    except Exception:  # noqa: BLE001
+        pass

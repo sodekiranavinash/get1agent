@@ -12,7 +12,7 @@ import types
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
-APP = REPO / "backend" / "services" / "http-fetch"
+APP = REPO / "backend" / "services" / "mcp" / "http-fetch"
 
 USER = "u_7k3f9qz2mpx8n4rq"
 OTHER = "u_zzzzzzzzzzzzzzzz"

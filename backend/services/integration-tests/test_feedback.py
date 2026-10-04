@@ -6,7 +6,7 @@ import json
 
 from support import load_module, patch_lambda_storage
 
-handler = load_module("backend/services/user-api/handler.py", "user_api_handler_feedback")
+handler = load_module("backend/services/apis/user-api/handler.py", "user_api_handler_feedback")
 
 SUB = "auth0|feedbacktest"
 
@@ -49,7 +49,7 @@ def _create_agent() -> dict:
             "config": {
                 "version": 2,
                 "prompt": "You are helpful.",
-                "model": "deepseek-v4-flash-vision-exp",
+                "model": "zai.glm-4.7-flash",
                 "reasoning": "medium",
                 "outputFormat": "markdown",
                 "input": {"query": "", "fileIds": []},

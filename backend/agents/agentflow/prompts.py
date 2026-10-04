@@ -53,18 +53,25 @@ def reasoning_instruction(effort: Any) -> str:
 
 
 _HITL_ASK_INSTRUCTION = (
-    "HUMAN-IN-THE-LOOP: when you are missing a fact or are not confident about a "
-    "choice that materially changes the answer, do NOT guess. Call the `ask_user` "
-    "tool with a short question and (when the answer is a choice) a few options, "
-    "then continue once the user answers. Ask at most a couple of questions, and "
-    "never ask for routine confirmation or for information you already have."
+    "HUMAN-IN-THE-LOOP: use the `ask_user` tool ONLY when a specific, "
+    "mutually-exclusive choice genuinely blocks the task and you cannot pick a "
+    "sensible default — for example choosing between named accounts, formats or "
+    "scopes that lead to materially different work. When you do ask, give 2-4 "
+    "concrete options.\n"
+    "- NEVER ask open-ended questions such as \"what aspect are you interested "
+    "in?\", never ask the user to clarify, narrow or restate their request, and "
+    "never ask for routine confirmation.\n"
+    "- For any general, factual or \"tell me about X\" request, do NOT ask — "
+    "answer it, using your tools where they help. Pick the most useful default "
+    "and proceed.\n"
+    "- Ask at most ONE question per run."
 )
 
 _HITL_ASSUME_INSTRUCTION = (
     "HUMAN-IN-THE-LOOP: the user has enabled auto-approve, so do not ask "
-    "questions. When information is missing, make the most sensible assumption "
-    "yourself, proceed with the task, and briefly state the assumption in your "
-    "answer."
+    "questions. When a choice is missing, make the most sensible assumption "
+    "yourself and state it briefly. Facts must still come from tool results, "
+    "never from your own memory."
 )
 
 
@@ -108,10 +115,15 @@ def build_system_prompt(
     )
 
     parts.append(
-        "CITATIONS (required): every source returned by a tool carries an "
-        "`index`. After each sentence or bullet that uses information from a "
-        "tool, append the matching index as a bracketed number, e.g. [1] or "
-        "[1][3]. Never omit citations for facts taken from tools."
+        "GROUNDING (mandatory): answer ONLY from information returned by tool "
+        "calls in this run. Do NOT use your own or training knowledge to state "
+        "facts, and never present anything as fact that no tool returned. Every "
+        "factual sentence or bullet MUST carry the bracketed `index` of the tool "
+        "source it came from, e.g. [1] or [1][3]. If the tools did not return the "
+        "answer, reply that you could not find it in the available sources — do "
+        "NOT answer from memory. Call only tools that actually exist; never invent "
+        "a tool name. Never fabricate sources, source names or citation markers. "
+        "The only exception is a bare greeting or sign-off, which needs no tool."
     )
 
     if skills:
@@ -128,9 +140,13 @@ def build_system_prompt(
 
     if config.get("knowledgeBaseIds"):
         parts.append(
-            "For questions about the attached knowledge bases, call "
-            "`get-user-knowledge-bases` once to see what is available, then call "
-            "`search-user-knowledge-bases` before answering from memory."
+            "KNOWLEDGE BASES (primary source): the attached knowledge bases hold "
+            "authoritative, user-specific context (a resume/profile, policies, "
+            "uploaded documents). Before answering, call `get-user-knowledge-bases` "
+            "once to see what is available, then ALWAYS call "
+            "`search-user-knowledge-bases` to check them — including when the "
+            "request is not phrased as being about them — and prefer their content "
+            "over your own memory. Cite what you use."
         )
 
     # Chat-only. `None` means the caller did not opt in (builder, automation),

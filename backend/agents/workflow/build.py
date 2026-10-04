@@ -21,6 +21,7 @@ from typing import Any
 
 from agentflow.config import RuntimeConfig
 from agentflow.context import TruncatingModel
+from agentflow.guardrails import load_default_guardrail, resolve_guardrail
 from agentflow.models import build_model, resolve_model_id
 from agentflow.prompts import build_system_prompt
 from agentflow.provider import resolve_model_provider
@@ -156,15 +157,23 @@ def _make_host(
     output_instructions: str,
     output_format: str,
     human_in_loop: bool | None = None,
+    allow_new_questions: bool = True,
+    guardrail: Any = None,
 ) -> Any:
     from strands import Agent
 
     from agentflow.hitl import build_ask_user_tool
 
-    tools = [build_ask_user_tool()] if human_in_loop else []
+    tools = (
+        [build_ask_user_tool(allow_new_questions=allow_new_questions)]
+        if human_in_loop
+        else []
+    )
     return Agent(
         name=name,
-        model=TruncatingModel(build_model(config, model_id, conversation_id)),
+        model=TruncatingModel(
+            build_model(config, model_id, conversation_id, guardrail=guardrail)
+        ),
         tools=tools,
         system_prompt=_build_prompt(
             base_config,
@@ -185,8 +194,15 @@ def build_node_agents(
     workflow_config: dict[str, Any],
     counter: dict[str, int],
     agent_ids: list[str] | None = None,
+    guard: Any = None,
+    guardrail_default: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Build one Strands Agent per saved-agent node."""
+    """Build one Strands Agent per saved-agent node.
+
+    ``guard`` is the AgentCore Policy admission check shared by every node.
+    ``guardrail_default`` is the workflow's resolved default guardrail, read once
+    by the caller so members never re-read the settings item.
+    """
     from strands import Agent
 
     specs = _node_specs(config, user_id, workflow_config, agent_ids)
@@ -213,17 +229,31 @@ def build_node_agents(
         skills = resolve_skills(user_id, list(effective.get("skillIds") or []))
         prompt = _build_prompt(effective, skills, extra=extra)
         skills_plugin = build_skills_plugin(skills)
+        # A member uses its own agent guardrail, falling back to the workflow's.
+        member_guardrail = resolve_guardrail(
+            effective.get("guardrail"),
+            workflow_config.get("guardrail"),
+            default=guardrail_default,
+        )
         tools = build_tools(
             config,
             user_id,
             effective,
             [kb["name"] for kb in knowledge],
             counter,
+            guard,
+            conversation_id,
         )
         agent = Agent(
             name=spec["nodeId"],
             model=TruncatingModel(
-                build_model(config, model_id, conversation_id, provider=provider)
+                build_model(
+                    config,
+                    model_id,
+                    conversation_id,
+                    provider=provider,
+                    guardrail=member_guardrail,
+                )
             ),
             tools=tools,
             plugins=[skills_plugin] if skills_plugin else None,
@@ -285,6 +315,9 @@ def build_workflow(
     host_overrides: dict[str, Any] | None = None,
     agent_ids: list[str] | None = None,
     human_in_loop: bool | None = None,
+    guard: Any = None,
+    *,
+    allow_new_questions: bool = True,
 ) -> tuple[Any, str, list[dict[str, Any]]]:
     """Build the orchestrator.
 
@@ -292,8 +325,16 @@ def build_workflow(
     metadata (hosts first/last around the members) the client renders.
     """
     mode = workflow_config.get("mode") or "graph"
+    guardrail_default = load_default_guardrail(user_id)
     members = build_node_agents(
-        config, user_id, conversation_id, workflow_config, counter, agent_ids
+        config,
+        user_id,
+        conversation_id,
+        workflow_config,
+        counter,
+        agent_ids,
+        guard,
+        guardrail_default,
     )
     if not members:
         raise ValueError("This workflow has no runnable agents")
@@ -301,6 +342,11 @@ def build_workflow(
     output_format = str(output.get("format") or "markdown")
     output_instructions = str(output.get("instructions") or "").strip()
     base, host_model = _host_config(workflow_config, output_format, host_overrides)
+    # The workflow's guardrail applies to the host (coordinator + final answerer);
+    # members resolve their own, falling back to this one.
+    workflow_guardrail = resolve_guardrail(
+        workflow_config.get("guardrail"), default=guardrail_default
+    )
 
     meta: list[dict[str, Any]] = [
         {
@@ -325,6 +371,8 @@ def build_workflow(
             output_instructions=output_instructions,
             output_format=output_format,
             human_in_loop=human_in_loop,
+            allow_new_questions=allow_new_questions,
+            guardrail=workflow_guardrail,
         )
         nodes = [host] + [member["agent"] for member in members]
         swarm = Swarm(
@@ -356,6 +404,7 @@ def build_workflow(
         extra=_GRAPH_DISPATCH_INSTRUCTION,
         output_instructions="",
         output_format=output_format,
+        guardrail=workflow_guardrail,
     )
     synth = _make_host(
         config,
@@ -367,6 +416,8 @@ def build_workflow(
         output_instructions=output_instructions,
         output_format=output_format,
         human_in_loop=human_in_loop,
+        allow_new_questions=allow_new_questions,
+        guardrail=workflow_guardrail,
     )
     graph = _build_graph(dispatch, synth, members, workflow_config)
     meta.insert(

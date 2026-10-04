@@ -1,4 +1,4 @@
-"""Evaluation lab: Langfuse-backed datasets + a background run scored offline."""
+"""Evaluation lab: AWS-native datasets + a background run scored offline."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import uuid
 
 from support import load_module, patch_lambda_storage
 
-handler = load_module("backend/services/user-api/handler.py", "user_api_handler_evals")
+handler = load_module("backend/services/apis/user-api/handler.py", "user_api_handler_evals")
 
 SUB = "auth0|evaltest"
 
@@ -40,8 +40,8 @@ def _call(method, path, body=None, expect=200):
     return json.loads(response["body"])
 
 
-class FakeLangfuse:
-    """In-memory stand-in for the src.evals.langfuse module."""
+class FakeLabStore:
+    """In-memory stand-in for the src.evals.store module."""
 
     def __init__(self) -> None:
         self.datasets: dict[str, dict] = {}
@@ -61,10 +61,10 @@ class FakeLangfuse:
         return list(self.datasets.values())
 
     def get_dataset(self, name: str) -> dict:
-        from src.evals.langfuse import LangfuseError
+        from src.evals.store import StoreError
 
         if name not in self.datasets:
-            raise LangfuseError("not found")
+            raise StoreError("not found")
         return self.datasets[name]
 
     def create_dataset(self, name: str, description: str = "") -> dict:
@@ -73,10 +73,10 @@ class FakeLangfuse:
         return item
 
     def delete_dataset(self, name: str) -> None:
-        from src.evals.langfuse import LangfuseError
+        from src.evals.store import StoreError
 
         if name not in self.datasets:
-            raise LangfuseError("not found")
+            raise StoreError("not found")
         self.datasets.pop(name)
 
     def list_dataset_items(self, name: str) -> list[dict]:
@@ -114,7 +114,7 @@ class FakeLangfuse:
         return "trace"
 
 
-def _patch_langfuse(monkeypatch, fake: FakeLangfuse) -> None:
+def _patch_lab_store(monkeypatch, fake: "FakeLabStore") -> None:
     for name in (
         "configured",
         "list_datasets",
@@ -127,16 +127,16 @@ def _patch_langfuse(monkeypatch, fake: FakeLangfuse) -> None:
         "list_dataset_runs",
         "emit_experiment_item",
     ):
-        monkeypatch.setattr(handler.evals_langfuse, name, getattr(fake, name))
+        monkeypatch.setattr(handler.lab_store, name, getattr(fake, name))
 
 
 def test_dataset_and_case_crud(monkeypatch):
-    fake = FakeLangfuse()
-    _patch_langfuse(monkeypatch, fake)
+    fake = FakeLabStore()
+    _patch_lab_store(monkeypatch, fake)
 
     created = _call("POST", "/v1/evals/datasets", {"name": "smoke", "description": "d"}, expect=201)
     assert created["dataset"]["name"] == "smoke"
-    # Namespaced on the way into Langfuse.
+    # Namespaced on the way into the Lab store.
     assert list(fake.datasets) == [f"u_{_uid()}/smoke"]
 
     _call("POST", "/v1/evals/datasets", {"name": "smoke"}, expect=409)
@@ -167,8 +167,8 @@ def test_dataset_and_case_crud(monkeypatch):
 
 def test_eval_run_scores_and_ingests_experiment(monkeypatch, fake_storage):
     patch_lambda_storage(monkeypatch, handler, fake_storage)
-    fake = FakeLangfuse()
-    _patch_langfuse(monkeypatch, fake)
+    fake = FakeLabStore()
+    _patch_lab_store(monkeypatch, fake)
     monkeypatch.setattr(handler.evals_config, "enabled", lambda: True)
 
     _call("POST", "/v1/evals/datasets", {"name": "rag"}, expect=201)
@@ -287,8 +287,8 @@ def test_eval_run_scores_and_ingests_experiment(monkeypatch, fake_storage):
 
 
 def test_dataset_detail_shows_source_trace_and_runs(monkeypatch):
-    fake = FakeLangfuse()
-    _patch_langfuse(monkeypatch, fake)
+    fake = FakeLabStore()
+    _patch_lab_store(monkeypatch, fake)
     _call("POST", "/v1/evals/datasets", {"name": "traced"}, expect=201)
 
     uid = _uid()
@@ -321,8 +321,8 @@ def test_dataset_detail_shows_source_trace_and_runs(monkeypatch):
 
 def test_eval_agent_task(monkeypatch, fake_storage):
     patch_lambda_storage(monkeypatch, handler, fake_storage)
-    fake = FakeLangfuse()
-    _patch_langfuse(monkeypatch, fake)
+    fake = FakeLabStore()
+    _patch_lab_store(monkeypatch, fake)
     monkeypatch.setattr(handler.evals_config, "enabled", lambda: True)
     monkeypatch.setattr(handler.evals_config, "agent_run_function", lambda: "agent-run")
     monkeypatch.setattr(handler.evals_config, "service_client_id", lambda: "svc")

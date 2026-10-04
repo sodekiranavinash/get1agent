@@ -36,6 +36,13 @@ PLAYGROUND_PREFIX = "playground"
 # Evaluation-lab per-case artifacts (retrieved contexts, generated answer, judge
 # reasoning). Not under `raw/`, so the EventBridge ingestion rule never fires.
 EVAL_PREFIX = "evals"
+# Cached remote-MCP tool schemas (one JSON per connection).
+MCP_PREFIX = "mcp"
+# AgentCore runtime conversation sessions (S3SessionManager), per user/agent.
+AGENT_SESSION_PREFIX = "agent-sessions"
+# Agent-run traces: the full Langfuse-style observation tree, one JSON per run.
+# Not under `raw/`, so the ingestion EventBridge rule never fires for these.
+TRACE_PREFIX = "traces"
 
 TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
@@ -92,6 +99,26 @@ def eval_case_key(sub: str, run_id: str, case_id: str) -> str:
 
 def eval_prefix(sub: str, run_id: str) -> str:
     return f"{EVAL_PREFIX}/{sub}/{run_id}/"
+
+
+def mcp_prefix(sub: str) -> str:
+    """Every cached remote-MCP artifact for a user (tool schemas)."""
+    return f"{MCP_PREFIX}/{sub}/"
+
+
+def agent_sessions_prefix(sub: str) -> str:
+    """AgentCore runtime conversation sessions for a user."""
+    return f"{AGENT_SESSION_PREFIX}/{sub}/"
+
+
+def trace_key(sub: str, trace_id: str) -> str:
+    """S3 key for one run's full trace/observation tree (Langfuse-style)."""
+    return f"{TRACE_PREFIX}/{sub}/{trace_id}.json"
+
+
+def trace_prefix(sub: str) -> str:
+    """Every trace object for a user (account-erasure cleanup)."""
+    return f"{TRACE_PREFIX}/{sub}/"
 
 
 def derived_prefix(sub: str, kb_id: str, doc_id: str) -> str:

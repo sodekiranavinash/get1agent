@@ -6,7 +6,7 @@ import json
 
 from support import load_module, patch_pipeline, patch_search
 
-handler = load_module("backend/services/knowledge-mcp/handler.py", "knowledge_mcp_handler")
+handler = load_module("backend/services/mcp/knowledge-mcp/handler.py", "knowledge_mcp_handler")
 
 from data.repositories import documents, knowledge_bases as kb, tags  # noqa: E402
 from data.repositories import users  # noqa: E402

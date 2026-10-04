@@ -1,6 +1,6 @@
 """Shared MCP-over-Lambda transport for the get1agent MCP servers.
 
-Each MCP server Lambda (``knowledge-mcp``, ``web-search``, ``code-interpreter``)
+Each MCP server Lambda (``knowledge-mcp``, ``code-interpreter``, ``http-fetch``…)
 owns its own tools and uses this module to expose them over two transports:
 
 * **HTTP (API Gateway):** the request body is a JSON-RPC message and the caller's
@@ -90,7 +90,7 @@ def build_handler(
 
     ``resolve_user_id`` maps the JWT ``sub`` to the internal userId for HTTP
     requests. Servers that key user data (knowledge-mcp, code-interpreter) pass
-    it; servers that only need an authenticated caller (web-search) leave it out.
+    it; servers that only need an authenticated caller leave it out.
     Direct invokes already carry the internal ``userId`` and are never resolved.
     """
 

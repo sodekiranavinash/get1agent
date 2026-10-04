@@ -14,11 +14,12 @@ from agentflow import models  # noqa: E402
 class ResolveModelIdTests(unittest.TestCase):
     def test_supported_passthrough(self) -> None:
         self.assertEqual(
-            models.resolve_model_id("deepseek-v4-flash-vision-exp"),
-            "deepseek-v4-flash-vision-exp",
+            models.resolve_model_id("deepseek.v3.2"),
+            "deepseek.v3.2",
         )
 
     def test_legacy_model_falls_back(self) -> None:
+        self.assertEqual(models.resolve_model_id("mimo-v2.5"), models.DEFAULT_MODEL)
         self.assertEqual(models.resolve_model_id("claude-sonnet-4"), models.DEFAULT_MODEL)
 
     def test_empty_falls_back(self) -> None:

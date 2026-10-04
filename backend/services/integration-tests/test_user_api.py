@@ -7,7 +7,7 @@ import re
 
 from support import load_module, patch_lambda_storage
 
-handler = load_module("backend/services/user-api/handler.py", "user_api_handler")
+handler = load_module("backend/services/apis/user-api/handler.py", "user_api_handler")
 
 SUB = "auth0|apitest"
 
@@ -179,7 +179,7 @@ def test_agents(fake_storage, monkeypatch):
         "config": {
             "version": 2,
             "prompt": "You are a careful research assistant.",
-            "model": "deepseek-v4-flash-vision-exp",
+            "model": "zai.glm-4.7-flash",
             "reasoning": "medium",
             "outputFormat": "markdown",
             "input": {"query": "Summarise my resume.", "fileIds": []},
@@ -198,7 +198,7 @@ def test_agents(fake_storage, monkeypatch):
     }
     created = _call("POST", "/v1/agents", payload, expect=201)
     agent_id = created["id"]
-    assert created["status"] == "draft" and created["model"] == "deepseek-v4-flash-vision-exp"
+    assert created["status"] == "draft" and created["model"] == "zai.glm-4.7-flash"
     assert created["config"]["knowledgeRerank"] is True
     assert created["config"]["version"] == 2
     assert created["config"]["memory"] == {"enabled": True}

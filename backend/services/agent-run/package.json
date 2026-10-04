@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Agent-run control-plane Lambda (Function URL) + Lambda MicroVM streaming proxy.",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
   "dependencies": {
     "@aws-sdk/client-lambda-microvms": "^3.1136.0"
   }

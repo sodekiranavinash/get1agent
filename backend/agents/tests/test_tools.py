@@ -45,6 +45,45 @@ class SlugTests(unittest.TestCase):
         self.assertEqual(tools._slug("", "server-0"), "server-0")
 
 
+class GatewayNamingTests(unittest.TestCase):
+    def test_prefixes_target(self) -> None:
+        self.assertEqual(
+            tools._gateway_tool_name("code-interpreter", "code-interpreter"),
+            "code-interpreter___code-interpreter",
+        )
+        self.assertEqual(
+            tools._gateway_tool_name("knowledge", "search-user-knowledge-bases"),
+            "knowledge___search-user-knowledge-bases",
+        )
+
+    def test_knowledge_caller_accepts_gateway_args(self) -> None:
+        from unittest import mock
+
+        captured: dict = {}
+
+        def fake_gateway(gateway_url, session_id, tool_name, arguments, region=None):
+            captured.update(tool_name=tool_name, arguments=arguments)
+            return {"result": {"content": [{"text": "ok"}]}}
+
+        with mock.patch.object(tools.mcp_client, "gateway_call_tool", fake_gateway):
+            caller = tools._knowledge_caller(
+                "kb-fn",
+                "u1",
+                "search-user-knowledge-bases",
+                ["my-kb"],
+                True,
+                {"n": 0},
+                None,
+                "https://gw.example/mcp",
+                "sess",
+                tools._gateway_tool_name("knowledge", "search-user-knowledge-bases"),
+            )
+            self.assertEqual(caller({"query": "x"}), "ok")
+
+        self.assertEqual(captured["tool_name"], "knowledge___search-user-knowledge-bases")
+        self.assertEqual(captured["arguments"]["knowledgeBaseNames"], ["my-kb"])
+
+
 class NumberSourcesTests(unittest.TestCase):
     def test_numbers_sources_and_results_globally(self) -> None:
         counter = {"n": 0}
@@ -134,6 +173,41 @@ class MakeToolTests(unittest.TestCase):
 
         asyncio.run(run())
         self.assertEqual(captured, {"query": "hi"})
+
+
+@unittest.skipUnless(HAVE_STRANDS, "strands not installed")
+class WebSearchAvailabilityTests(unittest.TestCase):
+    """Web search is a gateway-only connector (no local fallback)."""
+
+    @staticmethod
+    def _config(gateway: str = ""):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            mcp_transport="gateway" if gateway else "aggregator",
+            gateway_url=gateway,
+            web_search_gateway_url=gateway,
+            web_search_gateway_tool="web-search___WebSearch",
+            web_search_gateway_region="us-west-2",
+            knowledge_function="",
+            code_interpreter_function="",
+            http_fetch_function="",
+            browser_function="",
+            custom_tools_function="",
+            remote_function="",
+        )
+
+    def test_no_web_tool_without_a_gateway(self) -> None:
+        agent = {"servers": [{"source": "builtin", "id": "web-search"}]}
+        self.assertEqual(tools.build_tools(self._config(""), "u1", agent, []), [])
+
+    def test_web_tool_with_a_gateway(self) -> None:
+        agent = {"servers": [{"source": "builtin", "id": "web-search"}]}
+        names = [
+            tool.tool_name
+            for tool in tools.build_tools(self._config("https://gw.example/mcp"), "u1", agent, [])
+        ]
+        self.assertEqual(names, ["web-search"])
 
 
 if __name__ == "__main__":

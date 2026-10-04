@@ -84,7 +84,19 @@ class CleanPlanTests(unittest.TestCase):
         self.assertIsNone(planner._clean_plan({"understanding": "x"}))
         self.assertIsNone(planner._clean_plan(None))
 
-    def test_skill_names_are_not_treated_as_tools(self) -> None:
+    def test_sub_query_with_only_a_skill_becomes_a_skills_step(self) -> None:
+        raw = {
+            "subQueries": [
+                {
+                    "query": "compose",
+                    "todos": [{"title": "Compose the email", "tool": "email-composer"}],
+                }
+            ]
+        }
+        plan = planner._clean_plan(raw, frozenset({"email-composer"}))
+        self.assertEqual(plan["subQueries"][0]["todos"][0]["tool"], "skills")
+
+    def test_skill_names_load_via_the_skills_tool(self) -> None:
         raw = {
             "subQueries": [
                 {
@@ -97,21 +109,120 @@ class CleanPlanTests(unittest.TestCase):
             ]
         }
         plan = planner._clean_plan(raw, frozenset({"email-composer"}))
-        self.assertEqual(len(plan["subQueries"]), 1)
         todos = plan["subQueries"][0]["todos"]
-        self.assertEqual([todo["tool"] for todo in todos], ["web-search"])
-        self.assertEqual(todos[0]["title"], "Look it up")
+        # A skill is loaded through the `skills` tool, with the skill in `query`.
+        self.assertEqual(todos[0]["tool"], "skills")
+        self.assertEqual(todos[0]["query"], "email-composer")
+        # A mixed step keeps the real tool and prepends the skills loader.
+        self.assertEqual(todos[1]["tool"], "skills, web-search")
 
-    def test_sub_query_with_only_a_skill_is_dropped(self) -> None:
+    def test_skills_tool_survives_the_known_tools_filter(self) -> None:
         raw = {
             "subQueries": [
                 {
-                    "query": "compose",
-                    "todos": [{"title": "Compose the email", "tool": "email-composer"}],
+                    "query": "q",
+                    "todos": [{"title": "load", "tool": "skills", "query": "pdf-extract"}],
                 }
             ]
         }
-        self.assertIsNone(planner._clean_plan(raw, frozenset({"email-composer"})))
+        plan = planner._clean_plan(raw, frozenset(), frozenset({"skills", "web-search"}))
+        self.assertEqual(plan["subQueries"][0]["todos"][0]["tool"], "skills")
+
+    def test_unknown_tools_are_dropped(self) -> None:
+        raw = {
+            "subQueries": [
+                {
+                    "query": "look it up",
+                    "todos": [
+                        {"title": "Web search", "tool": "global_search"},
+                        {"title": "Search KB", "tool": "search-user-knowledge-bases"},
+                        {"title": "Mixed", "tool": "global_search, web-search"},
+                    ],
+                }
+            ]
+        }
+        plan = planner._clean_plan(
+            raw,
+            frozenset(),
+            frozenset({"search-user-knowledge-bases", "web-search"}),
+        )
+        todos = plan["subQueries"][0]["todos"]
+        # The invented `global_search` never survives.
+        self.assertEqual(
+            [todo["tool"] for todo in todos],
+            ["search-user-knowledge-bases", "web-search"],
+        )
+
+    def test_plan_of_only_unknown_tools_is_dropped(self) -> None:
+        raw = {
+            "subQueries": [
+                {"query": "x", "todos": [{"title": "a", "tool": "global_search"}]}
+            ]
+        }
+        self.assertIsNone(
+            planner._clean_plan(raw, frozenset(), frozenset({"web-search"}))
+        )
+
+    def test_tool_name_forms_still_match(self) -> None:
+        raw = {
+            "subQueries": [
+                {
+                    "query": "x",
+                    "todos": [
+                        {"title": "a", "tool": "`web-search`"},
+                        {"title": "b", "tool": "myserver/tool"},
+                    ],
+                }
+            ]
+        }
+        plan = planner._clean_plan(
+            raw, frozenset(), frozenset({"web-search", "myserver-tool"})
+        )
+        todos = plan["subQueries"][0]["todos"]
+        self.assertEqual([todo["tool"] for todo in todos], ["web-search", "myserver/tool"])
+
+
+class EnsureKnowledgePlanTests(unittest.TestCase):
+    """The runtime forces a KB-first step so it can't be skipped by the model."""
+
+    def test_prepends_a_kb_step_when_missing(self) -> None:
+        plan = {
+            "understanding": "u",
+            "subQueries": [
+                {
+                    "id": "1",
+                    "query": "q",
+                    "todos": [{"id": "1", "title": "web", "tool": "web-search"}],
+                }
+            ],
+        }
+        result = planner.ensure_knowledge_plan(plan, ["my-resume"])
+        first = result["subQueries"][0]
+        self.assertEqual(first["todos"][0]["tool"], "search-user-knowledge-bases")
+        # The planner's own step is preserved after the KB step.
+        self.assertEqual(result["subQueries"][1]["todos"][0]["tool"], "web-search")
+
+    def test_leaves_a_plan_that_already_uses_the_kb(self) -> None:
+        plan = {
+            "understanding": "u",
+            "subQueries": [
+                {
+                    "query": "q",
+                    "todos": [{"title": "kb", "tool": "search-user-knowledge-bases"}],
+                }
+            ],
+        }
+        self.assertIs(planner.ensure_knowledge_plan(plan, ["my-resume"]), plan)
+
+    def test_builds_a_kb_plan_when_there_is_none(self) -> None:
+        result = planner.ensure_knowledge_plan(None, ["my-resume"])
+        self.assertEqual(
+            result["subQueries"][0]["todos"][0]["tool"],
+            "search-user-knowledge-bases",
+        )
+
+    def test_noop_without_knowledge_bases(self) -> None:
+        self.assertIsNone(planner.ensure_knowledge_plan(None, []))
 
 
 class ExecutionInputTests(unittest.TestCase):
@@ -138,11 +249,34 @@ class ExecutionInputTests(unittest.TestCase):
     def test_empty_plan_passthrough(self) -> None:
         self.assertEqual(planner.execution_input("hello", {"subQueries": []}), "hello")
 
+    def test_skill_step_is_phrased_as_a_load(self) -> None:
+        plan = {
+            "subQueries": [
+                {
+                    "query": "q",
+                    "todos": [
+                        {"title": "Load skill", "tool": "skills", "query": "pdf-extract"}
+                    ],
+                }
+            ]
+        }
+        text = planner.execution_input("hello", plan)
+        self.assertIn('load the "pdf-extract" skill with the `skills` tool', text)
+
     def test_steps_are_sequential(self) -> None:
         plan = {"subQueries": [{"query": "q", "todos": [{"title": "a"}]}]}
         text = planner.execution_input("hello", plan)
         self.assertIn("strictly in sequential order", text)
         self.assertIn("one at a time", text)
+
+    def test_answer_must_be_grounded_in_tool_results(self) -> None:
+        plan = {
+            "subQueries": [
+                {"query": "q", "todos": [{"title": "a", "tool": "web-search"}]}
+            ]
+        }
+        text = planner.execution_input("hello", plan)
+        self.assertIn("using ONLY the results of these tool calls", text)
 
 
 if __name__ == "__main__":

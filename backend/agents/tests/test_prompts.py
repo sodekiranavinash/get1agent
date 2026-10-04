@@ -69,6 +69,25 @@ class BuildSystemPromptTests(unittest.TestCase):
         prompt = prompts.build_system_prompt({}, [])
         self.assertTrue(prompt)
 
+    def test_knowledge_bases_are_the_primary_source(self) -> None:
+        prompt = prompts.build_system_prompt(
+            {"prompt": "p", "knowledgeBaseIds": ["kb1"]}, []
+        )
+        self.assertIn("KNOWLEDGE BASES (primary source)", prompt)
+        self.assertIn("search-user-knowledge-bases", prompt)
+        # Absent when the agent has no knowledge bases attached.
+        self.assertNotIn(
+            "KNOWLEDGE BASES (primary source)",
+            prompts.build_system_prompt({"prompt": "p"}, []),
+        )
+
+    def test_answers_are_grounded_in_tools_only(self) -> None:
+        prompt = prompts.build_system_prompt({"prompt": "p"}, [])
+        self.assertIn("GROUNDING (mandatory)", prompt)
+        self.assertIn("Do NOT use your own or training knowledge", prompt)
+        # The old escape hatch (answer from your own memory) is gone.
+        self.assertNotIn("from your own knowledge and say so", prompt)
+
     def test_reasoning_is_excluded_from_the_answer(self) -> None:
         prompt = prompts.build_system_prompt({"prompt": "p"}, [])
         self.assertIn("Never include your internal reasoning", prompt)

@@ -6,7 +6,7 @@ import json
 
 from support import load_module, patch_lambda_storage
 
-handler = load_module("backend/services/user-api/handler.py", "user_api_handler_conv")
+handler = load_module("backend/services/apis/user-api/handler.py", "user_api_handler_conv")
 
 SUB = "auth0|convtest"
 
@@ -48,7 +48,7 @@ def _create_agent() -> dict:
         "config": {
             "version": 2,
             "prompt": "You are helpful.",
-            "model": "deepseek-v4-flash-vision-exp",
+            "model": "zai.glm-4.7-flash",
             "reasoning": "medium",
             "outputFormat": "markdown",
             "input": {"query": "", "fileIds": []},
@@ -102,7 +102,7 @@ def test_conversation_lifecycle(fake_storage, monkeypatch):
                 {
                     "runId": "run-1",
                     "question": "hi",
-                    "model": "deepseek-v4-flash-vision-exp",
+                    "model": "zai.glm-4.7-flash",
                     "agentId": agent_id,
                     "agentName": "chatty",
                     "status": "completed",

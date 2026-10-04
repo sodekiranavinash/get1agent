@@ -1,7 +1,7 @@
-"""Evaluation runs: bookkeeping for Langfuse-native experiments.
+"""Evaluation runs: bookkeeping for AWS-native experiments.
 
-Curated datasets and their items live in **Langfuse** (see
-``src.evals.langfuse``); the runner ingests each evaluated case back to Langfuse
+Curated datasets and their items live in the LAB# DynamoDB partition (see
+``src.evals.store``); the runner persists each evaluated case result itself
 as an experiment item. This repository keeps only what the UI needs to be fast
 and reliable: one small **run** item (``USER#<userId>`` / ``EVALRUN#<runId>``)
 with the config, status and aggregate metrics, and one tiny **case result** per

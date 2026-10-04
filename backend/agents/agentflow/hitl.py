@@ -21,8 +21,34 @@ ASK_USER_TOOL = "ask_user"
 _TOOL_CALL_MARKER = ":tool_call:"
 
 
-def build_ask_user_tool() -> Any:
-    """Build the Strands ``ask_user`` tool (raises an interrupt when called)."""
+def _stored_response(tool_context: Any) -> Any:
+    """The user's already-recorded answer for this exact tool call, if any.
+
+    Strands derives a deterministic interrupt id from the tool call, so a
+    *replayed* call (which carries the user's earlier answer) is distinguishable
+    from a brand-new ask. Returns ``None`` when there is no stored answer.
+    """
+    try:
+        interrupt_id = tool_context._interrupt_id(ASK_USER_TOOL)
+        agent = getattr(tool_context, "agent", None) or getattr(tool_context, "source", None)
+        state = getattr(agent, "_interrupt_state", None)
+        interrupt = (getattr(state, "interrupts", {}) or {}).get(interrupt_id)
+        if interrupt is not None and getattr(interrupt, "response", None) is not None:
+            return interrupt.response
+    except Exception:  # noqa: BLE001 - introspection must never break a run
+        return None
+    return None
+
+
+def build_ask_user_tool(*, allow_new_questions: bool = True) -> Any:
+    """Build the Strands ``ask_user`` tool (raises an interrupt when called).
+
+    ``allow_new_questions`` is a **hard cap**: a resumed run (the user has
+    already answered a question) is built with it ``False``, so only the
+    replayed call — which reads its stored answer — may interrupt. Any *new*
+    ask returns a "proceed" instruction instead of pausing, which stops a weak
+    model from trapping the run in an endless clarification loop.
+    """
     from strands import tool
     from strands.types.tools import ToolContext
 
@@ -48,6 +74,12 @@ def build_ask_user_tool() -> Any:
             options: Short suggested answers, offered as buttons.
             allow_custom: Whether the user may type their own answer instead.
         """
+        if not allow_new_questions and _stored_response(tool_context) is None:
+            return (
+                "The user has already answered your earlier question. Do not ask "
+                "again — proceed now with the best assumption and state it in "
+                "your answer."
+            )
         response = tool_context.interrupt(
             ASK_USER_TOOL,
             reason={

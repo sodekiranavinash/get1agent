@@ -6,7 +6,7 @@ import json
 
 from support import load_module
 
-handler = load_module("backend/services/mcp-tester/handler.py", "mcp_tester_handler")
+handler = load_module("backend/services/admin/mcp-tester/handler.py", "mcp_tester_handler")
 
 ADMIN_SUB = "auth0|admin-user"
 

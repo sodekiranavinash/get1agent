@@ -50,15 +50,6 @@ wheels = [
 ]
 
 [[package]]
-name = "backoff"
-version = "2.2.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/47/d7/5bbeb12c44d7c4f2fb5b56abce497eb5ed9f34d85701de869acedd602619/backoff-2.2.1.tar.gz", hash = "sha256:03f829f5bb1923180821643f8753b0502c3b682293992485b0eef2807afa5cba", size = 17001, upload-time = "2022-10-05T19:19:32.061Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/73/b6e24bd22e6720ca8ee9a85a0c4a2971af8497d8f3193fa05390cbd46e09/backoff-2.2.1-py3-none-any.whl", hash = "sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8", size = 15148, upload-time = "2022-10-05T19:19:30.546Z" },
-]
-
-[[package]]
 name = "bedrock-agentcore"
 version = "1.24.0"
 source = { registry = "https://pypi.org/simple" }
@@ -302,7 +293,6 @@ source = { virtual = "." }
 dependencies = [
     { name = "bedrock-agentcore" },
     { name = "boto3" },
-    { name = "langfuse" },
     { name = "openpyxl" },
     { name = "pymupdf" },
     { name = "python-docx" },
@@ -313,7 +303,6 @@ dependencies = [
 requires-dist = [
     { name = "bedrock-agentcore", specifier = ">=1.10.0" },
     { name = "boto3", specifier = ">=1.35" },
-    { name = "langfuse", specifier = ">=3" },
     { name = "openpyxl", specifier = ">=3.1.0" },
     { name = "pymupdf", specifier = ">=1.24.0" },
     { name = "python-docx", specifier = ">=1.1.0" },
@@ -527,26 +516,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/19/74/a633ee74eb36c44aa6d1095e7cc5569bebf04342ee146178e2d36600708b/jsonschema_specifications-2025.9.1.tar.gz", hash = "sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d", size = 32855, upload-time = "2025-09-08T01:34:59.186Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/41/45/1a4ed80516f02155c51f51e8cedb3c1902296743db0bbc66608a0db2814f/jsonschema_specifications-2025.9.1-py3-none-any.whl", hash = "sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe", size = 18437, upload-time = "2025-09-08T01:34:57.871Z" },
-]
-
-[[package]]
-name = "langfuse"
-version = "4.16.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "backoff" },
-    { name = "httpx" },
-    { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp-proto-http" },
-    { name = "opentelemetry-sdk" },
-    { name = "packaging" },
-    { name = "pydantic" },
-    { name = "typing-extensions" },
-    { name = "wrapt" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e0/97/cd74695a112e68afcfdabe11ad1a61fe4cd65ddf46fa0fd4dc62a7de46ec/langfuse-4.16.0.tar.gz", hash = "sha256:cf6908af52a0a43345bcbe4a34fe7d5f07cbaa959439dfec694ab7f5bb00353b", size = 393515, upload-time = "2026-09-30T09:55:56.083Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/22/214b2af3d3b9523e222112425f94618b377a476e8b916ea27a7a74488cbe/langfuse-4.16.0-py3-none-any.whl", hash = "sha256:60de8ea29230f8550694b53e6c0e238e90c6657e59ffbc9ea390b0894d828697", size = 707377, upload-time = "2026-09-30T09:55:54.423Z" },
 ]
 
 [[package]]

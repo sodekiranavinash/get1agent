@@ -1,6 +1,6 @@
 """Run one workflow: build the orchestrator and stream normalized frames.
 
-Mirrors ``agentflow.run``: one Langfuse trace per run, one persisted conversation
+Mirrors ``agentflow.run``: one OTel trace per run, one persisted conversation
 turn, and the same best-effort persistence guarantees. The orchestration itself
 is delegated to Strands (``Graph`` / ``Swarm``); this module only assembles the
 agents, forwards their events and derives the final answer.
@@ -149,6 +149,12 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
         if not workflow_id:
             raise ValueError("workflowId is required")
 
+        # Deterministic tool-call policy (AgentCore Policy), shared by every node.
+        from agentflow.memory import build_guard
+        from core import policy
+
+        guard = build_guard(policy.build_evaluator())
+
         workflow = load_workflow(user_id, workflow_id)
         workflow_config = workflow.get("config") or {}
         workflow_name = str(workflow.get("name") or "")
@@ -197,8 +203,11 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
             host_overrides,
             agent_ids,
             # On a resume the host must keep the `ask_user` tool so the paused
-            # call can replay, even if auto-approve was turned on afterwards.
+            # call can replay, even if auto-approve was turned on afterwards —
+            # but a *new* question is refused so the run can't loop.
             human_in_loop or bool(resume_responses),
+            guard,
+            allow_new_questions=not bool(resume_responses),
         )
         if not any(node["role"] == "agent" for node in nodes):
             raise ValueError("This workflow has no runnable agents")

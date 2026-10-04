@@ -5,7 +5,7 @@ item whose ``config`` map holds the mode (``graph`` | ``swarm``), the input/outp
 settings and the node/edge graph; the agent nodes reference saved agents by id
 (never embed their config).
 
-Keys (single table, see design/design-b-dynamodb-s3.md Part 6):
+Keys (single table, see docs/design/design-b-dynamodb-s3.md Part 6):
 
     Workflow       USER#<userId>    WORKFLOW#<lowerName>
     GSI1 byId      WORKFLOW#<id>    #META

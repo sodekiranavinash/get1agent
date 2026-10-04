@@ -11,6 +11,7 @@ from typing import Any
 from data.repositories import documents as documents_repo
 from data.repositories import events as events_repo
 from data.repositories import knowledge_bases as kb_repo
+from data.repositories import notifications as notifications_repo
 from ingestion.chunking import chunk_parents
 from retrieval.embedding.config import IngestionConfig, load_config
 from retrieval.embedding.embeddings import embed_images, embed_texts
@@ -209,6 +210,43 @@ def find_stalled_documents(threshold_minutes: int) -> list[dict]:
     ]
 
 
+def _notify_document_status(
+    document: dict[str, Any], status: str, chunk_count: int | None
+) -> None:
+    """Best-effort user notification when a document finishes or fails."""
+    user_id = document.get("userId")
+    if not user_id:
+        return
+    file_name = str(document.get("fileName") or "document")
+    kb_name = ""
+    kb_id = document.get("kbId")
+    if kb_id:
+        try:
+            kb = kb_repo.get_kb_by_id(kb_id)
+            kb_name = str((kb or {}).get("name") or "")
+        except Exception:  # noqa: BLE001 - a missing KB must not break ingestion
+            kb_name = ""
+    detail = f"{file_name} · {kb_name}" if kb_name else file_name
+    if status == "ready":
+        title = "Ingestion finished"
+        kind = "ingestion_ready"
+        if chunk_count:
+            detail = f"{detail} · {chunk_count} chunk{'s' if chunk_count != 1 else ''}"
+    else:
+        title = "Ingestion failed"
+        kind = "ingestion_failed"
+    try:
+        notifications_repo.create_notification(
+            user_id,
+            kind=kind,
+            title=title,
+            detail=detail,
+            link="/knowledge-bases",
+        )
+    except Exception:  # noqa: BLE001 - notifications are best effort
+        pass
+
+
 def set_document_status(
     document_id: str,
     status: str,
@@ -239,6 +277,8 @@ def set_document_status(
         )
         if delta:
             kb_repo.adjust_processing(document["kbId"], delta)
+        if status in ("ready", "failed"):
+            _notify_document_status(document, status, chunk_count)
 
 
 def _select_images(

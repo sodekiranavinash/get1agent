@@ -135,11 +135,45 @@ def _number_sources(text: str, counter: dict[str, int]) -> str:
     return json.dumps(payload, default=str) if changed else text
 
 
+# The gateway namespaces every target's tools as "<target>___<tool>". These are
+# the target names created in Terraform for each server family.
+_GATEWAY_TARGETS = {
+    "knowledge": "knowledge",
+    "code-interpreter": "code-interpreter",
+    "http-fetch": "http-fetch",
+    "browser": "browser",
+    "custom-tools": "custom-tools",
+    "remote-mcp": "remote-mcp",
+}
+
+
+def _gateway_tool_name(target: str, tool_name: str) -> str:
+    """Fully-qualified gateway tool name for a target's tool."""
+    resolved = _GATEWAY_TARGETS.get(target, target)
+    return f"{resolved}___{tool_name}" if resolved else tool_name
+
+
 def _mcp_caller(
-    function: str, user_id: str, tool_name: str, counter: dict[str, int]
+    function: str,
+    user_id: str,
+    tool_name: str,
+    counter: dict[str, int],
+    guard: Callable[[str, dict[str, Any]], tuple[bool, str]] | None = None,
+    gateway_url: str = "",
+    session_id: str = "",
+    gateway_tool_name: str = "",
 ) -> Callable[[dict[str, Any]], str]:
     def call(arguments: dict[str, Any]) -> str:
-        _, response = mcp_client.call_tool(function, user_id, tool_name, arguments)
+        if guard is not None:
+            allowed, reason = guard(tool_name, arguments)
+            if not allowed:
+                return f"Blocked by policy: {reason}"
+        if gateway_url:
+            response = mcp_client.gateway_call_tool(
+                gateway_url, session_id, gateway_tool_name or tool_name, arguments
+            )
+        else:
+            _, response = mcp_client.call_tool(function, user_id, tool_name, arguments)
         return _number_sources(_text_of(response), counter)
 
     return call
@@ -152,6 +186,10 @@ def _knowledge_caller(
     knowledge_names: list[str],
     rerank: bool,
     counter: dict[str, int],
+    guard: Callable[[str, dict[str, Any]], tuple[bool, str]] | None = None,
+    gateway_url: str = "",
+    session_id: str = "",
+    gateway_tool_name: str = "",
 ) -> Callable[[dict[str, Any]], str]:
     """Call a knowledge MCP tool scoped to the agent's attached KBs.
 
@@ -164,10 +202,97 @@ def _knowledge_caller(
         payload["knowledgeBaseNames"] = knowledge_names
         if tool_name == "search-user-knowledge-bases":
             payload["rerank"] = rerank
-        _, response = mcp_client.call_tool(function, user_id, tool_name, payload)
+        if guard is not None:
+            allowed, reason = guard(tool_name, payload)
+            if not allowed:
+                return f"Blocked by policy: {reason}"
+        if gateway_url:
+            response = mcp_client.gateway_call_tool(
+                gateway_url, session_id, gateway_tool_name or tool_name, payload
+            )
+        else:
+            _, response = mcp_client.call_tool(function, user_id, tool_name, payload)
         return _number_sources(_text_of(response), counter)
 
     return call
+
+
+_WEB_SEARCH_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "query": {
+            "type": "string",
+            "description": (
+                "Required. Natural-language description of the information you "
+                "want (max 200 characters)."
+            ),
+        },
+        "maxResults": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "description": "How many ranked sources to return (1-25).",
+        },
+        "excludeDomains": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Domains to exclude from the results.",
+        },
+    },
+    "required": ["query"],
+}
+
+
+def _web_search_args(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Map tool arguments onto the AgentCore WebSearch connector input."""
+    args: dict[str, Any] = {"query": str(arguments.get("query") or "").strip()[:200]}
+    raw = arguments.get("maxResults", arguments.get("numResults"))
+    try:
+        if raw is not None:
+            args["maxResults"] = max(1, min(int(raw), 25))
+    except (TypeError, ValueError):
+        pass
+    excludes = arguments.get("excludeDomains")
+    if isinstance(excludes, list):
+        clean = [str(domain).strip() for domain in excludes if str(domain).strip()]
+        if clean:
+            args["filters"] = {"domainFilter": {"exclude": clean}}
+    return args
+
+
+def _web_search_tool(
+    gateway_url: str,
+    session_id: str,
+    gateway_tool: str,
+    gateway_region: str,
+    counter: dict[str, int],
+    guard: Callable[[str, dict[str, Any]], tuple[bool, str]] | None,
+) -> Any:
+    """The gateway's built-in Web Search connector, as one Strands tool."""
+
+    def call(arguments: dict[str, Any]) -> str:
+        args = _web_search_args(arguments)
+        if not args.get("query"):
+            return json.dumps({"error": {"code": "invalid_request", "message": "query is required"}})
+        if guard is not None:
+            allowed, reason = guard("web-search", args)
+            if not allowed:
+                return f"Blocked by policy: {reason}"
+        response = mcp_client.gateway_call_tool(
+            gateway_url, session_id, gateway_tool, args, region=gateway_region or None
+        )
+        return _number_sources(_text_of(response), counter)
+
+    return _make_tool(
+        "web-search",
+        (
+            "Search the public web for current information via Amazon Bedrock "
+            "AgentCore Web Search. Returns ranked sources with titles, URLs and "
+            "snippets. Describe what you want in natural language."
+        ),
+        call,
+        _WEB_SEARCH_SCHEMA,
+    )
 
 
 def build_tools(
@@ -176,8 +301,20 @@ def build_tools(
     agent_config: dict[str, Any],
     knowledge_names: list[str],
     counter: dict[str, int] | None = None,
+    guard: Callable[[str, dict[str, Any]], tuple[bool, str]] | None = None,
+    session_id: str = "",
 ) -> list[Any]:
+    """Build the Strands tools for an agent.
+
+    ``guard`` (built by :func:`agentflow.memory.build_guard`) is the AgentCore
+    Policy admission check; when present every tool call is evaluated before the
+    MCP server is invoked, and a denial is returned to the model as a policy error.
+    """
     tools: list[Any] = []
+    # When the AgentCore Gateway is configured, every MCP tool call goes through
+    # it (managed MCP endpoint, Policy enforced, SigV4). Otherwise the in-app
+    # servers are invoked directly (local development).
+    gateway_url = config.gateway_url if config.mcp_transport == "gateway" else ""
     # Run-global citation counter: every source across every tool call gets the
     # next number, so the model's inline ``[n]`` matches the UI's source list.
     # A workflow passes one shared counter so citations stay globally numbered
@@ -208,6 +345,10 @@ def build_tools(
                         knowledge_names,
                         rerank,
                         counter,
+                        guard,
+                        gateway_url,
+                        session_id,
+                        _gateway_tool_name("knowledge", tool_name),
                     ),
                     schema,
                 )
@@ -217,16 +358,39 @@ def build_tools(
         source = str(server.get("source") or "")
         server_id = str(server.get("id") or "")
         if source == "builtin" and server_id == "web-search":
-            function = config.web_search_function
-        elif source == "builtin" and server_id == "code-interpreter":
+            # Web Search is the AgentCore Gateway built-in connector — no MCP
+            # Lambda and no model access. Prefer its dedicated gateway (which may
+            # be in another Region); fall back to the main gateway. There is
+            # deliberately no direct-invoke fallback.
+            web_search_url = config.web_search_gateway_url or gateway_url
+            if web_search_url:
+                tools.append(
+                    _web_search_tool(
+                        web_search_url,
+                        session_id,
+                        config.web_search_gateway_tool,
+                        config.web_search_gateway_region,
+                        counter,
+                        guard,
+                    )
+                )
+            continue
+        if source == "builtin" and server_id == "code-interpreter":
             function = config.code_interpreter_function
+            gateway_target = "code-interpreter"
         elif source == "builtin" and server_id == "http-fetch":
             function = config.http_fetch_function
+            gateway_target = "http-fetch"
+        elif source == "builtin" and server_id == "browser":
+            function = config.browser_function
+            gateway_target = "browser"
         elif source == "custom":
             # User-defined Playground tools; the server id is the tool namespace.
             function = config.custom_tools_function
+            gateway_target = "custom-tools"
         elif source == "mcp":
             function = config.remote_function
+            gateway_target = "remote-mcp"
         else:
             continue
         if not function:
@@ -254,7 +418,16 @@ def build_tools(
                 _make_tool(
                     tool_name,
                     str(spec.get("description") or ""),
-                    _mcp_caller(function, user_id, tool_name, counter),
+                    _mcp_caller(
+                        function,
+                        user_id,
+                        tool_name,
+                        counter,
+                        guard,
+                        gateway_url,
+                        session_id,
+                        _gateway_tool_name(gateway_target, tool_name),
+                    ),
                     schema,
                 )
             )

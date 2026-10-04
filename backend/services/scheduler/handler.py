@@ -21,8 +21,21 @@ from typing import Any
 from data.client import now_iso
 from data.repositories import agents as agents_repo
 from data.repositories import conversations as conversations_repo
+from data.repositories import notifications as notifications_repo
 from data.repositories import schedules as schedules_repo
 from data.repositories import workflows as workflows_repo
+
+
+def _notify(user_id: str, *, kind: str, title: str, detail: str, link: str | None) -> None:
+    """Best-effort user notification for a scheduled run."""
+    if not user_id:
+        return
+    try:
+        notifications_repo.create_notification(
+            user_id, kind=kind, title=title, detail=detail, link=link
+        )
+    except Exception:  # noqa: BLE001 - notifications are best effort
+        pass
 
 
 def _input_text(schedule: dict[str, Any]) -> str:
@@ -83,6 +96,14 @@ def _run_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
             error=str(result.get("error") or ""),
         )
         _mark_entity(user_id, kind, target_id, ran_at)
+        error_text = str(result.get("error") or "")
+        _notify(
+            user_id,
+            kind="schedule_failed" if error_text else "schedule_completed",
+            title="Scheduled run failed" if error_text else "Scheduled run finished",
+            detail=f"{name} · {kind}",
+            link=f"/chat/conversation/{conversation['conversationId']}",
+        )
         return {"ok": True, "conversationId": conversation["conversationId"]}
     except Exception as exc:  # noqa: BLE001 - one schedule must not block the rest
         print(
@@ -103,6 +124,13 @@ def _run_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - recording the failure is best effort
             pass
         _mark_entity(user_id, kind, target_id, ran_at)
+        _notify(
+            user_id,
+            kind="schedule_failed",
+            title="Scheduled run failed",
+            detail=f"{name} · {kind}",
+            link="/scheduled-jobs",
+        )
         return {"ok": False, "error": str(exc)}
 
 

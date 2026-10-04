@@ -47,6 +47,11 @@ TICKET_OPEN = "open"
 TICKET_CLOSED = "closed"
 TICKET_STATUSES = (TICKET_OPEN, TICKET_CLOSED)
 
+# A ticket is ordinary support, or a formal data-rights grievance (DPDP). The
+# kind lets the user filter their own list and the admins triage separately.
+KIND_SUPPORT = "support"
+KIND_GRIEVANCE = "grievance"
+
 REPORT_NEW = "new"
 REPORT_RESOLVED = "resolved"
 REPORT_STATUSES = (REPORT_NEW, REPORT_RESOLVED)
@@ -104,6 +109,8 @@ def create_ticket(
     user_email: str,
     subject: str,
     body: str,
+    kind: str = KIND_SUPPORT,
+    request_type: str | None = None,
 ) -> dict[str, Any]:
     """Open a ticket with its first (user) message."""
     timestamp = now_iso()
@@ -116,6 +123,7 @@ def create_ticket(
         "userId": user_id,
         "userEmail": user_email,
         "subject": subject,
+        "kind": kind,
         "status": TICKET_OPEN,
         "messageCount": 1,
         "lastAuthor": AUTHOR_USER,
@@ -125,6 +133,8 @@ def create_ticket(
         GSI3[0]: SUPPORT_ALL_PK,
         GSI3[1]: support_all_sk(timestamp, ticket_id),
     }
+    if request_type:
+        ticket["requestType"] = request_type
     table().put_item(Item=ticket)
     _put_message(
         ticket_id,

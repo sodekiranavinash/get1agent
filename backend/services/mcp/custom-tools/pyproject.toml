@@ -1,0 +1,11 @@
+[project]
+name = "get1agent-custom-tools"
+version = "0.1.0"
+description = "MCP server for user-defined Python tools (Playground built tools)"
+requires-python = ">=3.14"
+dependencies = [
+    "awslabs.mcp-lambda-handler==0.1.15",
+    "boto3>=1.43.31",
+    "python-dateutil>=2.8.2",
+    "tzdata>=2024.1",
+]

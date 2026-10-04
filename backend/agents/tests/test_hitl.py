@@ -134,6 +134,26 @@ class WorkflowInterruptTests(unittest.TestCase):
         self.assertEqual(frames, [])
 
 
+class StoredResponseTests(unittest.TestCase):
+    """The anti-loop cap: a resumed run must not raise a *new* question."""
+
+    def test_reads_the_stored_answer_for_a_replayed_call(self) -> None:
+        interrupt = SimpleNamespace(response="eu")
+        agent = SimpleNamespace(
+            _interrupt_state=SimpleNamespace(interrupts={"iid": interrupt})
+        )
+        context = SimpleNamespace(_interrupt_id=lambda name: "iid", agent=agent)
+        self.assertEqual(hitl._stored_response(context), "eu")
+
+    def test_none_for_a_brand_new_call(self) -> None:
+        agent = SimpleNamespace(_interrupt_state=SimpleNamespace(interrupts={}))
+        context = SimpleNamespace(_interrupt_id=lambda name: "new", agent=agent)
+        self.assertIsNone(hitl._stored_response(context))
+
+    def test_none_when_state_is_unavailable(self) -> None:
+        self.assertIsNone(hitl._stored_response(SimpleNamespace()))
+
+
 class PromptInjectionTests(unittest.TestCase):
     def test_ask_mode_tells_the_agent_to_use_ask_user(self) -> None:
         prompt = prompts.build_system_prompt({"prompt": "p"}, [], human_in_loop=True)
@@ -143,6 +163,13 @@ class PromptInjectionTests(unittest.TestCase):
         prompt = prompts.build_system_prompt({"prompt": "p"}, [], human_in_loop=False)
         self.assertIn("auto-approve", prompt)
         self.assertNotIn("`ask_user`", prompt)
+
+    def test_ask_mode_is_restrictive(self) -> None:
+        # HITL is only for genuine blocking choices, never for open-ended
+        # "tell me more" questions (which must be answered, not asked back).
+        prompt = prompts.build_system_prompt({"prompt": "p"}, [], human_in_loop=True)
+        self.assertIn("open-ended", prompt)
+        self.assertIn("at most ONE question", prompt)
 
     def test_default_omits_hitl_instructions(self) -> None:
         prompt = prompts.build_system_prompt({"prompt": "p"}, [])
