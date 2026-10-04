@@ -57,6 +57,7 @@ import {
   demoEvalRuns,
 } from './evals'
 import { demoGuardrails, demoGuardrailTest } from './guardrails'
+import { demoMemoryPayload } from './memory'
 
 const knowledgeBaseList = {
   knowledgeBases: demoKnowledgeBases,
@@ -174,6 +175,9 @@ function match(path: string, params: URLSearchParams): unknown {
   if (path === '/v1/storage/files') return demoStorageFiles
   if (path === '/v1/vault/secrets') return demoVaultSecrets
   if (path === '/v1/vault/providers') return demoVaultProviders
+
+  // --- memory ----------------------------------------------------------
+  if (path === '/v1/memory') return demoMemoryPayload
 
   // --- custom tools (MCP Builder) -------------------------------------
   if (path === '/v1/custom-tools') return demoCustomTools

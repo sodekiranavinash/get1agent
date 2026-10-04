@@ -119,6 +119,7 @@ from src.skills import (
     validate_skill_name,
 )
 from core import usage as core_usage
+from core import memory as core_memory
 from core.storage import Storage
 from data.repositories.users import (
     delete_identity,
@@ -3708,6 +3709,30 @@ def _handle_consent_withdraw(claims: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _export_memory(user_id: str) -> list[dict[str, Any]]:
+    """Every long-term memory record, for the DPDP right of access (best-effort)."""
+    records: list[dict[str, Any]] = []
+    try:
+        cursor: str | None = None
+        while len(records) < 2000:
+            page = core_memory.list_records(user_id, cursor=cursor, limit=100)
+            records.extend(page.get("records") or [])
+            cursor = page.get("nextCursor")
+            if not cursor:
+                break
+    except Exception as exc:  # noqa: BLE001 - export must never fail on memory
+        print(f"export: memory read failed for {user_id}: {exc!r}", file=sys.stderr)
+        return []
+    return [
+        {
+            "text": str(record.get("text") or ""),
+            "strategyId": record.get("strategyId"),
+            "createdAt": record.get("createdAt"),
+        }
+        for record in records
+    ]
+
+
 def _handle_user_export(claims: dict[str, Any]) -> dict[str, Any]:
     """The DPDP right of access: a machine-readable copy of the user's data."""
     profile = get_or_create_user(claims)
@@ -3772,6 +3797,7 @@ def _handle_user_export(claims: dict[str, Any]) -> dict[str, Any]:
         "mcpConnections": [_public_item(item) for item in mcp_repo.list_connections(sub)],
         "notifications": [_public_item(item) for item in notifications_repo.list_notifications(sub)],
         "supportTickets": [_public_item(item) for item in support_repo.list_tickets(sub)],
+        "memory": _export_memory(sub),
         "contact": _privacy_contact(),
         "note": (
             "This is the personal data get1agent holds about you. Knowledge-base "
@@ -3877,6 +3903,13 @@ def _handle_user_account_delete(claims: dict[str, Any]) -> dict[str, Any]:
     # 6) Evaluation Lab data (best-effort; datasets/cases/queues).
     lab_items = _delete_lab_data(sub)
 
+    # 7) AgentCore Memory (long-term records + short-term events), best-effort.
+    memory_erased: dict[str, int] = {"records": 0, "events": 0}
+    try:
+        memory_erased = core_memory.erase_all(sub)
+    except Exception as exc:  # noqa: BLE001 - never block the DB erasure
+        print(f"account delete: memory cleanup failed for {sub}: {exc!r}", file=sys.stderr)
+
     return _json(
         200,
         {
@@ -3886,6 +3919,7 @@ def _handle_user_account_delete(claims: dict[str, Any]) -> dict[str, Any]:
             "dynamodb": deleted,
             "auth0IdentityRemoved": auth_removed,
             "labItemsDeleted": lab_items,
+            "memoryErased": memory_erased,
             "message": (
                 "Your account and personal data have been erased. If Auth0 identity "
                 "removal is not configured, contact the grievance officer to complete it."
@@ -6670,6 +6704,117 @@ def _handle_notification_delete(claims: dict[str, Any], notification_id: str) ->
     return _json(200, {"ok": True})
 
 
+def _serialize_memory_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(record.get("id") or ""),
+        "text": str(record.get("text") or ""),
+        "namespaces": list(record.get("namespaces") or []),
+        "strategyId": record.get("strategyId"),
+        "score": record.get("score"),
+        "createdAt": record.get("createdAt"),
+    }
+
+
+def _handle_memory_get(claims: dict[str, Any], query: dict[str, str]) -> dict[str, Any]:
+    profile = get_or_create_user(claims)
+    sub = profile["userId"]
+    try:
+        limit = int(query.get("limit") or 50)
+    except (TypeError, ValueError):
+        limit = 50
+    limit = max(1, min(limit, 100))
+    search = (query.get("q") or "").strip() or None
+    cursor = (query.get("cursor") or "").strip() or None
+    try:
+        result = core_memory.list_records(
+            sub, cursor=cursor, limit=limit, query=search
+        )
+    except Exception as exc:  # noqa: BLE001 - the page must degrade, not 500
+        print(f"memory list failed for {sub}: {exc!r}", file=sys.stderr)
+        return _json(
+            200,
+            {
+                "enabled": core_memory.memory_enabled(sub),
+                "backend": core_memory.backend(),
+                "configured": core_memory.is_agentcore(),
+                "records": [],
+                "nextCursor": None,
+                "error": "Memory is temporarily unavailable",
+            },
+        )
+    return _json(
+        200,
+        {
+            "enabled": core_memory.memory_enabled(sub),
+            "backend": core_memory.backend(),
+            "configured": core_memory.is_agentcore(),
+            "records": [_serialize_memory_record(item) for item in result["records"]],
+            "nextCursor": result.get("nextCursor"),
+        },
+    )
+
+
+def _handle_memory_config(claims: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    profile = get_or_create_user(claims)
+    sub = profile["userId"]
+    if "enabled" not in body:
+        raise ApiError(400, "enabled is required")
+    enabled = bool(body["enabled"])
+    settings_repo.update_settings(sub, memory_enabled=enabled)
+    return _json(200, {"enabled": enabled})
+
+
+def _handle_memory_delete_record(
+    claims: dict[str, Any], record_id: str, query: dict[str, str]
+) -> dict[str, Any]:
+    profile = get_or_create_user(claims)
+    sub = profile["userId"]
+    namespace = (query.get("namespace") or "").strip() or None
+    # A record may only be deleted inside the caller's own namespace.
+    if namespace and not namespace.startswith(core_memory.user_namespace(sub)):
+        raise ApiError(403, "Not allowed")
+    core_memory.delete_record(sub, record_id, namespace)
+    return _json(200, {"ok": True, "id": record_id})
+
+
+def _handle_memory_erase(claims: dict[str, Any]) -> dict[str, Any]:
+    profile = get_or_create_user(claims)
+    sub = profile["userId"]
+    try:
+        erased = core_memory.erase_all(sub)
+    except Exception as exc:  # noqa: BLE001
+        print(f"memory erase failed for {sub}: {exc!r}", file=sys.stderr)
+        raise ApiError(502, "Could not erase memory; try again") from exc
+    return _json(200, {"ok": True, "erasedAt": now_iso(), **erased})
+
+
+def _route_memory(
+    claims: dict[str, Any],
+    method: str,
+    rest: list[str],
+    body: dict[str, Any],
+    query: dict[str, str],
+):
+    if not rest:
+        if method == "GET":
+            return _handle_memory_get(claims, query)
+        if method == "DELETE":
+            return _handle_memory_erase(claims)
+        raise ApiError(405, f"Method not allowed: {method}")
+
+    if rest == ["config"]:
+        if method == "PUT":
+            return _handle_memory_config(claims, body)
+        raise ApiError(405, f"Method not allowed: {method}")
+
+    if len(rest) == 2 and rest[0] == "records":
+        if method == "DELETE":
+            return _handle_memory_delete_record(claims, rest[1], query)
+        raise ApiError(405, f"Method not allowed: {method}")
+
+    raise ApiError(404, "Not found")
+
+
 def _route_notifications(
     claims: dict[str, Any],
     method: str,
@@ -6739,6 +6884,8 @@ def _route(
         return _route_storage(claims, method, segments[2:], body)
     if segments[:2] == ["v1", "notifications"]:
         return _route_notifications(claims, method, segments[2:], query)
+    if segments[:2] == ["v1", "memory"]:
+        return _route_memory(claims, method, segments[2:], body, query)
     if segments[:2] == ["v1", "user"]:
         return _route_user(claims, method, segments[2:], body)
     raise ApiError(404, "Not found")

@@ -50,13 +50,13 @@ def _config(**overrides):
 
 class MemoryBackendTests(unittest.TestCase):
     def test_dynamo_is_default(self) -> None:
-        manager = memory.build_memory_manager(_config(), "u_1", "agent", "7")
+        manager = memory.build_memory_manager(_config(), "u_1", session_id="7")
         self.assertIsInstance(manager._stores[0], memory.DynamoMemoryStore)
 
     def test_agentcore_without_id_is_a_hard_error(self) -> None:
         with self.assertRaises(RuntimeError):
             memory.build_memory_manager(
-                _config(memory_backend="agentcore", memory_id=""), "u_1", "agent", "7"
+                _config(memory_backend="agentcore", memory_id=""), "u_1", session_id="7"
             )
 
     def test_agentcore_uses_managed_store(self) -> None:
@@ -81,20 +81,20 @@ class MemoryBackendTests(unittest.TestCase):
             manager = memory.build_memory_manager(
                 _config(memory_backend="agentcore", memory_id="mem-123"),
                 "u_1",
-                "agent",
-                "7",
+                session_id="7",
             )
         self.assertIs(manager._stores[0], sentinel)
         kwargs = ctor.call_args.kwargs
         self.assertEqual(kwargs["memory_id"], "mem-123")
         self.assertEqual(kwargs["actor_id"], "u_1")
         self.assertEqual(kwargs["session_id"], "7")
-        self.assertIn("agents/agent", kwargs["namespace"])
+        # User-scoped namespace (no session/agent component) -> cross-session recall.
+        self.assertEqual(kwargs["namespace_path"], "/users/{actorId}/")
         self.assertTrue(kwargs["writable"])
 
     def test_dynamo_backend_is_opt_in(self) -> None:
         manager = memory.build_memory_manager(
-            _config(memory_backend="dynamo"), "u_1", "agent", "7"
+            _config(memory_backend="dynamo"), "u_1", session_id="7"
         )
         self.assertIsInstance(manager._stores[0], memory.DynamoMemoryStore)
 

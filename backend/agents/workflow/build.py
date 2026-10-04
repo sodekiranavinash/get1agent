@@ -109,6 +109,7 @@ def _build_prompt(
     output_instructions: str = "",
     output_format: str = "markdown",
     human_in_loop: bool | None = None,
+    memory_enabled: bool = False,
 ) -> str:
     prompt = dict(base_config)
     if output_instructions:
@@ -120,8 +121,44 @@ def _build_prompt(
             + output_instructions
         ).strip()
         prompt["output"] = output
-    base = build_system_prompt(prompt, skills, human_in_loop=human_in_loop)
+    base = build_system_prompt(
+        prompt, skills, human_in_loop=human_in_loop, memory_enabled=memory_enabled
+    )
     return f"{base}\n\n{extra}".strip() if extra else base
+
+
+def _build_memory(
+    config: RuntimeConfig, user_id: str, conversation_id: str
+) -> Any:
+    """Build a user-scoped memory manager for one workflow node (best-effort).
+
+    Every node points at the same user namespace, so a fact learned by one agent
+    is recalled by the host and the other members.
+    """
+    try:
+        from agentflow.memory import build_memory_manager
+
+        return build_memory_manager(config, user_id, session_id=conversation_id)
+    except Exception as exc:  # noqa: BLE001 - memory must never break a run
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "level": "warning",
+                    "message": "Workflow memory disabled for a node",
+                    "error": str(exc),
+                }
+            ),
+            flush=True,
+        )
+        return None
+
+
+def _collect(managers: list[Any] | None, manager: Any) -> Any:
+    if manager is not None and managers is not None:
+        managers.append(manager)
+    return manager
 
 
 def _host_config(
@@ -159,6 +196,8 @@ def _make_host(
     human_in_loop: bool | None = None,
     allow_new_questions: bool = True,
     guardrail: Any = None,
+    user_id: str = "",
+    memory: Any = None,
 ) -> Any:
     from strands import Agent
 
@@ -169,6 +208,11 @@ def _make_host(
         if human_in_loop
         else []
     )
+    # The host owns the final answer; let it erase a memory on request too.
+    if memory is not None and user_id:
+        from agentflow.memory import build_forget_tool
+
+        tools.append(build_forget_tool(user_id))
     return Agent(
         name=name,
         model=TruncatingModel(
@@ -182,7 +226,9 @@ def _make_host(
             output_instructions=output_instructions,
             output_format=output_format,
             human_in_loop=human_in_loop,
+            memory_enabled=memory is not None,
         ),
+        memory_manager=memory,
         callback_handler=None,
     )
 
@@ -196,6 +242,8 @@ def build_node_agents(
     agent_ids: list[str] | None = None,
     guard: Any = None,
     guardrail_default: dict[str, str] | None = None,
+    memory: bool = False,
+    managers: list[Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Build one Strands Agent per saved-agent node.
 
@@ -227,7 +275,14 @@ def build_node_agents(
             user_id, list(effective.get("knowledgeBaseIds") or [])
         )
         skills = resolve_skills(user_id, list(effective.get("skillIds") or []))
-        prompt = _build_prompt(effective, skills, extra=extra)
+        member_memory = (
+            _collect(managers, _build_memory(config, user_id, conversation_id))
+            if memory
+            else None
+        )
+        prompt = _build_prompt(
+            effective, skills, extra=extra, memory_enabled=member_memory is not None
+        )
         skills_plugin = build_skills_plugin(skills)
         # A member uses its own agent guardrail, falling back to the workflow's.
         member_guardrail = resolve_guardrail(
@@ -258,6 +313,7 @@ def build_node_agents(
             tools=tools,
             plugins=[skills_plugin] if skills_plugin else None,
             system_prompt=prompt or DEFAULT_MEMBER_PROMPT,
+            memory_manager=member_memory,
             callback_handler=None,
         )
         spec = dict(spec)
@@ -318,6 +374,8 @@ def build_workflow(
     guard: Any = None,
     *,
     allow_new_questions: bool = True,
+    memory: bool = False,
+    managers: list[Any] | None = None,
 ) -> tuple[Any, str, list[dict[str, Any]]]:
     """Build the orchestrator.
 
@@ -335,6 +393,8 @@ def build_workflow(
         agent_ids,
         guard,
         guardrail_default,
+        memory,
+        managers,
     )
     if not members:
         raise ValueError("This workflow has no runnable agents")
@@ -361,6 +421,11 @@ def build_workflow(
     if mode == "swarm":
         from strands.multiagent import Swarm
 
+        host_memory = (
+            _collect(managers, _build_memory(config, user_id, conversation_id))
+            if memory
+            else None
+        )
         host = _make_host(
             config,
             conversation_id,
@@ -373,6 +438,8 @@ def build_workflow(
             human_in_loop=human_in_loop,
             allow_new_questions=allow_new_questions,
             guardrail=workflow_guardrail,
+            user_id=user_id,
+            memory=host_memory,
         )
         nodes = [host] + [member["agent"] for member in members]
         swarm = Swarm(
@@ -406,6 +473,11 @@ def build_workflow(
         output_format=output_format,
         guardrail=workflow_guardrail,
     )
+    synth_memory = (
+        _collect(managers, _build_memory(config, user_id, conversation_id))
+        if memory
+        else None
+    )
     synth = _make_host(
         config,
         conversation_id,
@@ -418,6 +490,8 @@ def build_workflow(
         human_in_loop=human_in_loop,
         allow_new_questions=allow_new_questions,
         guardrail=workflow_guardrail,
+        user_id=user_id,
+        memory=synth_memory,
     )
     graph = _build_graph(dispatch, synth, members, workflow_config)
     meta.insert(

@@ -23,7 +23,12 @@ from agentflow.hitl import (
     tool_use_id_from_interrupt_id,
 )
 from agentflow.identity import resolve_user_id
-from agentflow.memory import build_guard, build_memory_manager
+from agentflow.memory import (
+    build_forget_tool,
+    build_guard,
+    build_memory_manager,
+    memory_enabled as memory_is_enabled,
+)
 from agentflow.models import (
     DEFAULT_CONTEXT_WINDOW,
     build_model,
@@ -216,6 +221,7 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
     observation: Any = None
     trace_id: str | None = None
     trace_url: str | None = None
+    memory_manager: Any = None
 
     try:
         config = load_config()
@@ -374,14 +380,27 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
         from strands import Agent
         from strands.agent.conversation_manager import SummarizingConversationManager
 
-        memory_enabled = bool((agent_config.get("memory") or {}).get("enabled"))
-        memory_manager = None
+        memory_enabled = memory_is_enabled(user_id)
         if memory_enabled:
             # AgentCore Memory when configured (AGENT_MEMORY_BACKEND=agentcore),
-            # otherwise the in-app DynamoMemoryStore.
-            memory_manager = build_memory_manager(
-                config, user_id, agent_id, conversation_id
-            )
+            # otherwise the in-app DynamoMemoryStore. A misconfigured memory
+            # resource disables memory for the run rather than failing it.
+            try:
+                memory_manager = build_memory_manager(
+                    config, user_id, session_id=conversation_id
+                )
+            except Exception as exc:  # noqa: BLE001 - memory must never break a run
+                print(
+                    json.dumps(
+                        {
+                            "level": "warning",
+                            "message": "Memory disabled for this run",
+                            "error": str(exc),
+                        }
+                    ),
+                    flush=True,
+                )
+                memory_enabled = False
 
         # Deterministic tool-call policy (AgentCore Policy). None disables it.
         from core import policy
@@ -406,6 +425,10 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
             guard=guard,
             session_id=conversation_id,
         )
+        # Let the user erase a memory by asking the agent ("forget my favorite
+        # color"). Bound to the caller's own namespace only.
+        if memory_manager is not None:
+            tools.append(build_forget_tool(user_id))
         # Chat-only: let the agent pause and ask the user when uncertain. On a
         # resume the tool must be present again so the paused call can replay,
         # even if auto-approve was turned on after the question was asked.
@@ -419,6 +442,7 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
             # After the user answers, switch to assume-mode so the model does not
             # try to ask again (the cap above is the hard stop).
             human_in_loop=False if resume_responses else human_in_loop,
+            memory_enabled=memory_enabled,
         )
         # Progressive disclosure: the plugin injects skill metadata into the system
         # prompt and exposes the `skills` activation tool. The agent decides which
@@ -758,6 +782,13 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
                     output_tokens=run_usage.get("outputTokens") or 0,
                 )
             except Exception:  # noqa: BLE001 - accounting never breaks a run
+                pass
+        # Persist any buffered memory writes (extraction is fire-and-forget).
+        # Best-effort: a memory write failure never changes the run's outcome.
+        if memory_manager is not None:
+            try:
+                await memory_manager.flush()
+            except Exception:  # noqa: BLE001
                 pass
         # The container can suspend between invocations, so flush buffered spans.
         # Always runs (even if the client disconnected and the run was cancelled).

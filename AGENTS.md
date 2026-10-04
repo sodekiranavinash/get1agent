@@ -124,6 +124,7 @@ chunks or postings in DynamoDB.
 | Support message | `SUPPORT#<ticketId>` | `MSG#<createdAt>#<seq>` | — |
 | Security report | `USER#<userId>` | `SREPORT#<reportId>` | `byStatus` (`SREPORT#all`) |
 | Notification | `USER#<userId>` | `NOTIF#<id>` | — (TTL 90d) |
+| User memory (local fallback) | `USER#<userId>` | `MEM#<memId>` | — (prod uses AgentCore Memory) |
 
 - **GSI1 `byId`** resolves a KB/document/skill/agent/workflow by UUID.
 - **GSI2 `byUser`** lists a user's KBs/skills/agents/workflows/tags by prefix.
@@ -761,10 +762,14 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   `knowledgeBaseIds`/`skillIds`/`servers`/`fileIds` per run; an empty list means
   "none selected".
 - **Sessions** persist in S3 (`S3SessionManager`, prefix
-  `agent-sessions/<userId>/<agentId>/`). **User memory** is a custom Strands
-  `MemoryStore` (`src/memory.py`) over DynamoDB items (`USER#<userId>` /
-  `MEM#<agentId>#<memId>`) + S3 Vectors (`status="memory"`, so it never leaks
-  into KB search) + Bedrock Titan embeddings.
+  `agent-sessions/<userId>/<agentId>/`). **User memory** is a single
+  **user-scoped** Strands `MemoryManager` shared by every agent and workflow of
+  the user (see "AgentCore Memory + Policy"): the same store is attached to the
+  single-agent run and to every workflow member/host, so a fact told in one
+  place is recalled everywhere. Memory is on by default and toggled on the
+  **Memory** page (workspace setting `memoryEnabled`). The runtime appends a
+  `forget_memory` tool so the user can erase a memory by asking the agent, and
+  flushes the manager after each run so extraction writes persist.
 - **Context management.** Every run restores the conversation's message history
   from the session and passes the **full text history** (user/assistant turns,
   capped to the last `AGENT_PLANNER_HISTORY_TURNS` = 6 turns) to the planner so
@@ -1396,18 +1401,36 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
 
 ### AgentCore Memory + Policy (AWS-native)
 
-- **Agent memory is Amazon Bedrock AgentCore Memory.** The runtime builds the
-  official Strands `AgentCoreMemoryStore` (`agentflow/memory.py`,
-  `build_memory_manager`): the **user** is the actor (long-term facts are shared
-  across that user's agents) and the **agent id** scopes the namespace
-  (`/users/<userId>/agents/<agentId>`); the store is writable with built-in
-  extraction. One managed resource is created per deployment
-  (`aws_bedrockagentcore_memory` + a `SEMANTIC` `aws_bedrockagentcore_memory_strategy`)
-  and its id is injected as `AGENTCORE_MEMORY_ID`.
-  `AGENT_MEMORY_BACKEND=dynamo` selects the in-app `DynamoMemoryStore` and exists
-  **only** for local dev/tests — a deployed runtime always uses the managed
-  service, and a missing `AGENTCORE_MEMORY_ID` is a hard error, never a silent
-  fallback.
+- **User memory is Amazon Bedrock AgentCore Memory, scoped to the user.**
+  `agentflow/memory.py:build_memory_manager` builds the official Strands
+  `AgentCoreMemoryStore`: the **user id is the actor** and the namespace is
+  **user-only** (`namespace_path="/users/{actorId}/"`, no session or agent
+  component), so long-term memory is recalled across sessions, agents and
+  workflows. The store is writable with **server-side extraction** and
+  `InvocationTrigger` (extract after every invocation, so a new fact is
+  recallable quickly); `MemoryManager`'s search tool + passive `<memory>`
+  injection are on (`add_tool_config` stays off — `AgentCoreMemoryStore` has no
+  `add`). One managed resource per deployment (`aws_bedrockagentcore_memory`
+  with `SEMANTIC` `/users/{actorId}/facts/` and `USER_PREFERENCE`
+  `/users/{actorId}/preferences/` strategies) and its id is injected as
+  `AGENTCORE_MEMORY_ID`. `config.memory.enabled` is legacy and ignored: memory is
+  a **workspace setting** (`memoryEnabled`, default on) toggled on the Memory
+  page. `AGENT_MEMORY_BACKEND=dynamo` selects the in-app `DynamoMemoryStore`
+  (`USER#<userId>` / `MEM#<memId>` items + S3 Vectors `status="memory"`) and
+  exists **only** for local dev/tests; a deployed runtime always uses the managed
+  service, and a missing `AGENTCORE_MEMORY_ID` raises (the run loop degrades to
+  no-memory instead of failing the run).
+- **Memory page + erase APIs** (`/v1/memory`, in `user-api` via
+  `core/memory.py`): the **Memory** page (sidebar **Resources**, route `/memory`)
+  lists, searches, deletes individual records and erases all memory; the toggle
+  writes the workspace setting. `core/memory.py` uses **raw boto3** (no
+  `bedrock_agentcore` SDK dependency in `user-api`):
+  `list_memory_records`/`retrieve_memory_records`, `delete_memory_record`,
+  `batch_delete_memory_records` + `list_sessions`/`list_events`/`delete_event`
+  for a full erase. Every call is namespaced `/users/<userId>/`, so a user can
+  only ever read/erase their own memory. DPDP: `/v1/user/export` includes the
+  user's memory, and account erasure (`/v1/user/account`) clears it
+  (`memoryErased`).
 - **Every tool call is governed by AgentCore Policy** (`core/policy.py`,
   `agentflow/memory.build_guard`). The engine id is a managed
   `aws_bedrockagentcore_policy_engine` injected as `AGENT_POLICY_ENGINE`; both the

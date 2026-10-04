@@ -161,6 +161,10 @@ ROUTES = {
         ("GET", "/v1/guardrails/{name}"),
         ("PUT", "/v1/guardrails/{name}"),
         ("DELETE", "/v1/guardrails/{name}"),
+        ("GET", "/v1/memory"),
+        ("PUT", "/v1/memory/config"),
+        ("DELETE", "/v1/memory"),
+        ("DELETE", "/v1/memory/records/{id}"),
         ("GET", "/v1/agents/{id}/runs"),
         ("GET", "/v1/workflows"),
         ("POST", "/v1/workflows"),
@@ -972,6 +976,11 @@ def main() -> int:
             "CUSTOM_TOOLS_GENERATE_ASYNC_TIMEOUT_SECONDS", "240"
         ),
         "USER_API_FUNCTION_NAME": FUNCTIONS["user_api"],
+        # User memory: the local fallback store (DynamoDB + S3 Vectors). The
+        # managed AgentCore Memory is not emulated by Floci.
+        "MEMORY_BACKEND": os.environ.get("MEMORY_BACKEND", "dynamo"),
+        "AGENT_MEMORY_BACKEND": os.environ.get("AGENT_MEMORY_BACKEND", "dynamo"),
+        "AGENTCORE_MEMORY_ID": os.environ.get("AGENTCORE_MEMORY_ID", ""),
         # Vault: encrypt per-user secrets, and allow testing a local provider
         # (e.g. Ollama at http://localhost:11434) under Floci only.
         "VAULT_KMS_KEY_ARN": vault_kms_key_arn,

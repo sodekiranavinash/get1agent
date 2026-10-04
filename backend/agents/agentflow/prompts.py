@@ -70,8 +70,20 @@ _HITL_ASK_INSTRUCTION = (
 _HITL_ASSUME_INSTRUCTION = (
     "HUMAN-IN-THE-LOOP: the user has enabled auto-approve, so do not ask "
     "questions. When a choice is missing, make the most sensible assumption "
-    "yourself and state it briefly. Facts must still come from tool results, "
-    "never from your own memory."
+    "yourself and state it briefly. Facts must still come from tool results or "
+    "the injected <memory> block, never from your own training knowledge."
+)
+
+# Injected by the Strands MemoryManager as a <memory> block before each model
+# call. This is the user's own long-term context, not training knowledge, so it
+# is allowed to answer personal questions directly.
+_USER_MEMORY_INSTRUCTION = (
+    "USER MEMORY (long-term): a `<memory>` block may be injected with durable "
+    "facts, preferences and past decisions about this user. Treat it as the "
+    "user's own context. Answer personal questions (\"what is my favorite "
+    "color?\", \"what did we decide?\") directly from it, without a tool call, "
+    "and let it shape your answer. Only use what the block actually contains — "
+    "never invent memories. Do not cite the memory block as a source."
 )
 
 
@@ -79,6 +91,7 @@ def build_system_prompt(
     config: dict[str, Any],
     skills: list[dict[str, Any]],
     human_in_loop: bool | None = None,
+    memory_enabled: bool = False,
 ) -> str:
     parts: list[str] = []
 
@@ -120,11 +133,16 @@ def build_system_prompt(
         "facts, and never present anything as fact that no tool returned. Every "
         "factual sentence or bullet MUST carry the bracketed `index` of the tool "
         "source it came from, e.g. [1] or [1][3]. If the tools did not return the "
-        "answer, reply that you could not find it in the available sources — do "
-        "NOT answer from memory. Call only tools that actually exist; never invent "
+        "answer, reply that you could not find it in the available sources rather "
+        "than answering from your own training knowledge. (The injected `<memory>` "
+        "block about the user, when present, is the user's own context and may be "
+        "used.) Call only tools that actually exist; never invent "
         "a tool name. Never fabricate sources, source names or citation markers. "
         "The only exception is a bare greeting or sign-off, which needs no tool."
     )
+
+    if memory_enabled:
+        parts.append(_USER_MEMORY_INSTRUCTION)
 
     if skills:
         # Skills themselves are loaded by the Strands AgentSkills plugin via

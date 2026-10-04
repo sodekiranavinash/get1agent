@@ -974,12 +974,6 @@ export function AgentNodeDialog({
               onChange={(rerank) => patch({ rerank })}
               hint="Re-score the fused results with the rerank model before returning them. Improves ordering; adds latency and cost."
             />
-            <LineToggle
-              label="Remember the user"
-              checked={Boolean(data.memoryEnabled)}
-              onChange={(memoryEnabled) => patch({ memoryEnabled })}
-              hint="Persist durable facts and preferences across sessions in AgentCore Memory, shared by this user's agents."
-            />
           </>
         )
       }

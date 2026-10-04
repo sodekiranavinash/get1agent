@@ -66,6 +66,7 @@ def update_settings(
     timezone: str | None = None,
     guardrail_id: str | None = None,
     guardrail_version: str | None = None,
+    memory_enabled: bool | None = None,
 ) -> None:
     updates: list[str] = []
     names: dict[str, str] = {}
@@ -83,6 +84,9 @@ def update_settings(
     if guardrail_version is not None:
         updates.append("guardrailVersion = :grver")
         values[":grver"] = guardrail_version
+    if memory_enabled is not None:
+        updates.append("memoryEnabled = :mem")
+        values[":mem"] = bool(memory_enabled)
     if not updates:
         return
     updates.append("updatedAt = :updated")

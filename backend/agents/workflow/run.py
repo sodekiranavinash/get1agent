@@ -141,6 +141,8 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
     result_usage: dict[str, Any] = {}
     spend_model = ""
     sinks: list[str] = []
+    managers: list[Any] = []
+    memory_on = False
 
     try:
         config = load_config()
@@ -150,10 +152,11 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
             raise ValueError("workflowId is required")
 
         # Deterministic tool-call policy (AgentCore Policy), shared by every node.
-        from agentflow.memory import build_guard
+        from agentflow.memory import build_guard, memory_enabled as memory_is_enabled
         from core import policy
 
         guard = build_guard(policy.build_evaluator())
+        memory_on = memory_is_enabled(user_id)
 
         workflow = load_workflow(user_id, workflow_id)
         workflow_config = workflow.get("config") or {}
@@ -208,6 +211,8 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
             human_in_loop or bool(resume_responses),
             guard,
             allow_new_questions=not bool(resume_responses),
+            memory=memory_on,
+            managers=managers,
         )
         if not any(node["role"] == "agent" for node in nodes):
             raise ValueError("This workflow has no runnable agents")
@@ -406,4 +411,10 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
                 )
         except Exception:  # noqa: BLE001 - accounting never breaks a run
             pass
+        # Persist any buffered memory writes from every node's manager.
+        for manager in managers:
+            try:
+                await manager.flush()
+            except Exception:  # noqa: BLE001 - memory never changes the outcome
+                pass
         flush()

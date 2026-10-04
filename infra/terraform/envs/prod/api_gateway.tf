@@ -510,6 +510,34 @@ module "api_gateway" {
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
+    memory_list = {
+      method               = "GET"
+      path                 = "/v1/memory"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    memory_config = {
+      method               = "PUT"
+      path                 = "/v1/memory/config"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    memory_erase = {
+      method               = "DELETE"
+      path                 = "/v1/memory"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    memory_record_delete = {
+      method               = "DELETE"
+      path                 = "/v1/memory/records/{id}"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
     security_reports_list = {
       method               = "GET"
       path                 = "/v1/security/reports"

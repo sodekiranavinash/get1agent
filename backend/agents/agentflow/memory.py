@@ -1,13 +1,17 @@
-"""Custom Strands ``MemoryStore`` backed by DynamoDB + S3 Vectors + Bedrock.
+"""User memory for the agent runtime.
 
-Retained only as the store used by **local development and tests** (`AGENT_MEMORY_BACKEND=dynamo`).
-Every deployed environment uses the managed **AgentCore Memory** service through
-:func:`build_memory_manager`.
+**One user-scoped store, shared by every agent and workflow.** Long-term memory
+lives under ``/users/<userId>/`` (facts + preferences + past decisions), never
+under a session or agent id, so what the user tells one agent is recalled in
+chat, the agent builder, workflows and scheduled runs.
 
-Memory text lives in small DynamoDB items (``USER#<userId>`` /
-``MEM#<agentId>#<memId>``); the embeddings (Amazon Titan) live in the per-user
-vector index under ``status="memory"`` so they never leak into knowledge-base
-search (which filters ``status="ready"``).
+The deployed backend is the managed **AgentCore Memory** service through
+:func:`build_memory_manager`; ``AGENT_MEMORY_BACKEND=dynamo`` selects the in-app
+:class:`DynamoMemoryStore` used by local development and tests (the Floci stack
+sets it). Text lives in small DynamoDB items (``USER#<userId>`` /
+``MEM#<memId>``) and the embeddings (Amazon Titan) live in the per-user vector
+index under ``status="memory"`` so they never leak into knowledge-base search
+(which filters ``status="ready"``).
 """
 
 from __future__ import annotations
@@ -17,10 +21,11 @@ import json
 import uuid
 from typing import Any, Callable
 
+from core import memory as core_memory
 from core.storage import Storage
 from data.client import now_iso, table
 from data.keys import user_pk
-from retrieval.embedding.config import load_config
+from retrieval.embedding.config import load_config as load_embed_config
 from retrieval.embedding.embeddings import embed_texts
 from retrieval.s3_vectors import VectorRecord, vector_store
 
@@ -29,8 +34,8 @@ from agentflow.config import RuntimeConfig
 _MEM_PREFIX = "MEM#"
 
 
-def _mem_sk(agent_id: str, mem_id: str) -> str:
-    return f"{_MEM_PREFIX}{agent_id}#{mem_id}"
+def _mem_sk(mem_id: str) -> str:
+    return f"{_MEM_PREFIX}{mem_id}"
 
 
 def _entry(content: str, metadata: dict[str, Any], store_name: str) -> Any:
@@ -52,13 +57,16 @@ def _entry(content: str, metadata: dict[str, Any], store_name: str) -> Any:
 
 
 class DynamoMemoryStore:
-    """Per-user, per-agent durable memory."""
+    """Per-user durable memory (local development + tests).
 
-    def __init__(self, user_id: str, agent_id: str) -> None:
+    Mirrors the deployed AgentCore store's user scope: records are not scoped by
+    agent, so any agent/workflow of the same user recalls them.
+    """
+
+    def __init__(self, user_id: str) -> None:
         self._user_id = user_id
-        self._agent_id = agent_id
         self.name = "user_memory"
-        self.description = "Durable facts and preferences about the user."
+        self.description = "Durable facts, preferences and past decisions about the user."
         self.max_search_results = 5
         self.writable = True
         self.extraction = False
@@ -67,7 +75,7 @@ class DynamoMemoryStore:
         return vector_store(Storage())
 
     def _embed(self, text: str, input_type: str) -> list[float]:
-        vectors = embed_texts([text], load_config(), input_type=input_type)
+        vectors = embed_texts([text], load_embed_config(), input_type=input_type)
         return vectors[0] if vectors else []
 
     async def search(
@@ -83,7 +91,7 @@ class DynamoMemoryStore:
             self._user_id,
             vector,
             self.max_search_results,
-            filters={"status": "memory", "agentId": self._agent_id},
+            filters={"status": "memory"},
         )
         entries: list[Any] = []
         for match in matches:
@@ -108,11 +116,7 @@ class DynamoMemoryStore:
                     VectorRecord(
                         key=f"mem#{mem_id}",
                         vector=vector,
-                        filterable={
-                            "status": "memory",
-                            "agentId": self._agent_id,
-                            "memId": mem_id,
-                        },
+                        filterable={"status": "memory", "memId": mem_id},
                         non_filterable={"text": content, "kind": "memory"},
                     )
                 ],
@@ -120,10 +124,9 @@ class DynamoMemoryStore:
         table().put_item(
             Item={
                 "pk": user_pk(self._user_id),
-                "sk": _mem_sk(self._agent_id, mem_id),
+                "sk": _mem_sk(mem_id),
                 "entity": "agentMemory",
                 "memId": mem_id,
-                "agentId": self._agent_id,
                 "userId": self._user_id,
                 "content": content,
                 "metadata": metadata or {},
@@ -133,21 +136,35 @@ class DynamoMemoryStore:
         return mem_id
 
 
-def build_memory_manager(
-    config: RuntimeConfig, user_id: str, agent_id: str, session_id: str
-) -> Any:
+def _extraction_config() -> Any:
+    """Extract after every invocation so a fact is recallable immediately.
+
+    The default Strands cadence is every 5 turns, which makes "remember this"
+    feel broken; the extra ``create_event`` calls are the cost of immediacy.
+    """
+    try:
+        from strands.memory import ExtractionConfig
+        from strands.memory.extraction.triggers import InvocationTrigger
+
+        return ExtractionConfig(trigger=[InvocationTrigger()])
+    except Exception:  # noqa: BLE001 - fall back to the SDK default cadence
+        return True
+
+
+def build_memory_manager(config: RuntimeConfig, user_id: str, *, session_id: str) -> Any:
     """Build the Strands ``MemoryManager`` for this run.
 
     **AgentCore Memory is the only production backend.** ``AGENT_MEMORY_BACKEND=dynamo``
     selects the in-app :class:`DynamoMemoryStore`, but that path exists solely for
     local development and tests — a deployed runtime always uses the managed
-    service, and a failure there is a hard error rather than a silent fallback.
+    service, and a missing ``AGENTCORE_MEMORY_ID`` is a hard error here (the run
+    loop degrades gracefully around it).
     """
     from strands.memory import MemoryManager
 
-    if config.memory_backend == "dynamo":
+    if config.memory_backend == core_memory.MEMORY_DYNAMO:
         return MemoryManager(
-            stores=[DynamoMemoryStore(user_id, agent_id)], add_tool_config=True
+            stores=[DynamoMemoryStore(user_id)], add_tool_config=True
         )
 
     if not config.memory_id:
@@ -159,20 +176,68 @@ def build_memory_manager(
         AgentCoreMemoryStore,
     )
 
-    # The user is the actor, so long-term memories are shared across that user's
-    # agents; the agent id scopes the namespace so two agents do not blend facts.
+    # The user is the actor and the namespace is user-scoped (no session/agent
+    # component), so every agent and workflow of this user shares one memory and
+    # recall works across sessions. The read target must match the strategy
+    # namespace templates provisioned in Terraform (`/users/{actorId}/...`).
     store = AgentCoreMemoryStore(
         memory_id=config.memory_id,
         actor_id=user_id,
         session_id=session_id,
-        namespace=f"/users/{user_id}/agents/{agent_id}",
+        namespace_path="/users/{actorId}/",
         name="user_memory",
-        description="Durable facts and preferences about the user.",
-        region_name=config.bedrock_region,
+        description="Durable facts, preferences and past decisions about the user.",
+        region_name=core_memory.region(),
         writable=True,
-        extraction=True,
+        extraction=_extraction_config(),
+        max_search_results=5,
     )
-    return MemoryManager(stores=[store], add_tool_config=True)
+    # ``add_tool_config`` stays off: ``AgentCoreMemoryStore`` has ``add_messages``
+    # (server-side extraction) but no ``add``, so enabling the add tool raises.
+    # The search tool and passive memory injection are on by default.
+    return MemoryManager(stores=[store])
+
+
+def memory_enabled(user_id: str) -> bool:
+    """Whether memory is on for this user (workspace default: on)."""
+    return core_memory.memory_enabled(user_id)
+
+
+def build_forget_tool(user_id: str) -> Any:
+    """A Strands tool that lets the user erase a memory by asking the agent."""
+    from strands import tool
+
+    def forget_memory(query: str) -> str:
+        """Forget a stored memory about the user.
+
+        Use when the user asks you to forget or delete something you remember
+        about them. Searches the user's memory for the best match and permanently
+        removes it.
+
+        Args:
+            query: What to forget, described in natural language.
+
+        Returns:
+            A JSON summary with the number of memories removed.
+        """
+        text = (query or "").strip()
+        if not text:
+            return json.dumps({"deleted": 0, "message": "query is required"})
+        try:
+            found = core_memory.list_records(user_id, limit=5, query=text)
+            records = found.get("records") or []
+            if not records:
+                return json.dumps({"deleted": 0, "message": "no matching memory"})
+            target = records[0]
+            namespace = (target.get("namespaces") or [core_memory.user_namespace(user_id)])[0]
+            core_memory.delete_record(user_id, str(target.get("id") or ""), namespace)
+            return json.dumps(
+                {"deleted": 1, "memory": str(target.get("text") or "")[:200]}
+            )
+        except Exception as exc:  # noqa: BLE001 - surface the failure to the model
+            return json.dumps({"deleted": 0, "error": str(exc)})
+
+    return tool(forget_memory)
 
 
 def build_guard(checker: Any) -> Callable[[str, dict[str, Any]], tuple[bool, str]]:

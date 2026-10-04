@@ -4,6 +4,7 @@ import {
   BookOpen,
   BookText,
   Bot,
+  Brain,
   CalendarClock,
   ClipboardCheck,
   CreditCard,
@@ -127,6 +128,12 @@ export const sidebarLinks: SidebarLink[] = [
     to: '/guardrails',
     label: 'Guardrails',
     icon: ShieldCheck,
+    section: 'resources',
+  },
+  {
+    to: '/memory',
+    label: 'Memory',
+    icon: Brain,
     section: 'resources',
   },
 

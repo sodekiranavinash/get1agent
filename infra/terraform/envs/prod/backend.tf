@@ -130,6 +130,37 @@ resource "aws_iam_role_policy" "user_api_trace_read" {
   })
 }
 
+# user-api owns the Memory page and the DPDP export/erasure: it lists, searches
+# and deletes the caller's own AgentCore Memory records (data plane) and reads
+# the resource (control plane). Records are always scoped to the caller's
+# `/users/<userId>/` namespace.
+resource "aws_iam_role_policy" "user_api_memory" {
+  count = var.enable_backend_lambdas ? 1 : 0
+  name  = "get1agent-prod-user-api-memory"
+  role  = module.user_api[0].role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "UserMemory"
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:ListMemoryRecords",
+        "bedrock-agentcore:RetrieveMemoryRecords",
+        "bedrock-agentcore:GetMemoryRecord",
+        "bedrock-agentcore:DeleteMemoryRecord",
+        "bedrock-agentcore:BatchDeleteMemoryRecords",
+        "bedrock-agentcore:ListActors",
+        "bedrock-agentcore:ListSessions",
+        "bedrock-agentcore:ListEvents",
+        "bedrock-agentcore:DeleteEvent",
+        "bedrock-agentcore-control:GetMemory",
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
 resource "aws_bedrockagentcore_gateway" "agents" {
   count           = var.enable_backend_lambdas ? 1 : 0
   name            = "get1agent-prod-gateway"
@@ -601,7 +632,11 @@ resource "aws_bedrockagentcore_evaluator" "skill_adherence" {
 
 # --- AgentCore Memory + Policy (phases A1/A2) --------------------------------
 # One memory resource per deployment, shared by every user/agent (the user id is
-# the actor and the agent id scopes the namespace). Created only when enabled.
+# the actor). Long-term memory is USER-scoped: the namespace has no session or
+# agent component, so a fact told in one conversation is recalled in every
+# later conversation, by every agent and workflow of that user. The runtime must
+# query the same template — `agentflow/memory.py` uses
+# `namespace_path="/users/{actorId}/"` to read all of a user's records.
 
 resource "aws_bedrockagentcore_memory" "agents" {
   count                 = var.enable_backend_lambdas ? 1 : 0
@@ -615,7 +650,15 @@ resource "aws_bedrockagentcore_memory_strategy" "semantic" {
   memory_id           = aws_bedrockagentcore_memory.agents[0].id
   name                = "semantic"
   type                = "SEMANTIC"
-  namespace_templates = ["/users/{actorId}/agents/{sessionId}"]
+  namespace_templates = ["/users/{actorId}/facts/"]
+}
+
+resource "aws_bedrockagentcore_memory_strategy" "preferences" {
+  count               = length(aws_bedrockagentcore_memory.agents)
+  memory_id           = aws_bedrockagentcore_memory.agents[0].id
+  name                = "preferences"
+  type                = "USER_PREFERENCE"
+  namespace_templates = ["/users/{actorId}/preferences/"]
 }
 
 resource "aws_bedrockagentcore_policy_engine" "agents" {
@@ -842,6 +885,10 @@ module "user_api" {
     EMBED_DIM         = "1024"
     EMBED_IMAGES      = "false"
     BEDROCK_REGION    = var.aws_region
+    # AgentCore Memory: the Memory page lists/searches/erases the user's own
+    # records; the DPDP export/erasure also reads and clears them.
+    AGENTCORE_MEMORY_ID     = local.agentcore_memory_id
+    AGENTCORE_MEMORY_REGION = var.aws_region
     # Custom-tools (Playground): run tests + generate tool code.
     CUSTOM_TOOLS_FUNCTION        = module.custom_tools[0].function_name
     CUSTOM_TOOLS_GENERATOR_MODEL = "zai.glm-4.7-flash"

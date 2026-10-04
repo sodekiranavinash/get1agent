@@ -154,8 +154,12 @@ export type AgentConfig = {
   knowledgeRerank: boolean
   skillIds: string[]
   servers: AgentServerSelection[]
-  /** Cross-session user memory. */
-  memory: AgentMemory
+  /**
+   * Legacy per-agent memory flag. Memory is user-scoped and controlled by the
+   * workspace setting on the Memory page; this field is retained for old configs
+   * but is no longer read by the runtime or written by the builder.
+   */
+  memory?: AgentMemory
   /** Bedrock guardrail applied to this agent's model calls. */
   guardrail: AgentGuardrail
   schedule: AgentSchedule
@@ -608,7 +612,6 @@ export function defaultNodeData(kind: AgentNodeKind): AgentNodeData {
         model: DEFAULT_AGENT_MODEL,
         reasoning: 'low',
         answerMode: DEFAULT_AGENT_ANSWER_MODE,
-        memoryEnabled: false,
         guardrailEnabled: true,
         guardrailId: '',
       }
@@ -780,7 +783,6 @@ export function graphFromConfig(config: AgentConfig): AgentGraph {
             providerSecretId: config.providerSecretId ?? '',
             reasoning: config.reasoning,
             answerMode: resolveAnswerMode(config.answerMode),
-            memoryEnabled: config.memory?.enabled ?? false,
             guardrailEnabled: config.guardrail?.enabled ?? true,
             guardrailId: config.guardrail?.id ?? '',
           },
@@ -865,7 +867,6 @@ export function configFromGraph(
     knowledgeRerank: knowledge?.data.rerank ?? false,
     skillIds: skills?.data.skillIds ?? [],
     servers: tools?.data.servers ?? [],
-    memory: { enabled: agent?.data.memoryEnabled ?? false },
     guardrail: {
       enabled: agent?.data.guardrailEnabled ?? true,
       id: agent?.data.guardrailId ?? '',
