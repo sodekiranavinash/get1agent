@@ -62,6 +62,13 @@ export const sidebarLinks: SidebarLink[] = [
   },
   { to: '/chat', label: 'Chat', icon: MessageSquare, section: 'home' },
   { to: '/storage', label: 'Storage', icon: HardDrive, section: 'home' },
+  {
+    to: '/scheduled-jobs',
+    label: 'Schedules',
+    tooltip: 'Scheduled Jobs',
+    icon: CalendarClock,
+    section: 'home',
+  },
 
   {
     to: '/agent-builder',
@@ -73,13 +80,6 @@ export const sidebarLinks: SidebarLink[] = [
     to: '/workflow-builder',
     label: 'Workflow builder',
     icon: Workflow,
-    section: 'build',
-  },
-  {
-    to: '/scheduled-jobs',
-    label: 'Schedules',
-    tooltip: 'Scheduled Jobs',
-    icon: CalendarClock,
     section: 'build',
   },
   {
