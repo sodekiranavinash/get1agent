@@ -1,12 +1,17 @@
 # Retrieval Sources & Citations
 
 Design reference for the retrieval (query) path: how a search result cites the
-document and page it came from, and how the UI opens the original file without
-ever exposing an S3 URL.
+document and page it came from, and how the UI opens the original file.
 
-Status: **design — not implemented.** Page capture (the prerequisite) is
-implemented; see "What ships now".
-Last updated: 2026-09-13.
+> **Status: historical design rationale (shipped).** Retrieval now runs inside
+> `knowledge-mcp` as hybrid **semantic (S3 Vectors) + BM25 (S3 postings)** search
+> fused with RRF, with small-to-big parent hydration and opt-in Bedrock Rerank —
+> see [`AGENTS.md`](../../AGENTS.md) → "Retrieval & MCP tools". The Postgres/pgvector SQL and
+> migration references below describe the earlier design and are kept for context;
+> sources are returned with the parent `content`, the matched child
+> `matchedContent`, a `snippet` and presigned download links resolved by
+> `user-api`. `AGENTS.md` is authoritative.
+> Last updated: 2026-09-13 (pre-migration).
 
 ---
 
@@ -28,7 +33,7 @@ network tab.
 
 ## 2. What ships now (page capture)
 
-Retrieval is not built yet, but the data it needs is now captured at ingestion.
+Retrieval now ships in `knowledge-mcp`; the page data it needs is captured at ingestion.
 
 ### Text chunks
 
@@ -207,10 +212,11 @@ role is simpler and keeps credentials out of the URL entirely.
 
 ## 8. References
 
-- Ingestion rationale: `design/ingestion-logic.md`.
-- Pipeline stages: each `backend/services/ingestion-*` Lambda (`handler.py` + `src/`).
+- Ingestion rationale: `docs/design/ingestion-logic.md`.
+- Pipeline stages: each `backend/services/ingestion/ingestion-*` Lambda (`handler.py` + `src/`).
 - Page-aware chunker: `backend/packages/ingestion/chunking.py`.
 - Page extraction: `backend/packages/ingestion/extractors.py`.
 - Embedding config/clients: `backend/packages/retrieval/embedding/`.
-- Schema: `backend/migrations/versions/0003_ingestion.py`,
-  `backend/migrations/versions/0005_chunk_pages.py`.
+- Semantic store: `backend/packages/retrieval/s3_vectors.py` (S3 Vectors) with a
+  local brute-force fallback (`VECTOR_STORE=local`).
+- Current architecture: [`AGENTS.md`](../../AGENTS.md) → "Retrieval & MCP tools".

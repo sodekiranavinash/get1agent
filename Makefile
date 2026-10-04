@@ -17,11 +17,13 @@ LOCAL_EMBED_MODEL ?= mxbai-embed-large
 
 # Local cross-encoder reranker (TEI). TEI's CPU image is amd64; Apple Silicon
 # runs it under Rosetta. Override RERANKER_IMAGE to pin a different tag.
+# RERANKER_IMAGE / RERANKER_PORT come from .env (via `--env-file`); these are
+# only fallbacks for the make targets themselves (do not export — that would
+# override .env for docker compose).
 RERANKER_IMAGE ?= ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
 RERANKER_PORT ?= 8080
-export RERANKER_IMAGE RERANKER_PORT
 
-.PHONY: help ui agent test test-unit floci floci-env floci-artifacts floci-build floci-up floci-wait \
+.PHONY: help ui architecture agent test test-unit floci floci-env floci-artifacts floci-build floci-up floci-wait \
 	floci-embed floci-rerank floci-reload floci-down floci-logs floci-oauth-proxy
 
 help:
@@ -31,7 +33,8 @@ help:
 	@echo "                        provision S3/SQS/EventBridge/Step Functions/Lambda"
 	@echo "                        + API Gateway, and print the local API URL"
 	@echo "  make ui               Start the React app (localhost:5173)"
-	@echo "  make agent            Run the agent runtime locally (:8080)"
+	@echo "  make agent            (Re)build + start the local agent container (:8090)"
+	@echo "  make architecture     Regenerate the README architecture diagrams"
 	@echo "  make test             Run backend integration tests (no Docker; moto)"
 	@echo ""
 	@echo "  Floci stack:"
@@ -47,11 +50,19 @@ help:
 ui:
 	cd frontend && npm run dev
 
+# Regenerate the README architecture diagrams (docs/assets/*.svg + *.png) from
+# the app's own diagram spec + layout engine.
+architecture:
+	cd frontend && npm run gen:architecture
+
 # Run the AgentCore agent runtime locally on :8080 against the local Floci stack.
 # Installs the venv on first run; loads the repo-root .env for the OpenCode Go key.
-agent:
-	@test -x backend/agents/.venv/bin/python || $(MAKE) -C backend/agents install
-	$(MAKE) -C backend/agents run
+# The agent runtime runs continuously as the `agent` service in the Floci stack
+# (started by `make floci`; rebuilt by `make floci-reload`). This target just
+# (re)builds + starts that container — the old host-run `make agent` is gone.
+agent: floci-env
+	@eval "$$(aws configure export-credentials --format env 2>/dev/null)" 2>/dev/null || true; \
+	$(COMPOSE) up -d --build agent
 
 # Backend integration tests: moto-backed DynamoDB + in-memory S3. No Docker/AWS.
 test:
@@ -60,7 +71,7 @@ test:
 # Per-lambda unit tests (stdlib unittest in each app's tests/ dir). No-op for
 # apps that don't have any yet.
 test-unit:
-	@for app in backend/services/*; do \
+	@for app in $$(find backend/services -maxdepth 3 -name Makefile -exec dirname {} \; | sort); do \
 		[ -f "$$app/Makefile" ] || continue; \
 		$(MAKE) -C "$$app" test || exit 1; \
 	done
@@ -71,85 +82,189 @@ floci-env:
 	@test -f .env || cp infra/local/floci/env.example .env
 
 floci-build:
-	bash infra/aws/build-backend-layers.sh base,genai,extra-tools
-	$(MAKE) -C backend/services/user-api package
-	$(MAKE) -C backend/services/knowledge-mcp package
-	$(MAKE) -C backend/services/mcp-tester package
-	$(MAKE) -C backend/services/web-search package
-	$(MAKE) -C backend/services/code-interpreter package
-	$(MAKE) -C backend/services/http-fetch package
-	$(MAKE) -C backend/services/custom-tools package
-	$(MAKE) -C backend/services/mcp-connections package
-	$(MAKE) -C backend/services/ingestion-dispatcher package
-	$(MAKE) -C backend/services/ingestion-extract package
-	$(MAKE) -C backend/services/ingestion-embed package
-	$(MAKE) -C backend/services/ingestion-index package
-	$(MAKE) -C backend/services/ingestion-mark-failed package
-	$(MAKE) -C backend/services/ingestion-watchdog package
+	@echo "Building all Lambda packages in parallel..."
+	$(MAKE) -j 8 floci-build-parallel
 
-# Build only if any artifact is missing (fast first run).
+# Direct parallel build using make -j
+floci-build-parallel: \
+	floci-build-user-api \
+	floci-build-knowledge-mcp \
+	floci-build-mcp-tester \
+	floci-build-code-interpreter \
+	floci-build-http-fetch \
+	floci-build-custom-tools \
+	floci-build-mcp-connections \
+	floci-build-ingestion-dispatcher \
+	floci-build-ingestion-extract \
+	floci-build-ingestion-embed \
+	floci-build-ingestion-index \
+	floci-build-ingestion-mark-failed \
+	floci-build-ingestion-watchdog \
+	floci-build-scheduler \
+	floci-build-browser
+
+# Individual build targets
+floci-build-user-api:
+	$(MAKE) -C backend/services/apis/user-api package
+
+floci-build-knowledge-mcp:
+	$(MAKE) -C backend/services/mcp/knowledge-mcp package
+
+floci-build-mcp-tester:
+	$(MAKE) -C backend/services/admin/mcp-tester package
+
+floci-build-code-interpreter:
+	$(MAKE) -C backend/services/mcp/code-interpreter package
+
+floci-build-http-fetch:
+	$(MAKE) -C backend/services/mcp/http-fetch package
+
+floci-build-custom-tools:
+	$(MAKE) -C backend/services/mcp/custom-tools package
+
+floci-build-mcp-connections:
+	$(MAKE) -C backend/services/mcp/mcp-connections package
+
+floci-build-ingestion-dispatcher:
+	$(MAKE) -C backend/services/ingestion/ingestion-dispatcher package
+
+floci-build-ingestion-extract:
+	$(MAKE) -C backend/services/ingestion/ingestion-extract package
+
+floci-build-ingestion-embed:
+	$(MAKE) -C backend/services/ingestion/ingestion-embed package
+
+floci-build-ingestion-index:
+	$(MAKE) -C backend/services/ingestion/ingestion-index package
+
+floci-build-ingestion-mark-failed:
+	$(MAKE) -C backend/services/ingestion/ingestion-mark-failed package
+
+floci-build-ingestion-watchdog:
+	$(MAKE) -C backend/services/ingestion/ingestion-watchdog package
+
+floci-build-scheduler:
+	$(MAKE) -C backend/services/scheduler package
+
+floci-build-browser:
+	$(MAKE) -C backend/services/mcp/browser package
+
+# Check and rebuild only Lambdas that have changed key files
+floci-rebuild-changed:
+	@echo "Quick check for Lambda changes..."
+	@for dir in $$(find backend/services -maxdepth 3 -name Makefile -exec dirname {} \; | sort); do \
+		if [ -f "$$dir/Makefile" ]; then \
+			name=$$(basename "$$dir"); \
+			package_path="$$dir/dist/function.zip"; \
+			if [ ! -f "$$package_path" ]; then \
+				echo "🔄 Rebuilding $$name (missing package)..."; \
+				($(MAKE) -C "$$dir" package >/dev/null 2>&1 && echo "✅ Rebuilt $$name" || echo "❌ Failed to rebuild $$name") & \
+			elif [ "$$dir/Makefile" -nt "$$package_path" ] || [ -f "$$dir/handler.py" -a "$$dir/handler.py" -nt "$$package_path" ] || [ -f "$$dir/pyproject.toml" -a "$$dir/pyproject.toml" -nt "$$package_path" ]; then \
+				echo "🔄 Rebuilding $$name (key files changed)..."; \
+				($(MAKE) -C "$$dir" package >/dev/null 2>&1 && echo "✅ Rebuilt $$name" || echo "❌ Failed to rebuild $$name") & \
+			fi; \
+		fi; \
+	done; \
+	wait
+
+
+
+# Check if all Lambda artifacts exist
 floci-artifacts:
 	@missing=0; \
-	for f in backend/services/dependency-layers/base/dist/layer.zip \
-		backend/services/dependency-layers/genai/dist/layer.zip \
-		backend/services/dependency-layers/extra-tools/dist/layer.zip \
-		backend/services/user-api/dist/function.zip \
-		backend/services/knowledge-mcp/dist/function.zip \
-		backend/services/mcp-tester/dist/function.zip \
-		backend/services/web-search/dist/function.zip \
-		backend/services/code-interpreter/dist/function.zip \
-		backend/services/http-fetch/dist/function.zip \
-		backend/services/custom-tools/dist/function.zip \
-		backend/services/mcp-connections/dist/function.zip \
-		backend/services/ingestion-dispatcher/dist/function.zip \
-		backend/services/ingestion-extract/dist/function.zip \
-		backend/services/ingestion-embed/dist/function.zip \
-		backend/services/ingestion-index/dist/function.zip \
-		backend/services/ingestion-mark-failed/dist/function.zip \
-		backend/services/ingestion-watchdog/dist/function.zip; do \
+	for f in backend/services/apis/user-api/dist/function.zip \
+		backend/services/mcp/knowledge-mcp/dist/function.zip \
+		backend/services/admin/mcp-tester/dist/function.zip \
+		backend/services/mcp/code-interpreter/dist/function.zip \
+		backend/services/mcp/http-fetch/dist/function.zip \
+		backend/services/mcp/custom-tools/dist/function.zip \
+		backend/services/mcp/mcp-connections/dist/function.zip \
+		backend/services/ingestion/ingestion-dispatcher/dist/function.zip \
+		backend/services/ingestion/ingestion-extract/dist/function.zip \
+		backend/services/ingestion/ingestion-embed/dist/function.zip \
+		backend/services/ingestion/ingestion-index/dist/function.zip \
+		backend/services/ingestion/ingestion-mark-failed/dist/function.zip \
+		backend/services/ingestion/ingestion-watchdog/dist/function.zip \
+		backend/services/scheduler/dist/function.zip \
+		backend/services/mcp/browser/dist/function.zip; do \
 		[ -f "$$f" ] || missing=1; \
 	done; \
 	if [ "$$missing" = "1" ]; then \
-		echo "Lambda artifacts missing; building..."; \
-		$(MAKE) floci-build; \
+		echo "Lambda artifacts missing (quick incremental build)..."; \
+		$(MAKE) floci-rebuild-changed; \
 	else \
-		echo "Lambda artifacts present (run 'make floci-build' after code changes)"; \
+		echo "✓ All Lambda artifacts present (run 'make floci-reload' after code changes)"; \
 	fi
 
 floci-up: floci-env
+	@# Forward real AWS credentials from the host chain (env, ~/.aws, SSO) to the
+	@# Floci container so non-emulated services (Bedrock) work locally. Skipped
+	@# silently when the AWS CLI is unavailable or logged out (emulator default).
+	@eval "$$(aws configure export-credentials --format env 2>/dev/null)" 2>/dev/null || true; \
 	$(COMPOSE) up -d
 
 floci-wait:
 	bash infra/local/floci/wait.sh
 
-# After changing Lambda code: rebuild the zips and re-upload them to the running
-# Floci instance (re-runs the init hook in place; keeps S3/DynamoDB state).
+# After changing Lambda **or agent** code: rebuild only changed Lambdas,
+# rebuild + restart the agent container, and re-run the init hook in place.
 floci-reload: floci-env
-	$(MAKE) floci-build
-	$(COMPOSE) exec -T floci python3 /etc/floci/init/ready.d/10-provision.py
+	@touch .floci-last-rebuild-timestamp
+	$(MAKE) floci-rebuild-changed
+	@eval "$$(aws configure export-credentials --format env 2>/dev/null)" 2>/dev/null || true; \
+	# Only rebuild agent if agent code changed
+	if [ "agents/main.py" -nt ".floci-agent-last-built" ] || \
+	   [ "agents/agentflow/" -nt ".floci-agent-last-built" ] || \
+	   [ "agents/workflow/" -nt ".floci-agent-last-built" ] || \
+	   [ "backend/agents/Dockerfile" -nt ".floci-agent-last-built" ] || \
+	   [ ! -f ".floci-agent-last-built" ]; then \
+		echo "🔄 Agent code changed, rebuilding agent container..."; \
+		$(COMPOSE) up -d --build agent; \
+		touch ".floci-agent-last-built"; \
+	else \
+		echo "✓ Agent unchanged, restarting only..."; \
+		$(COMPOSE) up -d agent; \
+	fi
+	# Check if any Lambda ZIP files were rebuilt (newer than timestamp)
+	@lambda_updated=0; \
+	for dir in $$(find backend/services -maxdepth 3 -name Makefile -exec dirname {} \; | sort); do \
+		zip_file="$$dir/dist/function.zip"; \
+		if [ -f "$$zip_file" ] && [ "$$zip_file" -nt ".floci-last-rebuild-timestamp" ]; then \
+			lambda_updated=1; \
+			break; \
+		fi; \
+	done; \
+	if [ $$lambda_updated -eq 1 ]; then \
+		echo "🔄 Some Lambdas were rebuilt, running provision script..."; \
+		$(COMPOSE) exec -T floci python3 /etc/floci/init/ready.d/10-provision.py; \
+	else \
+		echo "✓ No Lambdas rebuilt, skipping provision script"; \
+	fi
 
 # Pull the local embedding model (only needed for EMBED_MODE=local).
 floci-embed: floci-env
 	@mode=$$(grep -E '^EMBED_MODE=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
+	model=$$(grep -E '^LOCAL_EMBED_MODEL=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
 	if [ "$${mode:-voyage}" != "local" ]; then \
 		echo "EMBED_MODE=$${mode:-voyage}; skipping Ollama (not needed)."; \
 	else \
 		$(COMPOSE) --profile local-embeddings up -d ollama; \
 		echo "waiting for ollama..."; \
 		until $(COMPOSE) --profile local-embeddings exec -T ollama ollama list >/dev/null 2>&1; do sleep 2; done; \
-		$(COMPOSE) --profile local-embeddings exec -T ollama ollama pull $(LOCAL_EMBED_MODEL); \
+		$(COMPOSE) --profile local-embeddings exec -T ollama ollama pull $${model:-$(LOCAL_EMBED_MODEL)}; \
 	fi
 
 # Wait for the local reranker (only needed for RERANK_MODE=local).
 floci-rerank: floci-env
 	@mode=$$(grep -E '^RERANK_MODE=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
+	rport=$$(grep -E '^RERANKER_PORT=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
 	if [ "$${mode:-voyage}" != "local" ]; then \
 		echo "RERANK_MODE=$${mode:-voyage}; skipping local reranker (not needed)."; \
 	else \
 		$(COMPOSE) --profile local-rerank up -d reranker; \
 		echo "waiting for reranker (first run downloads the model)..."; \
-		until curl -fsS "http://localhost:$(RERANKER_PORT)/health" >/dev/null 2>&1; do sleep 3; done; \
-		echo "reranker ready on http://localhost:$(RERANKER_PORT)"; \
+		until curl -fsS "http://localhost:$${rport:-$(RERANKER_PORT)}/health" >/dev/null 2>&1; do sleep 3; done; \
+		echo "reranker ready on http://localhost:$${rport:-$(RERANKER_PORT)}"; \
 	fi
 
 floci-down: floci-env

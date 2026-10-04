@@ -1,13 +1,17 @@
 # Ingestion Logic
 
 Design reference for the document ingestion pipeline:
-**PDF → pages → markdown → chunks → embeddings → pgvector**, with idempotent
+**PDF → pages → markdown → chunks → embeddings → index**, with idempotent
 re-ingestion when a document is re-uploaded with new content.
 
-Status: implemented — see `AGENTS.md` → "Document ingestion" for the shipped
-architecture (S3 → EventBridge → SQS → Step Functions **Express** → worker).
-This file remains the design rationale.
-Last updated: 2026-09-12.
+> **Status: historical design rationale.** The shipped pipeline is the 3-stage
+> **S3 → EventBridge → SQS → Step Functions (Standard) → extract → embed → index**
+> design described in [`AGENTS.md`](../../AGENTS.md) → "Document ingestion". The
+> pgvector/pgvector-on-RDS schema and migration snippets below describe the earlier
+> Postgres design and are kept only to explain the rationale; the live stores are
+> **S3 Vectors** (embeddings) and **S3 objects** (BM25 postings, parents,
+> manifests). `AGENTS.md` is authoritative.
+> Last updated: 2026-09-12 (pre-migration).
 
 ---
 
@@ -157,8 +161,8 @@ CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops);
 | embeddings | `text-embedding-3-small` | $0.02 / 1M tokens, best price/quality |
 | vector DB | **pgvector on existing RDS** | zero new infra |
 
-Alternative embeddings if cost-sensitive: `voyage-3-lite`, or self-hosted
-`bge-small` / `all-MiniLM` (free API, pay compute only).
+Embeddings run on **Amazon Bedrock Titan Text Embeddings V2** (1024-d, in-region);
+locally, Ollama `mxbai-embed-large` is the offline fallback.
 
 ---
 
@@ -179,20 +183,23 @@ Alternative embeddings if cost-sensitive: `voyage-3-lite`, or self-hosted
 
 ---
 
-## 7. Alignment with this repo
+## 7. Alignment with this repo (current)
 
-- Lambdas live in `backend/services/<name>/<module>/handler.py`, registered in
-  `backend/services/registry.json`, runtime `python3.14`, shared `data` layer.
-- New schema changes go through `backend/migrations/versions/` and
-  `bash infra/scripts/migrate.sh up`.
-- Local testing via `make` targets / `infra/local/` scripts only — never invoke
-  Lambdas through AWS or Docker locally.
-- Step Functions definition and S3/EventBridge resources belong in
-  `infra/terraform/`.
+- Lambdas live in `backend/services/<category>/<name>/` with `handler.py` at the
+  app root and code in `src/`, registered in `backend/registry.json`, runtime
+  `python3.14`, shared `backend/packages/` bundled per app.
+- The shipped pipeline is **3 stages** (`extract+chunk → embed → index`) under
+  Step Functions **Standard**; the schema is DynamoDB + S3 Vectors + S3 objects
+  (no RDS/migrations).
+- Local testing via `make floci-*` targets only.
+- The Step Functions definition and S3/EventBridge resources live in
+  `infra/terraform/modules/ingestion/`.
 
-### Open questions
+### Historical open questions (resolved)
 
-- Which embedding provider / model do we standardize on?
-- Chunking strategy and target chunk size / overlap?
-- Do we need OCR (scanned PDFs) in v1, or text-layer PDFs only?
-- Retention: keep raw files in S3 indefinitely, or expire after ingestion?
+- Embedding provider/model: **Amazon Bedrock Titan Text Embeddings V2** (1024-d),
+  Ollama `mxbai-embed-large` locally.
+- Chunking: **512-token children with 64 overlap**, parents per PDF page (or a
+  fixed window).
+- OCR: text-layer PDFs plus extracted images; image embeddings are opt-in and not
+  yet searched.

@@ -10,9 +10,13 @@ Edit this file freely — opencode loads it automatically as project context.
 ```
 frontend/              React + TypeScript + Tailwind (Vite)
 backend/
-  services/            Lambda apps (user-api, knowledge-mcp, mcp-tester, ingestion-*,
-                       web-search, code-interpreter, custom-tools)
-  services/dependency-layers/   third-party Lambda layers (base, genai, extra-tools, ml)
+  services/            Lambda apps, grouped by category (see below)
+  services/apis/       user-api
+  services/admin/      mcp-tester
+  services/mcp/        knowledge-mcp, code-interpreter, http-fetch, browser, custom-tools, mcp-connections
+  services/ingestion/  ingestion-{dispatcher,extract,embed,index,mark-failed,watchdog}
+  services/scheduler/  scheduled agent/workflow runs
+  services/agent-run/  AgentCore control-plane Lambda + MicroVM proxy
   services/integration-tests/   moto + in-memory S3 integration tests
   agents/              AgentCore runtime (agentflow: single-agent; workflow: multi-agent)
   packages/            shared modules: core, data, retrieval, ingestion
@@ -21,30 +25,37 @@ infra/                 Terraform, deploy scripts, local Floci stack
 
 ## Current status
 
-- Bedrock access is not enabled yet. Embeddings and rerank run on **Voyage AI**
-  (`EMBED_MODE=voyage` / `RERANK_MODE=voyage`, the defaults everywhere, including
-  prod) — do not block on Bedrock. The `bedrock` paths are kept dormant for
-  later.
+- The platform is **fully AWS-native on 10+ AWS services**: embeddings, rerank,
+  every LLM call, the agent platform, tracing and caching all run on AWS. The AI
+  layer is **Amazon Bedrock** (Titan embeddings + multimodal, Bedrock Rerank, the
+  curated models, Guardrails, prompt caching, structured outputs, batch inference)
+  and **AgentCore** (Runtime, Code Interpreter, Memory, Policy, Gateway, Identity,
+  Registry, Evaluations, Optimization, Browser). Web search is **Amazon Bedrock
+  Web Search** (the gateway's built-in `web-search` connector, no model access
+  required), so the only deliberate non-AWS dependencies are **Auth0** (identity)
+  and **Cloudflare** (DNS/CDN). Model ids, quotas and the account's Bedrock limits are documented
+  under "Agent runtime"; the cost/latency levers under "Bedrock cost & latency
+  levers".
 
 ## Architecture
 
-The backend is **serverless with no VPC and no RDS**:
+The backend is **fully serverless**: managed AWS services, scaled automatically
+and billed per request.
 
 - **DynamoDB** (single table `get1agent`) holds all operational data.
 - **S3 Vectors** holds the semantic (embedding) index; **S3 objects** hold the
   keyword (BM25) index, parents, manifests and staged artifacts.
-- **No Lambda joins a VPC.** Everything reaches DynamoDB, S3, S3 Vectors and
-  Voyage AI over public endpoints.
-- The frontend talks to API Gateway only; never directly to DynamoDB or S3
-  (uploads use presigned URLs).
+- Every Lambda reaches DynamoDB, S3, S3 Vectors and Amazon Bedrock over public
+  HTTPS endpoints.
+- The frontend talks to API Gateway only; uploads use presigned S3 URLs.
 
-### Lambda code layout — package vs dependency layer
+### Lambda code layout — bundled dependencies (no layers)
 
 Deployables live under `backend/services/` (all Lambda apps, including the
 `web-search`/`code-interpreter` MCP servers) and `backend/agents/`. Shared
 application code lives once in **`backend/packages/`** as four top-level modules
 (`core`, `data`, `retrieval`, `ingestion`) and is **bundled into each Lambda's
-zip** (never in a layer):
+zip**. **Third-party dependencies are also bundled per Lambda** (no Lambda layers):
 
 ```
 packages/core/       core       auth, mcp_server, mcp_client, storage, json_utils, logging
@@ -54,20 +65,24 @@ packages/ingestion/  ingestion  pipeline, chunking, extractors, actions
 ```
 
 Each app keeps its Lambda entry point as `handler.py` at the app root and the
-rest of its code in `src/`; the `Makefile` copies `handler.py`, `src/` and the
-shared modules it uses to the zip root and zips it. **Dependency layers carry
-only third-party dependencies** — never `core`/`data`/`retrieval`/`ingestion`:
+rest of its code in `src/`; the `Makefile` copies `handler.py`, `src/`, the
+shared modules it uses, **and all third-party dependencies** to the zip root and zips it.
 
-| Layer | Contents | Attached to |
-|---|---|---|
-| `base` | `tzdata`, `python-dateutil` | user-api, knowledge-mcp, web-search, code-interpreter, custom-tools |
-| `genai` | `awslabs.mcp-lambda-handler` (future: strands, AI SDKs) | knowledge-mcp, web-search, code-interpreter, custom-tools |
-| `extra-tools` | `pymupdf`, `python-docx`, `openpyxl` | ingestion-extract |
-| `ml` | *(future)* torch/transformers/… | *(future)* |
+**Dependencies are defined per Lambda in `pyproject.toml`** and installed via `uv sync` at build time:
+
+| Lambda | Key Dependencies |
+|---|---|
+| `user-api` | `python-dateutil`, `tzdata` |
+| `knowledge-mcp`, `code-interpreter`, `http-fetch`, `custom-tools`, `mcp-connections`, `browser` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata` |
+| `ingestion-extract` | `pymupdf`, `python-docx`, `openpyxl`, `python-dateutil`, `tzdata` |
+| `mcp-tester`, `scheduler` | `python-dateutil`, `tzdata` |
+| Other ingestion Lambdas | None (lightweight) |
+
+**No Lambda layers** — simpler deployment, easier local development.
 
 App-local code stays in the app's `src/` package: `src.skills`,
-`src.search` (hybrid-search orchestration), `src.service`/`src.exa`, and
-`src.guard`/`src.sessions`. Layer membership and per-app packages are
+`src.search` (hybrid-search orchestration), `src.service`/`src.bedrock`
+(Bedrock Web Search client), and `src.guard`/`src.sessions`. Layer membership and per-app packages are
 declared in `backend/registry.json`; `agents/` is AgentCore runtime and is
 excluded from the Lambda build.
 
@@ -83,6 +98,7 @@ chunks or postings in DynamoDB.
 | Settings | `USER#<userId>` | `#SETTINGS` | — |
 | Notification prefs | `USER#<userId>` | `#NOTIF` | — |
 | Quota counters | `USER#<userId>` | `#QUOTA` | — |
+| Consent | `USER#<userId>` | `#CONSENT` | — |
 | Knowledge base | `USER#<userId>` | `KB#<name>` | `byId`; `byUser` (`KB#<updatedAt>#<name>`) |
 | Document | `KB#<kbId>` | `DOC#<lowerFileName>` | `byId`; `byStatus` (`DOCSTATUS#<status>`) |
 | Tag | `DOC#<docId>` | `TAG#<lowerName>` | `byUser` (`TAG#<lowerName>#<docId>`) |
@@ -106,6 +122,7 @@ chunks or postings in DynamoDB.
 | Support ticket | `USER#<userId>` | `SUPPORT#<ticketId>` | `byStatus` (`SUPPORT#all`) |
 | Support message | `SUPPORT#<ticketId>` | `MSG#<createdAt>#<seq>` | — |
 | Security report | `USER#<userId>` | `SREPORT#<reportId>` | `byStatus` (`SREPORT#all`) |
+| Notification | `USER#<userId>` | `NOTIF#<id>` | — (TTL 90d) |
 
 - **GSI1 `byId`** resolves a KB/document/skill/agent/workflow by UUID.
 - **GSI2 `byUser`** lists a user's KBs/skills/agents/workflows/tags by prefix.
@@ -183,7 +200,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   → `ingestion-mark-failed`). Each stage is its own Lambda.
 - **3 stages**: `ingestion-extract` downloads + parses + **chunks** (writes
   `derived/` + `chunks.json`); `ingestion-embed` reads `chunks.json`, calls
-  Voyage (or Ollama locally), writes `embeddings.json`; `ingestion-index` writes
+  Titan on Bedrock (or Ollama locally), writes `embeddings.json`; `ingestion-index` writes
   vectors (S3 Vectors / local), parent objects, term postings, catalog, stats and
   the manifest, then sets `documents.status=ready`.
 - The pipeline lives in the `ingestion` package
@@ -191,14 +208,14 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   `ingestion-*` Lambda is a thin handler that calls one stage action. Embedding
   config/clients live in `retrieval.embedding`. Heavy extractor deps
   (`pymupdf`, `python-docx`, `openpyxl`) ship in the `extra-tools` layer.
-- Embeddings: selected by `EMBED_MODE` — **Voyage AI** (`voyage`, the default
-  everywhere: `VOYAGE_TEXT_MODEL` default `voyage-4-large`,
-  `VOYAGE_MULTIMODAL_MODEL` default `voyage-multimodal-3.5`, key in
-  `VOYAGE_API_KEY`). Voyage embeds text and images (`/embeddings` +
-  `/multimodalembeddings`, batched, `input_type` `document` for ingestion and
-  `query` at search time). Ollama `mxbai-embed-large` (`local`) is the offline
-  fallback; **Titan** (`bedrock`) is dormant until Bedrock access is added. Image
-  embeddings are computed but not searched.
+- Embeddings: selected by `EMBED_MODE` — **`bedrock`** (the default everywhere;
+  Amazon **Titan Text Embeddings V2** for text and **Titan Multimodal
+  Embeddings G1** for images). Ollama `mxbai-embed-large` (`local`) is the
+  offline fallback used by Floci and tests. Image embeddings are **opt-in**
+  (`EMBED_IMAGES=false` by default) because they are computed but not searched
+  and Titan Multimodal is rate-limited to 20 RPM. Embedding calls are admitted
+  through `core.ratelimit_bedrock` (global per-model token bucket) before hitting
+  Bedrock.
 - Ingestion config (embedding model + chunk size/overlap) is **per knowledge
   base**, set at creation (`knowledge_bases` columns); the page-level "Workspace
   defaults" card only pre-fills the create dialog.
@@ -238,21 +255,21 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - Default child size is **512 tokens** with 64 overlap (config default in
   `packages/retrieval/.../embedding/config.py`), so children fit every embedder window.
 - **Rerank is opt-in** (`rerank: true`) and never runs unless requested.
-  `RERANK_MODE=voyage` (the default) calls the Voyage rerank API
-  (`VOYAGE_RERANK_MODEL` default `rerank-3`); `RERANK_MODE=local` calls a
-  HuggingFace TEI cross-encoder (`reranker` container, `POST /rerank`);
-  `RERANK_MODE=bedrock` uses Bedrock Rerank (`amazon.rerank-v1:0`, `us-west-2`)
-  once Bedrock access is added; `none` skips it. If the reranker is unreachable
-  the RRF order is returned instead of failing.
+  `RERANK_MODE=bedrock` (the default) calls **Bedrock Rerank**
+  (`amazon.rerank-v1:0` in `us-west-2` — it is not offered in ap-south-1, so the
+  call is cross-region); `RERANK_MODE=local` calls a HuggingFace TEI cross-encoder
+  (`reranker` container, `POST /rerank`); `none` skips it. If the reranker is
+  unreachable the RRF order is returned instead of failing.
 - **Identity is passed in the event** (`userId`, the internal UUID) for direct
   invokes, or resolved from the JWT `sub` for HTTP (via the `SUB#<sub>` item).
 - **Each MCP server is its own Lambda** (`awslabs.mcp-lambda-handler`,
   stateless) exposing its tools over its own `POST /mcp…` route behind the Auth0
   JWT authorizer, plus the direct Lambda invoke transport. `knowledge-mcp` owns
-  the knowledge tools (`POST /mcp`), `web-search` owns `web-search`
-  (`POST /mcp/web-search`), `code-interpreter` owns `code-interpreter`
+  the knowledge tools (`POST /mcp`), `code-interpreter` owns `code-interpreter`
   (`POST /mcp/code-interpreter`) and `http-fetch` owns `http-fetch`,
   `list-storage-files` and `read-storage-file` (`POST /mcp/http-fetch`).
+  `web-search` is **not** a Lambda: it is the AgentCore Gateway's built-in
+  `web-search` connector (see "Web search tool").
 - Knowledge base names follow **S3-bucket-style rules** (lowercase letters,
   digits and hyphens; 3–63 chars; must start/end alphanumeric) and are unique
   per user (`uq_knowledge_bases_user_name`); the create handler returns `409` on
@@ -262,37 +279,36 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 ### Caching (embeddings + knowledge search)
 
 - A best-effort cache lives in **`core.cache`**
-  (`backend/packages/core/cache.py`), default backend **Upstash Redis over
-  REST** (`CACHE_BACKEND=redis`, `UPSTASH_REDIS_REST_URL`,
-  `UPSTASH_REDIS_REST_TOKEN`) — no VPC, no connection pool, stdlib `urllib`.
-  Missing credentials (or `CACHE_BACKEND=none`) makes every call a no-op, and all
-  operations swallow errors so the cache can never break a request. Keys are
+  (`backend/packages/core/cache.py`). Default backend **`dynamodb`**: one item
+  per entry in the shared table (`pk=CACHE#<prefix><kind>`, `sk=<sha256>`, TTL
+  `expiresAt`), read with `BatchGetItem` and written with a `batch_writer`.
+  `CACHE_BACKEND=none` disables it. Every call is a no-op when unavailable and
+  all operations swallow errors, so the cache can never break a request. Keys are
   `g1a:<kind>:<sha256(parts)>`; per-kind TTLs come from
   `CACHE_<KIND>_TTL_SECONDS` (`CACHE_SEARCH_TTL_SECONDS` 300,
   `CACHE_EMBEDDING_TTL_SECONDS` 2592000).
 - It is used on the **normal request path only** — never in the Labs:
   - `retrieval.embedding.embeddings.embed_texts` caches vectors keyed by
-    `(embed_mode, model, input_type, text)`; embeddings are deterministic, cached
-    vectors are read/written in batches, and only misses hit
-    Voyage/Ollama/Bedrock.
+    `(embed_mode, model, text)`; embeddings are deterministic, cached vectors are
+    read/written in batches, and only misses hit Bedrock Titan / Ollama.
   - `knowledge-mcp` caches the whole search payload keyed by
     `(userId, query, kbNames, tags, rerank, topK, maxPerDocument)` so a repeated
     question skips embed + search + rerank (per-user scope; short TTL).
   - **Semantic cache** (`core.semantic_cache`): a near-duplicate query reuses the
-    cached search payload. It uses **Upstash Vector** (a separate serverless
-    vector DB — Upstash Redis has no RediSearch vector search) as the ANN index,
-    in a **namespace per user**, and stores the payload in the vector's raw
-    `data` field with `expiresAt` + a hard `kb` filter in metadata. A hit
+    cached search payload. It uses the platform **S3 Vectors** store (one index
+    per user — the same store as the knowledge index) as the ANN index; entries
+    carry `kind="semcache"` so they never surface in knowledge search, and the
+    payload lives in a DynamoDB TTL cache item referenced by the vector key. A hit
     requires cosine score ≥ `SEMANTIC_CACHE_THRESHOLD` (0.95), a non-expired
     entry, and the same knowledge-base set. Flow in `knowledge-mcp._search`:
     exact cache → embed → semantic lookup → real search → store exact + semantic.
-    Env: `UPSTASH_VECTOR_REST_URL`/`UPSTASH_VECTOR_REST_TOKEN`,
-    `SEMANTIC_CACHE_ENABLED`, `SEMANTIC_CACHE_THRESHOLD`,
+    Env: `SEMANTIC_CACHE_ENABLED`, `SEMANTIC_CACHE_THRESHOLD`,
     `SEMANTIC_CACHE_TTL_SECONDS` (600), `SEMANTIC_CACHE_MAX_BYTES` (200000).
-    Stale vectors are ignored via `expiresAt` (Upstash Vector has no native TTL).
-- **Single-flight** (`core.singleflight`, same Upstash REST client, fails open):
-  the knowledge search path is wrapped in a **`SET NX` lock** so N concurrent
-  identical requests compute once and the rest wait for the cached result. This
+    Stale vectors are ignored via `expiresAt`.
+- **Single-flight** (`core.singleflight`, reuses the configured cache backend — a
+  DynamoDB conditional `PutItem` in production — and fails open): the knowledge
+  search path is wrapped in a lock so N concurrent identical requests compute
+  once and the rest wait for the cached result. This
   is cost deduplication — **not** rate limiting (rate limiting lives at the API
   Gateway). Env: `SINGLE_FLIGHT_ENABLED` (default true),
   `SINGLE_FLIGHT_LOCK_SECONDS` (20), `SINGLE_FLIGHT_WAIT_SECONDS` (6).
@@ -307,7 +323,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 
 ### Code interpreter tool
 
-- `code-interpreter` (`backend/services/code-interpreter/`) is its own MCP server
+- `code-interpreter` (`backend/services/mcp/code-interpreter/`) is its own MCP server
   Lambda (`POST /mcp/code-interpreter`) owning the `code-interpreter` tool. It
   runs LLM-generated Python in **Bedrock AgentCore Code Interpreter** sandboxes
   (`aws.codeinterpreter.v1`, available in `ap-south-1`). It is **outside the
@@ -336,26 +352,28 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 
 ### Web search tool
 
-- `web-search` (`backend/services/web-search/`) is its own MCP server Lambda
-  (`POST /mcp/web-search`) owning the `web-search` tool. It calls the **Exa
-  Search API** (`POST https://api.exa.ai/search`). It is **outside the VPC** and
-  ships no third-party HTTP client — a stdlib `urllib` client.
-- Token-aware defaults: `type=auto`, 5 results (cap 25), `maxAgeHours=24`, and
-  **highlights only** (~400 chars each) — full page text is opt-in via
-  `text=true`/`textMaxCharacters`. Every content budget is **hard-capped**
-  server-side: `textMaxCharacters` ≤ `MAX_TEXT_MAX_CHARACTERS` (8000), a bare
-  `text: true` defaults to `DEFAULT_TEXT_MAX_CHARACTERS` (4000),
-  `highlightsMaxCharacters` ≤ 2000 and `subpages` ≤ 20 — so a search can never
-  flood the agent's context (the runtime also caps tool results independently).
-  Deep types can return zero results; the tool retries once with `type=auto`.
-- Config: `EXA_API_KEY` (required), `EXA_API_BASE_URL`,
-  `WEB_SEARCH_TIMEOUT_SECONDS`, `WEB_SEARCH_MAX_RESULTS`. There is **no local
-  emulation branch** — Floci containers reach `api.exa.ai` directly using the
-  host `EXA_API_KEY`; set it in `.env`.
+- Web search is **Amazon Bedrock AgentCore Web Search** — a fully managed,
+  MCP-compliant **built-in connector** attached to the AgentCore Gateway. There
+  is **no web search Lambda** and **no model access** to request: the gateway
+  snapshots the connector's schema and exposes it as `web-search___WebSearch`
+  (`connectorId: "web-search"`, `target_configuration.mcp.connector`).
+- The gateway invokes the connector with **its own role**
+  (`bedrock-agentcore:InvokeWebSearch` on
+  `arn:aws:bedrock-agentcore:<region>:aws:tool/web-search.v1`); callers only need
+  `bedrock-agentcore:InvokeGateway`. The tool takes `query` (≤200 chars) and
+  `maxResults` (1–25), plus an optional `filters` domain denylist.
+- The agent runtime registers a single **`web-search`** Strands tool from
+  `WEB_SEARCH_GATEWAY_TOOL` (default `web-search___WebSearch`), maps
+  `maxResults`/`excludeDomains` onto the connector input and calls it through the
+  gateway (`MCP_TRANSPORT=gateway`). Source numbering and the chat source
+  carousel are unchanged (`results[]` → `_extract_sources`).
+- **No fallback:** the connector is only reachable through the gateway. With the
+  local `aggregator` transport (AgentCore Gateway is not emulated in Floci) the
+  `web-search` tool is simply not offered.
 
 ### HTTP fetch & storage access tool
 
-- `http-fetch` (`backend/services/http-fetch/`) is its own MCP server Lambda
+- `http-fetch` (`backend/services/mcp/http-fetch/`) is its own MCP server Lambda
   (`POST /mcp/http-fetch`, group `mcp-tools`) owning three tools:
   - **`http-fetch`** — fetch a public `http(s)` URL/API endpoint in **trusted
     code** (never the sandbox) and **save the response to the caller's S3
@@ -408,7 +426,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   persists in a **Playground session** (below); there is **no per-user
   deployment** of the tool itself.
 - The tool is served by the **`custom-tools`** MCP-server Lambda
-  (`backend/services/custom-tools/`, `POST /mcp/custom-tools`, group
+  (`backend/services/mcp/custom-tools/`, `POST /mcp/custom-tools`, group
   `mcp-tools`), which loads each user's tools from DynamoDB on every request and
   namespaces them `<serverSlug>/<toolName>` — the same per-request pattern as the
   remote aggregator.
@@ -447,8 +465,8 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   direct-invokes `custom-tools` (IAM-trusted, no API-Gateway 30s cap); the SPA
   never executes user code.
 - **AI generation**: `POST /v1/custom-tools/generate` (and the turn worker above)
-  makes one OpenCode Go `/chat/completions` call (`CUSTOM_TOOLS_GENERATOR_MODEL`,
-  default `deepseek-v4-flash-vision-exp`) returning `{name, description, code,
+  makes one **Amazon Bedrock (Converse)** call (`CUSTOM_TOOLS_GENERATOR_MODEL`,
+  default `zai.glm-4.7-flash`) returning `{name, description, code,
   inputSchema, outputSchema}`; the Playground re-sends the current code and last
   test error to iteratively refine it. The synchronous `/generate` route is
   capped at `CUSTOM_TOOLS_GENERATE_TIMEOUT_SECONDS` (25, under the gateway's
@@ -457,7 +475,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   (32000) must stay large: the model spends up to ~18k hidden reasoning tokens
   **before** the JSON, and a smaller budget is consumed entirely by reasoning
   (`finish_reason=length`, no tool). `CUSTOM_TOOLS_FUNCTION`,
-  `OPENCODE_API_KEY`/`OPENCODE_BASE_URL` and these knobs live on **user-api**
+  `CUSTOM_TOOLS_GENERATOR_MODEL` (a Bedrock model) and these knobs live on **user-api**
   (which owns the routes).
 - **Agents**: a custom server attaches as an agent `servers[]` entry with
   `source: "custom"` and `id: <slug>`; `agentflow.tools.build_tools` calls
@@ -644,7 +662,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   and advances `nextRunAt`; it also stamps the entity's `lastRunAt`. One schedule
   failing never blocks the others, and scheduled runs never set `humanInLoop`.
 - Env: `AGENT_RUN_FUNCTION`, `AGENT_SERVICE_CLIENT_ID` /
-  `AGENT_SERVICE_CLIENT_SECRET`, `AUTH0_AUDIENCE`, `AUTH0_TOKEN_URL`. Infra:
+  `AGENT_SERVICE_CLIENT_SECRET`, `AUTH_AUDIENCE`, `AUTH_TOKEN_URL`. Infra:
   `module "scheduler"` + the `get1agent-prod-scheduler` EventBridge rule in
   `infra/terraform/envs/prod/backend.tf`; Floci creates the function (rule off
   unless `ENABLE_LOCAL_SCHEDULER=true`, since AgentCore isn't emulated locally).
@@ -676,17 +694,17 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   ownership. The AgentCore session is hard-capped by `max_lifetime` (25 min);
   the MicroVM aborts the run at the same limit. Local dev streams directly from
   the local agent app (`VITE_AGENT_RUN_MICROVM=false`).
-- Models: **OpenCode Go** (`OPENCODE_API_KEY`, `OPENCODE_BASE_URL`), or a user's
-  **Vault provider** when the agent sets `config.providerSecretId` (the runtime
-  decrypts it and calls the user's base URL/key — see the Vault section). Most
-  models use the OpenAI-compatible `/chat/completions` via Strands `OpenAIModel`;
-  `gpt-5.6-luna` is served through the Responses API via Strands
-  `OpenAIResponsesModel` (see `RESPONSES_MODELS`). Go requires a descriptive user
-  agent and a stable `x-opencode-session` header on every request (sent by
-  `agentflow/models.py`). The builder dropdown offers six curated cheap/strong Go
-  models (see `AGENT_MODELS` / `SUPPORTED_AGENT_MODELS`): `mimo-v2.5`,
-  `glm-5.3-flash`, `qwen3.8-flash`, `deepseek-v4-flash-vision-exp`,
-  `gpt-5.6-luna`, `kimi-k2.6`.
+- Models: **Amazon Bedrock** by default — the runtime builds a Strands
+  `BedrockModel` (`agentflow/models.py`, SigV4, region `BEDROCK_REGION`) — or a
+  user's **Vault provider** when the agent sets `config.providerSecretId` (the
+  runtime decrypts it and calls the user's base URL/key via Strands `OpenAIModel`
+  — see the Vault section). The builder dropdown offers the curated models kept in
+  sync across `agentflow/models.py` (`SUPPORTED_MODELS`),
+  `user-api/handler.py` (`SUPPORTED_AGENT_MODELS`) and `frontend/src/lib/agents.ts`
+  (`AGENT_MODELS`): `zai.glm-4.7-flash`, `nvidia.nemotron-nano-3-30b`,
+  `deepseek.v3.2`, `qwen.qwen3-next-80b-a3b`, and
+  `global.amazon.nova-2-lite-v1:0` (1M-context, multimodal). Every model call is
+  admitted through `core.ratelimit_bedrock` (global per-model token bucket).
 - The runtime reads the **canonical `config`** (flat `prompt/model/reasoning/
   answerMode/input/output/knowledgeBaseIds/knowledgeRerank/skillIds/servers/memory`
   + `graph` for the UI)
@@ -738,14 +756,14 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   (`ingestion.extractors`) and folds that text into the execution input. Bytes
   never leave the runtime. The `attachments` frame tells the client which files
   were used. The agent container installs `pymupdf`/`python-docx`/`openpyxl`
-  (same set as the `extra-tools` Lambda layer). A run payload may override
+  (the same set bundled into the `ingestion-extract` app). A run payload may override
   `knowledgeBaseIds`/`skillIds`/`servers`/`fileIds` per run; an empty list means
   "none selected".
 - **Sessions** persist in S3 (`S3SessionManager`, prefix
   `agent-sessions/<userId>/<agentId>/`). **User memory** is a custom Strands
   `MemoryStore` (`src/memory.py`) over DynamoDB items (`USER#<userId>` /
   `MEM#<agentId>#<memId>`) + S3 Vectors (`status="memory"`, so it never leaks
-  into KB search) + Voyage embeddings.
+  into KB search) + Bedrock Titan embeddings.
 - **Context management.** Every run restores the conversation's message history
   from the session and passes the **full text history** (user/assistant turns,
   capped to the last `AGENT_PLANNER_HISTORY_TURNS` = 6 turns) to the planner so
@@ -881,43 +899,36 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   MicroVM + build role). Deploy with
   `bash infra/aws/deploy-agent-runtime.sh`: it creates the ECR repo, builds and
   pushes the ARM64 image, then applies the runtime with
-  `agent_worker_image_uri`. Needs the `OPENCODE_API_KEY` repo secret
-  (`TF_VAR_opencode_api_key`); the runtime/proxy are gated off until an image URI
-  is supplied.
-- **Tracing: Langfuse, not X-Ray.** The runtime's traces go to **Langfuse** over
-  OTLP. The Langfuse SDK owns the OpenTelemetry provider (`agentflow/observability.py`,
-  initialised in `main.py` *before* `BedrockAgentCoreApp()`), so Strands'
-  auto-instrumented spans (agent loop, generations, tool calls) attach to it;
-  `run_trace` in `run.py` wraps each run in one root observation enriched with
-  `user_id` (internal userId), `session_id` (conversationId), tags (agent/model)
-  and metadata, and flushes at the end. AgentCore's own ADOT exporter is turned
-  off with `DISABLE_ADOT_OBSERVABILITY=true` so spans are not double-exported.
-  Config is opt-in via `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY`/
-  `LANGFUSE_BASE_URL` (no-op without keys; `LANGFUSE_BASE_URL` must contain
-  "langfuse" so Strands emits Langfuse-friendly attributes), set from the
-  `TF_VAR_langfuse_*` repo secrets. Traces are **not sampled** — every run is
-  exported. The runtime's `XRay` IAM statement is unused once Langfuse is on.
-- **Trace links.** Each run marks its trace public and stores its `traceId` +
-  Langfuse `traceUrl` on the persisted turn (S3 transcript) and the conversation
-  item (`lastTraceId`/`lastTraceUrl`). The public flag is stamped on **every**
-  span by a custom OTEL span processor (`_install_public_processor`), because
-  Langfuse only honors `langfuse.trace.public` from the observation it ingests
-  first — our root ends last, so a child arriving before it would otherwise leave
-  the trace private (and its IO would render empty in the public view).
-  `user-api` never hands out the permanent public URL: it signs it into a
-  **30-minute expiring link** (`TRACE_LINK_SECRET`, HMAC-SHA256) returned as a
-  relative `traceUrl` on turns (`GET /v1/conversations/{id}`) and runs (`GET
-  /v1/agents/{id}/runs` → `lastTraceUrl`). The **unauthenticated** `GET
-  /v1/traces/{token}` route verifies the signature + expiry and 302-redirects to
-  the Langfuse trace (410 once expired). The chat shows a "View trace" link under
-  each answer and the builder History shows one per run.
+  `agent_worker_image_uri`; the runtime/proxy are gated off until an image URI is
+  supplied. The runtime reaches Amazon Bedrock with its task role (SigV4) — no
+  model API key is required.
+- **Tracing: OpenTelemetry → CloudWatch + X-Ray (AWS-native).** The runtime's
+  spans are plain **OpenTelemetry** (`agentflow/observability.py`): Strands'
+  auto-instrumentation (agent loop, generations, tool calls) and one root span per
+  run (`run_trace` in `run.py`) enriched with `user_id` (internal userId),
+  `session_id` (conversationId), tags (agent/model) and metadata. Export is owned
+  by the **AgentCore Runtime's ADOT collector** → CloudWatch (GenAI
+  observability) and X-Ray, so there is no observability vendor and no
+  credentials to configure (`AGENT_TRACING_ENABLED`, `OTEL_SERVICE_NAME`).
+  Every Lambda, Step Functions state machine and the API also run with X-Ray
+  `Active`, and CloudWatch **Transaction Search** ingests the runtime's spans
+  into the `aws/spans` log group.
+- **Trace links.** Each run stores its OpenTelemetry `traceId` on the persisted
+  turn (S3 transcript) and the conversation item (`lastTraceId`). `user-api` never
+  hands out a raw id: it signs it into a **30-minute expiring link**
+  (`TRACE_LINK_SECRET`, HMAC-SHA256) returned as a relative `traceUrl` on turns
+  (`GET /v1/conversations/{id}`) and runs (`GET /v1/agents/{id}/runs` →
+  `lastTraceUrl`). The **unauthenticated** `GET /v1/traces/{token}` route verifies
+  the signature + expiry and 302-redirects to the CloudWatch/X-Ray trace view
+  (410 once expired). The chat shows a "View trace" link under each answer and the
+  builder History shows one per run.
 - **Run feedback.** Every run can be rated (thumbs up/down) with an optional
   details dialog (predefined reasons per sentiment + free text). One small item
   per run (`USER#<userId>` / `FEEDBACK#<runId>`; `data/repositories/feedback.py`),
   addressed by the run id so it works identically in the chat and the builder
   History. `PUT /v1/feedback/{runId}` upserts (an empty `value` clears it), and
-  the API mirrors it to Langfuse as a `user-feedback` score on the run's trace
-  (best-effort, via `LANGFUSE_*`). Feedback is returned with conversation turns
+  the API emits it as a **CloudWatch EMF metric** (`get1agent/feedback`
+  namespace) alongside the DynamoDB item. Feedback is returned with conversation turns
   (`GET /v1/conversations/{id}`) and with builder runs (`GET
   /v1/agents/{id}/runs`); the chat shows thumbs under each answer and the builder
   History shows them beside each run.
@@ -969,11 +980,70 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   minimal shell when signed out). Admins in the admin view are redirected from
   `/support` → `/admin/support` and `/security` → `/admin/security-reports`.
 
+### Privacy & data rights (DPDP)
+
+- get1agent implements the **Digital Personal Data Protection Act, 2023** (India) as a data
+  fiduciary for account data and a data **processor** for user-uploaded content. The
+  user-facing surface is **Privacy & data rights** (`frontend/src/pages/DataRightsPage.tsx`, route
+  `/privacy/rights`); the notice is `PrivacyPage.tsx`, the processor list is `SubProcessorsPage.tsx`
+  (`/sub-processors`), and a first-login **ConsentGate**
+  (`frontend/src/components/privacy/ConsentGate.tsx`, mounted in `MainLayout`) records consent.
+- **Consent** is one item (`USER#<userId>` / `#CONSENT`; `data/repositories/consent.py`) holding the
+  notice `consentVersion`, the accepted `purposes`, `adultConfirmed`, `language`, `acceptedAt` and
+  `withdrawnAt`. Purposes are declared once in `consent.PURPOSES` (`required` = intrinsic to the
+  service). Consent is withdrawable as easily as it is given. Bump `CONSENT_VERSION` when the
+  notice changes materially.
+- **Routes** (in `user-api`, under `_route_user`, JWT + user view):
+  `GET/POST/DELETE /v1/user/consent`, `GET /v1/user/export` (right of access — a machine-readable
+  bundle with presigned download links; encrypted/token fields are stripped by `_public_item`),
+  `DELETE /v1/user/account` (right to erasure), and
+  `GET/POST /v1/user/grievances` (data-rights requests, stored as support tickets with
+  `kind="grievance"`).
+- **Erasure** (`_handle_user_account_delete`) deletes every `USER#<userId>` item plus the
+  `EVALRUN#<runId>` and `SUPPORT#<ticketId>` child partitions (`users.delete_user_data`), every S3
+  prefix for the user (`raw/`, `derived/`, `index/`, `storage/`, `conversations/`, `custom/`,
+  `playground/`, `evals/`, `mcp/`, `agent-sessions/`), the vector index
+  (`vector_store().delete_user`), the `SUB#<sub>` identity binding, and — best-effort, when
+  `AUTH_MGMT_*` is configured — the Auth0 identity. S3/Auth0 failures are logged and reported, never
+  block the DB erasure.
+- **Age (18+)**: the first-login ConsentGate asks if the user is 18+; choosing "under 18" hard-blocks
+  the app (non-dismissible, offers sign-out or account erasure) and `POST /v1/user/consent` rejects
+  anything without `adultConfirmed`. get1agent does not serve children. Grievance contact is
+  published (`PRIVACY_OFFICER_*`, `PRIVACY_RESPONSE_DAYS` env).
+- Engineering reference and operational runbooks: `docs/compliance/` (`DPDP.md`, `retention.md`,
+  `breach-response.md`, `data-requests.md`).
+
+### Notifications
+
+- **A real, per-user feed** — one small item per notification
+  (`USER#<userId>` / `NOTIF#<id>`, TTL 90 days) with `kind`, `title`, `detail`,
+  an optional in-app `link`, `read`, `createdAt`. Repository:
+  `data/repositories/notifications.py` (`create_notification`,
+  `list_notifications`, `unread_count`, `mark_read`, `mark_all_read`,
+  `delete_notification`); the feed is read with one base-table Query on
+  `USER#<userId>` + the `NOTIF#` prefix (never a Scan) and sorted newest-first.
+  Distinct from the `#NOTIF` notification-*preferences* item.
+- **Emitted from real events** (best-effort — never breaks the source path):
+  ingestion emits on a document reaching `ready`/`failed`
+  (`ingestion/pipeline.py:set_document_status`), and the scheduler emits on a
+  scheduled run finishing/failing (`scheduler/handler.py:_run_schedule`).
+- **Routes** (in `user-api`, JWT + user view): `GET /v1/notifications`,
+  `POST /v1/notifications/{id}/read`, `POST /v1/notifications/read-all`,
+  `DELETE /v1/notifications/{id}`.
+- **Frontend:** the TopBar bell (`components/layout/NotificationsMenu.tsx`)
+  shows a count badge, lists the feed, and **clicking a notification marks it
+  read** (and follows its `link`); there is a "Mark all read" action and a
+  per-item dismiss. The menu is hidden in the admin view (the routes are
+  user-view only). Client is `lib/notifications.ts` (query key `notifications`).
+- **Demo:** the read-only demo has canned notifications
+  (`lib/demo/notifications.ts`) and emulates mark-read / mark-all / dismiss
+  entirely client-side (in-memory), since the demo client rejects writes.
+
 ### Vault (encrypted user secrets)
 
 - The **Vault** (`frontend/src/pages/VaultPage.tsx`, route `/vault`, sidebar
   section `manage`) stores a user's secrets — OpenAI-compatible provider keys
-  (OpenAI/OpenCode/OpenRouter/Gemini/Groq/DeepSeek/Mistral/Together/xAI/
+  (OpenAI/OpenRouter/Gemini/Groq/DeepSeek/Mistral/Together/xAI/
   Fireworks/Perplexity/Ollama/`custom`), MCP API keys, or any generic
   token/connection string. CRUD lives in **`user-api`**; backend test client is
   `src/vault/tester.py`, presets are `src/vault/providers.py`. A **provider
@@ -1085,7 +1155,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   is used by both the agent and workflow runtimes, so cumulative tokens are
   never silently dropped. Cumulative stats surface on the **Usage** page
   (application budget + per-model rates from `GET /v1/user/settings`); the raw
-  per-trace view is Langfuse and is not shown in-app.
+  per-trace view is CloudWatch/X-Ray and is not shown in-app.
 
 ### Prompt Playground (trace replay)
 
@@ -1097,12 +1167,11 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   one has its messages and model lifted into an editable prompt. Edit any
   message, change model/temperature/max tokens, and **Run**.
 - `POST /v1/lab/playground/run` takes one prompt spec or a `runs[]` array (A/B
-  up to 4 models, executed in parallel) and makes one OpenCode Go
-  `/chat/completions` call per run (`src/evals/playground.py`), returning
+  up to 4 models, executed in parallel) and makes one **Amazon Bedrock
+  (Converse)** call per run (`src/evals/playground.py`), returning
   `{results: [{ok, model, output, usage, latencyMs}]}`; the UI shows the original
   trace output and each replay side by side. Models are limited to
-  `PLAYGROUND_MODELS` (chat-completions only; the Responses-API model is
-  excluded).
+  `PLAYGROUND_MODELS` (the curated Bedrock set).
 - `POST /v1/lab/playground/judge` scores a replay with the **same judges as the
   evaluator** (`judge_relevance`, plus `judge_correctness` with an optional
   reference and `judge_faithfulness`/`judge_context_relevance` when contexts are
@@ -1122,10 +1191,11 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   evaluations** against a golden dataset. Backend CRUD + the run worker live in
   **`user-api`** (`src/evals/`, `data/repositories/evals.py`); there is no
   separate Lambda.
-- **Datasets and their cases are Langfuse-native** (one item per case): a
-  dataset is a Langfuse dataset named `u_<userId>/<name>` (lowercase-hyphen,
-  ≤48 chars) and a case is a Langfuse dataset item with `input = {question}`,
-  optional `expectedOutput`, and `metadata.expectedSources`. A **run**
+- **Datasets and their cases are AWS-native** (one item per case, in the shared
+  DynamoDB table): a dataset is a `LAB#DATASETS` item named `u_<userId>/<name>`
+  (lowercase-hyphen, ≤48 chars) and a case is a `LAB#CASES` item with
+  `input = {question}`, optional `expectedOutput`, and
+  `metadata.expectedSources`. A **run**
   (`USER#<userId>` / `EVALRUN#<runId>`) only keeps the config + status +
   aggregate metrics for the UI; each **case result**
   (`EVALRUN#<runId>` / `CASE#<caseId>`) is tiny and the bulky artifact
@@ -1138,7 +1208,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - Routes: `GET/POST /v1/evals/datasets`, `GET/PUT/DELETE
   /v1/evals/datasets/{id}`, `GET/POST /v1/evals/datasets/{id}/cases`,
   `DELETE /v1/evals/datasets/{id}/cases/{caseId}`,
-  `GET /v1/evals/datasets/{id}/runs` (the Langfuse experiment runs that used the
+  `GET /v1/evals/datasets/{id}/runs` (the runs that used the
   dataset), `GET/POST /v1/evals/runs`,
   `GET/DELETE /v1/evals/runs/{id}`, `GET /v1/evals/runs/{id}/cases`,
   `GET /v1/evals/runs/{id}/cases/{caseId}`. `POST /v1/evals/runs` creates the run
@@ -1150,9 +1220,9 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   (`core.mcp_client`, identity in the payload) and a controlled generator
   answers from the retrieved `chunks[].content` (mode `rag`; `retrieval` skips
   generation). Retrieval and generation are scored **separately** (the
-  Ragas/Langfuse convention): deterministic `context_recall`,
+  Ragas convention): deterministic `context_recall`,
   `context_precision`, `hit_rate`, `mrr` when the case declares expected
-  sources; the LLM judge runs **in user-api** (not in Langfuse) with **one
+  sources; the LLM judge runs **in user-api** on Bedrock with **one
   focused call per metric** — Ragas-aligned `faithfulness` (the answer is
   decomposed into atomic claims; score = supported / total) and
   `context_relevance` (every retrieved passage labelled relevant; score =
@@ -1160,23 +1230,19 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   expected answer exists. The unsupported claims and passage labels are kept in
   the S3 artifact and shown in the run's case detail (explainability). Ground
   truth is **optional per case** — metrics light up only when their inputs are
-  present. Judges return strict JSON via OpenCode Go (`EVAL_ANSWER_MODEL` /
-  `EVAL_JUDGE_MODEL`, defaults `deepseek-v4-flash-vision-exp`); scores are then
-  pushed to Langfuse.
+  present. Judges return strict JSON via **Amazon Bedrock (Converse)**
+  (`EVAL_ANSWER_MODEL` / `EVAL_JUDGE_MODEL`, defaults `amazon.nova-2-lite-v1:0`);
+  each case's metrics are stored on its `CASE#<caseId>` result item.
 - A run stops persisting before the 300s Lambda timeout
   (`EVAL_RUN_BUDGET_SECONDS`, default 260) and marks remaining cases `skipped`.
   `user-api` now direct-invokes `knowledge-mcp`, so its role needs that
   `lambda:InvokeFunction` grant (`lambda_invoke_arns`).
-- **Runs are Langfuse experiments**: the background worker loads the dataset's
-  items from Langfuse and, per evaluated case, ingests one item trace via
-  **OTLP/HTTP** (`POST /api/public/otel/v1/traces`) carrying the documented
-  `langfuse.experiment.*` attributes (`experiment.id/name/dataset.id`,
-  `experiment.item.id/root_observation_id/expected_output`) plus the observation
-  input/output, then attaches the metric scores to that trace/observation
-  (`POST /api/public/scores`). Datasets, experiment runs, traces and scores
-  therefore all live in Langfuse; DynamoDB/S3 keep only the UI's run status,
-  per-case results and artifacts. Raw `urllib`, no `langfuse` package in
-  user-api; ingestion is best-effort (a Langfuse outage never fails a run).
+- **Runs persist to DynamoDB + S3**: the background worker loads the dataset's
+  cases from the Lab store and, per evaluated case, writes a tiny
+  `CASE#<caseId>` result item (metrics) plus one S3 artifact
+  (`evals/<userId>/<runId>/<caseId>.json`) holding the retrieved contexts,
+  generated answer and judge reasoning; the aggregate metrics live on the run
+  item. Everything is AWS-native — no external experiment service.
 - **Agent task (service auth).** A run's `config.task` is `rag` (default: the
   retrieval + answer pipeline) or `agent` (re-run a saved agent end to end).
   The agent task has no user JWT, so the worker authenticates as the **platform
@@ -1190,74 +1256,199 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   and trajectory metrics `tool_precision`/`tool_recall`/`tool_f1`/`tool_calls`
   when the item's metadata carries `expectedTools`. Knowledge bases are optional
   for agent runs. Env: `AGENT_RUN_FUNCTION`, `AGENT_SERVICE_CLIENT_ID` /
-  `AGENT_SERVICE_CLIENT_SECRET`, `AUTH0_AUDIENCE`, `AUTH0_TOKEN_URL` (defaults
-  to `https://<auth0_domain>/oauth/token`); the agent runtime gets
+  `AGENT_SERVICE_CLIENT_SECRET`, `AUTH_AUDIENCE`, `AUTH_TOKEN_URL` (defaults
+  to `https://<auth_domain>/oauth/token`); the agent runtime gets
   `SERVICE_AUTH_CLIENT_ID`. Auth0 setup: one Machine-to-Machine app authorised
   for the API audience, then set the TF vars.
 
-#### Langfuse-native curation (traces page, datasets, annotation queues)
+#### AWS-native curation (traces page, datasets, annotation queues)
 
-- The **curation** layer is Langfuse-native (option "one shared project, users
-  never see Langfuse"): `user-api` proxies the Langfuse public API under
-  **`/v1/lab/*`** using the same basic-auth helper as the score mirror. Every
-  dataset / annotation-queue / score-config name is namespaced
-  **`u_<userId>/<name>`**, and list endpoints filter to that prefix, so a user
-  can only ever read or write their own objects even though the project is
-  shared. Trace ids are Langfuse trace ids.
+- The **curation** layer is AWS-native: `user-api` serves **`/v1/lab/*`** from
+  `src/evals/store.py` (the **Lab store**), which keeps everything in the shared
+  `get1agent` DynamoDB table under `LAB#` partitions. Every dataset /
+  annotation-queue / score-config name is namespaced **`u_<userId>/<name>`**, so a
+  user can only ever read or write their own objects. Trace ids are the
+  OpenTelemetry trace ids exported to CloudWatch/X-Ray.
 - **Traces page** (`frontend/src/pages/TracesPage.tsx`, route `/traces`, sidebar
   `labs`) is the only place a trace can be **added to a dataset or an annotation
   queue** — there are no such actions on the chat, builder, or evaluations
-  screens. It lists the caller's traces (`GET /v1/lab/traces` →
-  `GET /api/public/v2/traces?userId=<userId>`, with our own `eval*` traces
-  hidden) and offers **Dataset** / **Queue** actions per row.
+  screens. It lists the caller's traces (`GET /v1/lab/traces`, derived from the
+  user's stored conversations) and offers **Dataset** / **Queue** actions per row.
 - Routes: `GET /v1/lab/traces`; `POST /v1/lab/traces/{traceId}/dataset`
-  (creates a `dataset-item` with `sourceTraceId` + a deterministic item id so
+  (creates a dataset item with `sourceTraceId` + a deterministic item id so
   re-adding upserts); `POST /v1/lab/traces/{traceId}/queue` (ownership-checked,
-  then `annotation-queues/{id}/items` with `objectType=TRACE`);
-  `GET/POST /v1/lab/datasets`; `GET/POST /v1/lab/queues`; `GET/POST
-  /v1/lab/score-configs`. All best-effort reads return `configured: false` when
-  Langfuse is unset so the page shows a clean empty state.
-- **Review queues work without Langfuse logins**: `GET
-  /v1/lab/queues/{queueId}/items` (pending items), `GET
-  /v1/lab/traces/{traceId}` (the full trace for rendering), and `POST
-  /v1/lab/queues/{queueId}/items/{itemId}` (writes scores to the item's trace —
-  categorical/boolean/text via `stringValue`, numeric via `value` — and
-  optionally completes the item). Score configs are created or selected in the
-  add-to-queue dialog, and the Traces page's **Review queues** tab opens the
-  review surface (`QueueReviewDialog`).
+  then a queue item with `objectType=TRACE`); `GET/POST /v1/lab/datasets`;
+  `GET/POST /v1/lab/queues`; `GET/POST /v1/lab/score-configs`.
+- **Review queues**: `GET /v1/lab/queues/{queueId}/items` (pending items), `GET
+  /v1/lab/traces/{traceId}` (the trace for rendering), and `POST
+  /v1/lab/queues/{queueId}/items/{itemId}` (writes scores — categorical/boolean/
+  text via `stringValue`, numeric via `value` — and optionally completes the
+  item). Score configs are created or selected in the add-to-queue dialog, and the
+  Traces page's **Review queues** tab opens the review surface
+  (`QueueReviewDialog`).
 - **Metrics page** (`frontend/src/pages/MetricsPage.tsx`, route `/metrics`) is
-  populated from the Langfuse **v2 Metrics API** via `GET /v1/lab/metrics`
-  (`GET /api/public/v2/metrics` with one `query` JSON). Observations scoped to
-  the caller's `userId` + `isRootObservation=true` yield trace count, avg/p95
-  latency, cost and total tokens (a daily series + totals), plus a per-model
-  breakdown (`models[]`, grouped by `providedModelName`/`model`); a
-  `scores-numeric` view yields per-score averages. `userId` is filter-only (not
-  groupable) — the API forbids grouping by high-cardinality dimensions.
-  Token/score/model queries are best-effort (measure/dimension names vary by
-  version; a failed probe just yields an empty list).
+  populated by `GET /v1/lab/metrics`, which aggregates the caller's runs from the
+  Lab store + conversation counts + `core.usage` spend (a daily series + totals,
+  per-score averages). `configured` is always true (AWS-native).
 - **Usage page** (`frontend/src/pages/UsagePage.tsx`, route `/usage`, sidebar
-  `manage`) is the workspace-wide live view: the 30-day run/token/cost/latency
-  KPIs and the per-model breakdown come from the same `/v1/lab/metrics` route
-  (`configured:false` degrades to a "needs Langfuse" note), the **provider keys**
-  card reads the real Vault (masked, with per-key use counts + test status and a
-  Manage link), and the **Resources** tab aggregates the real limits already
+  `manage`) is the workspace-wide live view: the run/token/cost KPIs and the
+  per-model breakdown come from the same `/v1/lab/metrics` route, the **provider
+  keys** card reads the real Vault (masked, with per-key use counts + test status
+  and a Manage link), and the **Resources** tab aggregates the real limits already
   returned by `/v1/knowledge-bases`, `/v1/storage/files`, `/v1/agents`,
   `/v1/workflows`, `/v1/agent-skills`, `/v1/mcp/connections` and
   `/v1/vault/secrets`. There is **no billing/credit backend**, so no invoice or
   balance data is fabricated — every number on the page is server-derived.
-- **`user-api` now receives the Langfuse env in prod** (`LANGFUSE_PUBLIC_KEY` /
-  `LANGFUSE_SECRET_KEY` / `LANGFUSE_BASE_URL`) **and `TRACE_LINK_SECRET`** —
-  these were previously only on the agent runtime, so trace links and score
-  mirroring were dark in prod. Floci already had them.
-- The eval lab is fully Langfuse-native today: datasets + items in Langfuse,
-  runs ingested as Langfuse experiments (OTLP), scores attached to item traces.
-  The worker can run either the RAG task or a saved **agent** end to end (service
-  auth, above). Reading run aggregates straight from Langfuse (instead of our
-  own run item) remains an optional future simplification.
+- The eval lab is fully AWS-native: datasets + cases in DynamoDB, per-case
+  artifacts in S3, metrics on the run item. The worker can run either the RAG task
+  or a saved **agent** end to end (service auth, above).
 
+### Bedrock cost & latency levers
+
+One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe defaults):
+
+- **Prompt caching** — `BEDROCK_PROMPT_CACHE` (`auto`|`anthropic`|`off`) +
+  `BEDROCK_PROMPT_CACHE_TTL` (`5m`|`1h`). The agent runtime passes Strands
+  `cache_config` (system prompt + tool schemas cached); the Labs add a
+  `cachePoint` to the Converse `system` block. Cache reads are up to ~90% cheaper.
+- **Service tiers** — `BEDROCK_SERVICE_TIER` (`standard`|`flex`|`priority`).
+  Ingestion embedding defaults to **`flex`** (~50% cheaper, batch-tolerant);
+  chat stays `standard`.
+- **Intelligent prompt routing** — `BEDROCK_PROMPT_ROUTER_ARN` (empty disables).
+  Routes within a model family (Nova Lite ↔ Pro) to the cheapest capable model.
+- **Application inference profiles** — `BEDROCK_PROFILE_CHAT` / `_EVAL` /
+  `_INGESTION` (workload is selected via `BEDROCK_WORKLOAD`, set to `eval` by the
+  judges and `ingestion` by the embed worker) so the bill is attributable per
+  feature. `resolve_model()` applies profile → router → model.
+- **Structured outputs** — `core.bedrock_chat.converse(..., output_schema=…)`
+  constrains the model to a JSON Schema object; used by the eval **judge** and the
+  custom-tools **generator** instead of prompt-only JSON.
+- **Guardrails as IaC** — `aws_bedrock_guardrail` (+ `_version`) defines the
+  content/PII/topic policy in Terraform; `local.guardrail_id` feeds
+  `GUARDRAIL_ID`, falling back to `var.guardrail_id` when `enable_guardrail_iaC=false`.
+
+### AgentCore Registry, Evaluations, Optimization & Browser
+
+- **Registry (A5)** — `aws_bedrockagentcore_registry` (curated: `auto_approval =
+  false`) is the governed catalog for agents, MCP servers, tools and skills.
+  `core/registry.py` publishes (`CreateRegistryRecord`) and searches
+  (`SearchRegistryRecords`); routes `GET /v1/registry`, `POST
+  /v1/registry/publish`, `GET /v1/registry/search`. Env: `AGENTCORE_REGISTRY_ARN`,
+  `AGENTCORE_REGISTRY_ID`.
+- **Evaluations (A6)** — a managed `aws_bedrockagentcore_evaluator` (LLM-as-a-judge
+  on Nova) plus `aws_bedrockagentcore_online_evaluation_config` that samples live
+  agent traces from the `aws/spans` CloudWatch log group
+  (`online_evaluation_sampling_percentage`, default 5%). The app's own Ragas lab
+  (`src/evals/`) remains for datasets.
+- **Optimization (A7)** — `core/optimization.py` surfaces availability and the
+  config surfaces it may rewrite (`system_prompt`, `tool_descriptions`);
+  route `GET /v1/optimization`. Insights/Recommendations consume Evaluations
+  results and are free during preview.
+- **Browser (A8)** — `aws_bedrockagentcore_browser` backs a new **`browser` MCP
+  server** (`backend/services/mcp/browser/`, `POST /mcp/browser`, agent `builtin`
+  server `browser`). Tools: `open-browser-session` / `close-browser-session`.
+  `core/browser.py` starts/stops sessions and enforces a **domain allowlist**
+  (`BROWSER_ALLOWED_DOMAINS`, empty denies all); the `browser` tool is also
+  covered by AgentCore Policy. Routes `GET /v1/browser`, `POST /v1/browser/check`,
+  `POST|DELETE /v1/browser/session`. Env: `BROWSER_ID`, `BROWSER_REGION`,
+  `BROWSER_ALLOWED_DOMAINS`, `BROWSER_MCP_FUNCTION`.
+
+### AgentCore Identity (managed OAuth)
+
+- Third-party tokens (Google/GitHub/Slack/…) are held by the **AgentCore Identity
+  token vault**, not the app: `aws_bedrockagentcore_workload_identity` gives the
+  runtime a machine identity, `aws_bedrockagentcore_token_vault_cmk` stores tokens
+  under the deployment's KMS key, and one
+  `aws_bedrockagentcore_oauth2_credential_provider` per provider holds the client
+  credentials. Providers are created only when their credentials are supplied
+  (`identity_google_client_id`, `identity_github_client_id`, `identity_slack_client_id`).
+- `core/identity.py` resolves a provider key to its ARN and calls
+  `GetResourceOauth2Token` for a user; the runtime and `user-api` carry the
+  `bedrock-agentcore:GetResourceOauth2Token` grant.
+- Routes (in `user-api`): `GET /v1/identity` (which providers are wired),
+  `POST /v1/identity/token` (fetch a user's token by provider — never returns the
+  raw secret to the client), and the public `GET /v1/identity/callback` return URL.
+  Env: `AGENT_WORKLOAD_IDENTITY_ARN`, `AGENT_TOKEN_VAULT_ID`,
+  `AGENT_IDENTITY_PROVIDERS`, `AGENT_IDENTITY_RETURN_URL`.
+- The Vault (KMS-encrypted user secrets) remains for user-supplied API keys;
+  AgentCore Identity is the managed path for OAuth delegation.
+
+### AgentCore Gateway (managed MCP)
+
+- The platform's MCP servers are fronted by one **AgentCore Gateway**
+  (`aws_bedrockagentcore_gateway`, protocol `MCP`, `AWS_IAM` authorizer, semantic
+  tool search). Every MCP Lambda (knowledge, code-interpreter,
+  http-fetch, custom-tools, remote MCP) is registered as a **Lambda target**
+  (`aws_bedrockagentcore_gateway_target`, `target_configuration.mcp.lambda`), so
+  agents call a single signed HTTPS endpoint instead of invoking each function.
+- The deployed runtime sets `MCP_TRANSPORT=gateway` and receives the endpoint as
+  `MCP_GATEWAY_URL`; `agentflow/tools.py` then routes every tool call through
+  `core.mcp_client.gateway_call_tool`, which signs the request with **SigV4**
+  (`bedrock-agentcore`) and normalizes JSON **or SSE** MCP responses. The in-app
+  direct-invoke path remains for local development
+  (`MCP_TRANSPORT=aggregator`).
+- The gateway also carries a `policy_engine_configuration` pointing at the managed
+  policy engine, so tool-call policy is enforced at both the gateway and in
+  process. The gateway role can only `lambda:InvokeFunction` the six MCP servers.
+
+### AgentCore Memory + Policy (AWS-native)
+
+- **Agent memory is Amazon Bedrock AgentCore Memory.** The runtime builds the
+  official Strands `AgentCoreMemoryStore` (`agentflow/memory.py`,
+  `build_memory_manager`): the **user** is the actor (long-term facts are shared
+  across that user's agents) and the **agent id** scopes the namespace
+  (`/users/<userId>/agents/<agentId>`); the store is writable with built-in
+  extraction. One managed resource is created per deployment
+  (`aws_bedrockagentcore_memory` + a `SEMANTIC` `aws_bedrockagentcore_memory_strategy`)
+  and its id is injected as `AGENTCORE_MEMORY_ID`.
+  `AGENT_MEMORY_BACKEND=dynamo` selects the in-app `DynamoMemoryStore` and exists
+  **only** for local dev/tests — a deployed runtime always uses the managed
+  service, and a missing `AGENTCORE_MEMORY_ID` is a hard error, never a silent
+  fallback.
+- **Every tool call is governed by AgentCore Policy** (`core/policy.py`,
+  `agentflow/memory.build_guard`). The engine id is a managed
+  `aws_bedrockagentcore_policy_engine` injected as `AGENT_POLICY_ENGINE`; both the
+  single-agent and multi-agent runtimes pass the guard into `build_tools`, so the
+  check runs before any MCP server is invoked and a denial is returned to the
+  model as `Blocked by policy: <reason>`. `AGENT_POLICY_DENY_TOOLS` denies tools
+  outright; `AGENT_POLICY_MODE` (default `enforce`) may be set to `report` to stage
+  a rule. A guard that raises **fails closed**.
+
+### Bedrock Guardrails
+
+- A guardrail is created in Amazon Bedrock and referenced by **id only** — the
+  version is always Bedrock's working `DRAFT` and is never user-configurable. The
+  agent runtime applies it on every model call via Strands' `guardrail_*` kwargs
+  (`agentflow/models.py`); `core/guardrails.py` exposes `enabled()`,
+  `guardrail_config()`, `config_for(id, version)` and
+  `apply(text, source=…, guardrail_identifier=…, guardrail_version=…)`.
+- **Resolution** (`agentflow/guardrails.py:resolve_guardrail`, one small
+  `GetItem` on the settings item): the agent/workflow's own
+  `config.guardrail = {enabled, id}` wins (an explicit id, or `enabled:false` to
+  opt out); a workflow's guardrail is the fallback for its member agents; then
+  the user's workspace default (`guardrailId` on `#SETTINGS`, saved by the
+  Guardrails page); then the platform-wide `GUARDRAIL_ID` env (Terraform). A run
+  on the user's own Vault provider key has no Bedrock guardrail (third-party
+  endpoint).
+- **Per agent / per workflow.** `config.guardrail` is part of the canonical agent
+  config and the workflow config; the agent builder (agent card → Model group)
+  and the workflow inspector (host card) expose a toggle + optional guardrail id,
+  defaulting to the workspace guardrail. The runtime resolves it for the
+  single-agent model (`agentflow/run.py`), the workflow host and every member
+  (`workflow/build.py`).
+- Env: `GUARDRAIL_ID` (empty disables), `GUARDRAIL_VERSION` (default `DRAFT`).
+- Routes (in `user-api`, registered in API Gateway + Floci): `GET
+  /v1/guardrails` (status — saved default, else env), `PUT /v1/guardrails/config`
+  (record the workspace default id on the settings item), `POST
+  /v1/guardrails/test` (`ApplyGuardrail` on a text; uses the supplied id, else
+  the saved default, else env).
+- Frontend: the **Guardrails page** (`frontend/src/pages/GuardrailsPage.tsx`,
+  route `/guardrails`, sidebar `manage`) shows the active workspace guardrail,
+  saves the id, and runs a text through it (or the id typed in) to show whether
+  it intervenes.
 ### Remote MCP servers & connections
 
-- `mcp-connections` (`backend/services/mcp-connections/`) is the **OAuth broker
+- `mcp-connections` (`backend/services/mcp/mcp-connections/`) is the **OAuth broker
   and connection store** for remote (Streamable HTTP) MCP servers, plus an
   **aggregator MCP server**. It is outside the VPC and reaches providers over
   public HTTPS.
@@ -1287,8 +1478,8 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   OAuth overrides for providers without standard metadata and the **names** of
   the env vars holding pre-registered client credentials — never the secrets.
   GitHub (launch provider) is pre-registered: register a GitHub OAuth App with
-  callback `<api>/v1/mcp/oauth/callback` and set `GITHUB_MCP_CLIENT_ID` /
-  `GITHUB_MCP_CLIENT_SECRET`.
+  callback `<api>/v1/mcp/oauth/callback` and set `MCP_GITHUB_CLIENT_ID` /
+  `MCP_GITHUB_CLIENT_SECRET`.
 - **Registry**: `GET /v1/mcp/registry?search=&cursor=&limit=` proxies the official
   public MCP Registry (`registry.modelcontextprotocol.io`, override with
   `MCP_REGISTRY_URL`), so the SPA can browse/search any published server without
@@ -1304,6 +1495,17 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - **stdio servers are not run in Lambda** (no persistent stdin/stdout; stateful
   servers break). Managed stdio hosting (containers on AgentCore Runtime) is a
   later phase; the public catalog currently lists remote HTTP servers only.
+
+### Sign-in (Google via Auth0)
+
+- **Google-only auth via Auth0.** The frontend signs in with
+  `loginWithRedirect` pinned to the Google social connection
+  (`AUTH_GOOGLE_CONNECTION`, default `google-oauth2`, override
+  `VITE_AUTH_CONNECTION`). Auth0 renders the Google account chooser, so there is
+  **no extra Google client id on the frontend** and no One Tap script.
+- Sign-in is a manual choice on `/login` (no silent redirect). The fixed navbar
+  carries **Sign in with Google** and **Demo**; the read-only demo is the other
+  way in.
 
 ### Admin console & strict role separation
 
@@ -1324,7 +1526,7 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   - No header → falls back to `admin` if the token has the admin role, else
     `user`.
 - Admin code is kept separate: frontend UI under `frontend/src/admin/`, backend
-  Lambda under `backend/services/mcp-tester/`.
+  Lambda under `backend/services/admin/mcp-tester/`.
 - **`mcp-tester`** (`GET /v1/admin/mcp/tools`, `POST /v1/admin/mcp/call`) is the
   MCP *client*: it reads the admin claim + `sub`, resolves the caller's internal
   `userId`, builds MCP JSON-RPC, and invokes every MCP server in `MCP_FUNCTIONS`
@@ -1425,22 +1627,37 @@ make floci-down       # stop and remove (named volumes are kept)
   Floci container needs network access to `https://get1agent.us.auth0.com/`.
 - Compose file: `infra/local/floci/docker-compose.yml`. Host env: the root
   `.env` (from `infra/local/floci/env.example`).
+- **Real AWS from local.** `.env` sets no credentials: host processes use your
+  normal chain (exported vars, `~/.aws`, SSO). `make floci-up` resolves the same
+  chain with `aws configure export-credentials` and passes it to the Floci
+  container; the init hook forwards it into every Lambda's environment and pins
+  `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` to real AWS (Floci has no Bedrock), so the
+  Labs reach real AWS. Credentials are only as fresh as the last `make floci-up`
+  — re-run it after `aws sso login`. (Web Search is the AgentCore Gateway
+  connector and is **not** available locally: the gateway is not emulated.)
+- **The agent runs in the stack.** The `agent` compose service (built from
+  `backend/agents/Dockerfile`, context `backend/`) runs the AgentCore app
+  continuously on host `:8090` (Vite proxies `/agent-run` to it) — there is no
+  host-run `make agent`. It reads the repo-root `.env` and overrides the
+  endpoints for the compose network (`DYNAMODB_ENDPOINT_URL=http://dynamodb:8000`,
+  `AWS_ENDPOINT_URL=http://floci:4566`). After agent-side changes:
+  `make floci-reload` (rebuilds the image + re-provisions Floci in place).
 - `infra/local/floci/init/ready.d/10-provision.py` mirrors Terraform: DynamoDB
   table + GSIs, bucket + EventBridge notification (`raw/` prefix) → rule → SQS +
   DLQ → dispatcher → state machine → workers, plus the HTTP API + JWT authorizer
   + routes from `infra/terraform/envs/prod/api_gateway.tf`.
 - The state machine definition is the same file Terraform deploys:
   `infra/terraform/modules/ingestion/statemachine.asl.json`.
-- Ingestion runs with `EMBED_MODE=voyage` (the default): set `VOYAGE_API_KEY` in
-  `.env` and the Floci Lambda containers reach `api.voyageai.com` directly. Set
-  `EMBED_MODE=local` to embed offline with the Ollama container
-  (`mxbai-embed-large`, pulled by `make floci`); the Voyage env is then unused
-  but harmless.
+- Ingestion runs with `EMBED_MODE=local` in Floci: the Ollama container
+  (`mxbai-embed-large`, pulled by `make floci`) returns real vectors with no cloud
+  call. Set `EMBED_MODE=bedrock` to use the real Amazon Titan models instead
+  (host credentials are forwarded automatically — see "Real AWS from local").
 - Retrieval runs with `VECTOR_STORE=local` (brute-force cosine over
   `index/<userId>/vectors.json`; S3 Vectors is not emulated) and
-  `RERANK_MODE=voyage` (Voyage rerank; opt-in per request). Set
-  `RERANK_MODE=local` to use the HuggingFace TEI `reranker` container instead;
-  `make floci` then starts it and waits for `/health`.
+  `RERANK_MODE=none` (rerank is opt-in per request). Set `RERANK_MODE=local` to
+  use the HuggingFace TEI `reranker` container instead; `make floci` then starts
+  it and waits for `/health`. (`RERANK_MODE=bedrock` calls Bedrock Rerank, which
+  needs AWS credentials.)
 - After changing Lambda code: `make floci-build` then `make floci-up`
   (provisioning is re-run on every boot), or `make floci-reload`.
 - Local OAuth for remote MCP servers: providers reject plaintext-HTTP redirect
@@ -1450,10 +1667,10 @@ make floci-down       # stop and remove (named volumes are kept)
 
 ### Migrations
 
-None. There is no SQL database and no migration tooling — DynamoDB schemas are
-created by Terraform (`infra/terraform/modules/dynamodb`) and by the Floci init
-hook locally. Adding an attribute or GSI is a code/Terraform change, not a
-migration.
+DynamoDB schemas are declarative: Terraform
+(`infra/terraform/modules/dynamodb`) creates the table, GSIs and indexes, and
+the Floci init hook mirrors it locally. Adding an attribute or GSI is a
+code/Terraform change.
 
 ## Commands
 
@@ -1461,7 +1678,7 @@ migration.
 - Backend tests: `make test` — integration tests in `backend/services/integration-tests/` using
   `moto` (DynamoDB) + an in-memory S3 double. No Docker, no AWS. Run a single
   file with `cd backend/services/integration-tests && uv run pytest test_search.py`.
-- Per-lambda unit tests: `make test-unit` (or `make -C backend/services/web-search test`)
+- Per-lambda unit tests: `make test-unit` (or `make -C backend/services/mcp/knowledge-mcp test`)
   — stdlib `unittest` in each app's `tests/` dir. The integration suite gates
   every deploy; each Lambda's own unit tests run before it is packaged.
 - Local Lambdas / infra: see "Local development" above (`make floci-*`).

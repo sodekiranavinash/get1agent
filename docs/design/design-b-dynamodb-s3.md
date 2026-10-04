@@ -1,12 +1,15 @@
 # Design B — Serverless Migration: Discussion, Decisions & Implementation Plan
 
-**Status:** approved design, not yet implemented.
-**Purpose:** single source of truth for replacing the current
+**Status:** implemented. This is the **original Design B record** (options,
+locked decisions and implementation plan); the live architecture is maintained in
+[`AGENTS.md`](../../AGENTS.md) → "Architecture" and "Document ingestion", which are
+authoritative wherever this file disagrees with the shipped system.
+**Purpose:** single source of truth for replacing the pre-migration
 Postgres/pgvector + VPC backend with a serverless design where **DynamoDB is the
 database**, **S3 Vectors** holds embeddings, and **S3 objects** hold the keyword
 index and retrieval artifacts.
-**Audience:** implement this in a fresh session. Everything needed is here.
-**Last updated:** 2026-09-14.
+**Audience:** historical context for why the platform is shaped the way it is.
+**Last updated:** 2026-09-14 (superseded by the shipped platform — see `AGENTS.md`).
 
 ---
 
@@ -22,7 +25,7 @@ That VPC is the source of pain:
 - Because of the VPC split, the system is fragmented: some Lambdas run in the
   VPC, some outside, and data is split between RDS and DynamoDB
   (`code-interpreter-sessions`).
-- The user wants **all data in one place**, **no VPC friction**, **fast search**,
+- The user wants **all data in one place**, **a simple managed network**, **fast search**,
   and **equal-or-better relevance**.
 
 The current retrieval quality comes from **hybrid search**: a pgvector cosine
@@ -66,7 +69,8 @@ Rank Fusion, then optionally Bedrock Rerank. Any replacement must preserve this.
 Go with **Design B**: DynamoDB for operational data, **S3 Vectors** for the
 semantic leg, **S3 objects** for the keyword (BM25) index and retrieval
 artifacts. This keeps DynamoDB cheap (small metadata only), avoids the posting
-write-amplification cost, needs no VPC, and keeps local S3 dev working. The
+write-amplification cost, runs entirely on managed services, and keeps local S3
+dev working. The
 accepted trade-off is S3 Vectors' 100–300 ms semantic latency (with a
 `VECTOR_STORE=dynamodb` switch if ms is ever required).
 
@@ -133,12 +137,14 @@ accepted trade-off is S3 Vectors' 100–300 ms semantic latency (with a
 # Part 4 — Goals / non-goals
 
 **Goals**
-- No VPC, no RDS, no Alembic migrations, no data backfill (app is greenfield).
+- One managed data tier: DynamoDB for operational data, S3 + S3 Vectors for the
+  index; greenfield, so no data backfill.
 - One database (DynamoDB) for operational data; S3 for vectors + search index.
 - Search stays fast and relevance stays at least as good as the current hybrid.
 - All existing routes/methods/responses work unchanged.
-- No N+1 query patterns.
-- Lower idle cost than RDS; no posting write amplification in DynamoDB.
+- Targeted reads only (no N+1 query patterns).
+- Lower idle cost than a managed relational database; no posting write
+  amplification in DynamoDB.
 
 **Non-goals**
 - Multi-region / global tables.
@@ -163,7 +169,7 @@ S3 (data)  = raw, derived, parents, term postings, catalog, manifests  ← keywo
 Bedrock    = embeddings + optional rerank
 ```
 
-No VPC. No NAT. No RDS. No DB migrations.
+Managed networking. Managed data. Declarative schema.
 
 ---
 
@@ -198,6 +204,13 @@ sparse GSIs. **No vectors, chunks, or postings in DynamoDB.**
   (`AGENTLIB#public`, `gsi3sk=<publishedAt>#<agentId>`).
 
 **Table config:** on-demand (`PAY_PER_REQUEST`); TTL attribute `expiresAt`.
+
+> **Current state.** The platform has grown well beyond the entities listed above
+> (workflows, custom tools, vault secrets, conversations, playground sessions, MCP
+> connections/OAuth state, run feedback, eval runs/cases, support tickets/messages,
+> security reports, notifications, …). The authoritative, complete entity table is
+> in [`AGENTS.md`](../../AGENTS.md) → "DynamoDB single table" and
+> [data-access.md](data-access.md).
 
 ## 6.1 Access-pattern matrix
 
@@ -333,6 +346,10 @@ Watchdog (Lambda) : scheduled backstop (GSI3 DOCSTATUS#processing)
 
 # Part 11 — Lambda set (17 → 11)
 
+> **Historical.** The shipped Lambda set is now larger and grouped by category —
+> see [`AGENTS.md`](../../AGENTS.md) and `backend/registry.json` (there is no
+> `web-search` Lambda; web search is the AgentCore Gateway built-in connector).
+
 | Before | After |
 |---|---|
 | `knowledge-bases` + `agent-skills` + `account-settings` | **`user-api`** |
@@ -347,6 +364,12 @@ Functions (per locked decision 6).
 ---
 
 # Part 12 — API surface — unchanged
+
+> **Historical.** The route list below is the migration-time surface. The current
+> full route set (agents, workflows, storage, vault, conversations, evals, lab,
+> support, privacy, guardrails, identity, registry, optimization, browser) is
+> maintained in [`AGENTS.md`](../../AGENTS.md) and
+> `infra/terraform/envs/prod/api_gateway.tf`.
 
 Every existing route/method/status/response is preserved:
 
@@ -414,7 +437,8 @@ Do not add `PATCH` aliases unless requested.
 # Part 15 — Performance & cost
 
 **Latency**
-- No VPC ENI cold start, no TLS/IAM DB handshake, no Lambda-to-Lambda chain.
+- Cold start skips ENI attachment and database handshakes, and the request path
+  is a single Lambda hop.
 - Warm path ≈ S3 Vectors (100–300 ms) ∥ term GETs (~10–30 ms each, parallel)
   + a few parent GETs + optional rerank.
 - Cold start is much faster than today.
@@ -484,7 +508,7 @@ Do not add `PATCH` aliases unless requested.
 - Delete those three services
 
 ## Phase 5 — Tools
-- `backend/services/code-interpreter/src/sessions.py` → main table + TTL
+- `backend/services/mcp/code-interpreter/src/sessions.py` → main table + TTL
 - `backend/services/web-search` → unchanged
 
 ## Phase 6 — Infra

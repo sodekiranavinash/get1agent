@@ -87,42 +87,37 @@ jobs:
       - name: Package user-api zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/user-api
+        working-directory: backend/services/apis/user-api
 
       - name: Package knowledge-mcp zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/knowledge-mcp
+        working-directory: backend/services/mcp/knowledge-mcp
 
       - name: Package mcp-tester zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/mcp-tester
+        working-directory: backend/services/admin/mcp-tester
 
       - name: Package code-interpreter zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/code-interpreter
-
-      - name: Package web-search zip
-        if: inputs.api_gateway || inputs.lambdas
-        run: make package
-        working-directory: backend/services/web-search
+        working-directory: backend/services/mcp/code-interpreter
 
       - name: Package http-fetch zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/http-fetch
+        working-directory: backend/services/mcp/http-fetch
 
       - name: Package custom-tools zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/custom-tools
+        working-directory: backend/services/mcp/custom-tools
 
       - name: Package mcp-connections zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/mcp-connections
+        working-directory: backend/services/mcp/mcp-connections
 
       - name: Package agent-run zip
         if: inputs.api_gateway || inputs.lambdas
@@ -132,73 +127,81 @@ jobs:
       - name: Package ingestion-dispatcher zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/ingestion-dispatcher
+        working-directory: backend/services/ingestion/ingestion-dispatcher
 
       - name: Package ingestion-extract zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/ingestion-extract
+        working-directory: backend/services/ingestion/ingestion-extract
 
       - name: Package ingestion-embed zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/ingestion-embed
+        working-directory: backend/services/ingestion/ingestion-embed
 
       - name: Package ingestion-index zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/ingestion-index
+        working-directory: backend/services/ingestion/ingestion-index
 
       - name: Package ingestion-mark-failed zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/ingestion-mark-failed
+        working-directory: backend/services/ingestion/ingestion-mark-failed
 
       - name: Package ingestion-watchdog zip
         if: inputs.api_gateway || inputs.lambdas
         run: make package
-        working-directory: backend/services/ingestion-watchdog
+        working-directory: backend/services/ingestion/ingestion-watchdog
+
+      - name: Package scheduler zip
+        if: inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/services/scheduler
+
+      - name: Package browser zip
+        if: inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/services/mcp/browser
 
       - name: Verify Lambda zips
         if: inputs.api_gateway || inputs.lambdas
         run: |
-          test -s backend/services/dependency-layers/base/dist/layer.zip
-          unzip -l backend/services/dependency-layers/base/dist/layer.zip | grep 'python/tzdata'
-          test -s backend/services/dependency-layers/genai/dist/layer.zip
-          unzip -l backend/services/dependency-layers/genai/dist/layer.zip | grep 'python/awslabs'
-          test -s backend/services/user-api/dist/function.zip
-          unzip -l backend/services/user-api/dist/function.zip | grep handler.py
-          test -s backend/services/knowledge-mcp/dist/function.zip
-          unzip -l backend/services/knowledge-mcp/dist/function.zip | grep handler.py
-          test -s backend/services/ingestion-dispatcher/dist/function.zip
-          unzip -l backend/services/ingestion-dispatcher/dist/function.zip | grep handler.py
-          test -s backend/services/ingestion-extract/dist/function.zip
-          unzip -l backend/services/ingestion-extract/dist/function.zip | grep handler.py
-          test -s backend/services/ingestion-embed/dist/function.zip
-          unzip -l backend/services/ingestion-embed/dist/function.zip | grep handler.py
-          test -s backend/services/ingestion-index/dist/function.zip
-          unzip -l backend/services/ingestion-index/dist/function.zip | grep handler.py
-          test -s backend/services/ingestion-mark-failed/dist/function.zip
-          unzip -l backend/services/ingestion-mark-failed/dist/function.zip | grep handler.py
-          test -s backend/services/ingestion-watchdog/dist/function.zip
-          unzip -l backend/services/ingestion-watchdog/dist/function.zip | grep handler.py
-          test -s backend/services/mcp-tester/dist/function.zip
-          unzip -l backend/services/mcp-tester/dist/function.zip | grep handler.py
-          test -s backend/services/code-interpreter/dist/function.zip
-          unzip -l backend/services/code-interpreter/dist/function.zip | grep handler.py
-          test -s backend/services/web-search/dist/function.zip
-          unzip -l backend/services/web-search/dist/function.zip | grep handler.py
-          test -s backend/services/http-fetch/dist/function.zip
-          unzip -l backend/services/http-fetch/dist/function.zip | grep handler.py
-          test -s backend/services/custom-tools/dist/function.zip
-          unzip -l backend/services/custom-tools/dist/function.zip | grep handler.py
-          test -s backend/services/mcp-connections/dist/function.zip
-          unzip -l backend/services/mcp-connections/dist/function.zip | grep handler.py
+          test -s backend/services/apis/user-api/dist/function.zip
+          unzip -l backend/services/apis/user-api/dist/function.zip | grep handler.py
+          test -s backend/services/mcp/knowledge-mcp/dist/function.zip
+          unzip -l backend/services/mcp/knowledge-mcp/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion/ingestion-dispatcher/dist/function.zip
+          unzip -l backend/services/ingestion/ingestion-dispatcher/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion/ingestion-extract/dist/function.zip
+          unzip -l backend/services/ingestion/ingestion-extract/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion/ingestion-embed/dist/function.zip
+          unzip -l backend/services/ingestion/ingestion-embed/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion/ingestion-index/dist/function.zip
+          unzip -l backend/services/ingestion/ingestion-index/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion/ingestion-mark-failed/dist/function.zip
+          unzip -l backend/services/ingestion/ingestion-mark-failed/dist/function.zip | grep handler.py
+          test -s backend/services/ingestion/ingestion-watchdog/dist/function.zip
+          unzip -l backend/services/ingestion/ingestion-watchdog/dist/function.zip | grep handler.py
+          test -s backend/services/admin/mcp-tester/dist/function.zip
+          unzip -l backend/services/admin/mcp-tester/dist/function.zip | grep handler.py
+          test -s backend/services/mcp/code-interpreter/dist/function.zip
+          unzip -l backend/services/mcp/code-interpreter/dist/function.zip | grep handler.py
+          test -s backend/services/mcp/http-fetch/dist/function.zip
+          unzip -l backend/services/mcp/http-fetch/dist/function.zip | grep handler.py
+          test -s backend/services/mcp/custom-tools/dist/function.zip
+          unzip -l backend/services/mcp/custom-tools/dist/function.zip | grep handler.py
+          test -s backend/services/mcp/mcp-connections/dist/function.zip
+          unzip -l backend/services/mcp/mcp-connections/dist/function.zip | grep handler.py
           test -s backend/services/agent-run/dist/function.zip
           unzip -l backend/services/agent-run/dist/function.zip | grep index.mjs
           test -s backend/services/agent-run/dist/microvm.zip
           unzip -l backend/services/agent-run/dist/microvm.zip | grep Dockerfile
           unzip -l backend/services/agent-run/dist/microvm.zip | grep 'app.mjs'
+          test -s backend/services/scheduler/dist/function.zip
+          unzip -l backend/services/scheduler/dist/function.zip | grep handler.py
+          test -s backend/services/mcp/browser/dist/function.zip
+          unzip -l backend/services/mcp/browser/dist/function.zip | grep handler.py
 
       - name: Terraform validate
         if: inputs.api_gateway || inputs.lambdas
@@ -229,24 +232,19 @@ jobs:
           AWS_REGION: ${{ env.AWS_REGION }}
           APPLY_API_GATEWAY: ${{ inputs.api_gateway }}
           APPLY_BACKEND_LAMBDAS: ${{ inputs.lambdas }}
-          TF_VAR_exa_api_key: ${{ secrets.EXA_API_KEY }}
-          TF_VAR_voyage_api_key: ${{ secrets.VOYAGE_API_KEY }}
-          TF_VAR_opencode_api_key: ${{ secrets.OPENCODE_API_KEY }}
-          TF_VAR_langfuse_public_key: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
-          TF_VAR_langfuse_secret_key: ${{ secrets.LANGFUSE_SECRET_KEY }}
-          # Langfuse region endpoint (a non-secret environment variable). Without
-          # this the provider default https://cloud.langfuse.com is used, which is
-          # the wrong region for a US project.
-          TF_VAR_langfuse_host: ${{ vars.LANGFUSE_BASE_URL }}
           TF_VAR_trace_link_secret: ${{ secrets.TRACE_LINK_SECRET }}
           # GitHub forbids secret names starting with GITHUB_, so the repo
-          # secrets are MCP_GITHUB_*; they feed the GITHUB_MCP_* Terraform vars.
-          TF_VAR_GITHUB_MCP_CLIENT_ID: ${{ secrets.MCP_GITHUB_CLIENT_ID }}
-          TF_VAR_GITHUB_MCP_CLIENT_SECRET: ${{ secrets.MCP_GITHUB_CLIENT_SECRET }}
+          # secrets are MCP_GITHUB_*; they feed the matching Terraform vars.
+          TF_VAR_MCP_GITHUB_CLIENT_ID: ${{ secrets.MCP_GITHUB_CLIENT_ID }}
+          TF_VAR_MCP_GITHUB_CLIENT_SECRET: ${{ secrets.MCP_GITHUB_CLIENT_SECRET }}
           # Auth0 M2M ("platform service"): user-api + scheduler mint a
           # client-credentials token to run agents server-side (schedules, evals).
           TF_VAR_agent_service_client_id: ${{ secrets.AGENT_SERVICE_CLIENT_ID }}
           TF_VAR_agent_service_client_secret: ${{ secrets.AGENT_SERVICE_CLIENT_SECRET }}
+          # Auth0 Management API M2M (scope delete:users): erases the Auth0
+          # identity on account deletion. Optional; blank = manual step.
+          TF_VAR_auth_mgmt_client_id: ${{ secrets.AUTH_MGMT_CLIENT_ID || secrets.AUTH0_MGMT_CLIENT_ID }}
+          TF_VAR_auth_mgmt_client_secret: ${{ secrets.AUTH_MGMT_CLIENT_SECRET || secrets.AUTH0_MGMT_CLIENT_SECRET }}
         run: bash infra/aws/apply-prod.sh
 
       - name: Agent runtime (build + push image, deploy)
@@ -254,15 +252,9 @@ jobs:
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
           IMAGE_TAG: ${{ github.sha }}
-          TF_VAR_exa_api_key: ${{ secrets.EXA_API_KEY }}
-          TF_VAR_voyage_api_key: ${{ secrets.VOYAGE_API_KEY }}
-          TF_VAR_opencode_api_key: ${{ secrets.OPENCODE_API_KEY }}
-          TF_VAR_langfuse_public_key: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
-          TF_VAR_langfuse_secret_key: ${{ secrets.LANGFUSE_SECRET_KEY }}
-          TF_VAR_langfuse_host: ${{ vars.LANGFUSE_BASE_URL }}
           TF_VAR_trace_link_secret: ${{ secrets.TRACE_LINK_SECRET }}
-          TF_VAR_GITHUB_MCP_CLIENT_ID: ${{ secrets.MCP_GITHUB_CLIENT_ID }}
-          TF_VAR_GITHUB_MCP_CLIENT_SECRET: ${{ secrets.MCP_GITHUB_CLIENT_SECRET }}
+          TF_VAR_MCP_GITHUB_CLIENT_ID: ${{ secrets.MCP_GITHUB_CLIENT_ID }}
+          TF_VAR_MCP_GITHUB_CLIENT_SECRET: ${{ secrets.MCP_GITHUB_CLIENT_SECRET }}
           # The runtime only needs the M2M client *id* (SERVICE_AUTH_CLIENT_ID) to
           # know which `sub` to trust; it never receives the secret.
           TF_VAR_agent_service_client_id: ${{ secrets.AGENT_SERVICE_CLIENT_ID }}
