@@ -11,8 +11,11 @@ The public catalog lives in :mod:`src.catalog`; HTTP transport in
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import urllib.error
+import urllib.request
 import uuid
 from typing import Any
 from urllib.parse import urlparse
@@ -36,6 +39,8 @@ from . import catalog, registry
 MAX_CONNECTIONS_PER_USER = 20
 CONNECT_TIMEOUT_SECONDS = 15
 TOOL_TIMEOUT_SECONDS = 30
+# Best-effort call to the provider's identity endpoint after OAuth connect.
+IDENTITY_TIMEOUT_SECONDS = 10
 # Refresh this many seconds before the access token actually expires.
 REFRESH_SKEW_SECONDS = 60
 
@@ -128,6 +133,9 @@ def serialize(connection: dict[str, Any]) -> dict[str, Any]:
         "status": connection.get("status"),
         "enabled": connection.get("enabled", True) is not False,
         "toolCount": int(connection.get("toolCount") or 0),
+        "accountLogin": connection.get("accountLogin"),
+        "accountName": connection.get("accountName"),
+        "accountAvatarUrl": connection.get("accountAvatarUrl"),
         "lastError": connection.get("lastError"),
         "lastRefreshedAt": connection.get("lastRefreshedAt"),
         "createdAt": connection.get("createdAt"),
@@ -295,6 +303,7 @@ def start_connection(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
         "resource": metadata.get("resource"),
         "serverUrl": server_url,
         "scopes": scopes,
+        "catalogId": catalog_id,
     }
     secret_enc = _encrypt(user_id, conn_id, _FIELD_CLIENT, client_secret)
     if secret_enc:
@@ -337,6 +346,86 @@ def _parse_state(state: str) -> tuple[str, str]:
     if not user_id.startswith("u_") or not token:
         raise ApiError(400, "Invalid OAuth state")
     return user_id, state
+
+
+def _account_field(data: dict[str, Any], path: str | None) -> str | None:
+    """Read a dotted path (e.g. ``login`` or ``user.login``) from a JSON dict."""
+    if not path:
+        return None
+    value: Any = data
+    for part in str(path).split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _fetch_account(
+    entry: dict[str, Any] | None, access_token: str | None
+) -> dict[str, Any]:
+    """Best-effort: identify the connected account (login/name/avatar).
+
+    The provider's identity endpoint is declared on the catalog entry; any
+    failure is swallowed so it can never block a successful connection.
+    """
+    config = catalog.identity_config(entry)
+    endpoint = str(config.get("endpoint") or "").strip()
+    if not endpoint or not access_token:
+        return {}
+    request = urllib.request.Request(
+        endpoint,
+        headers={
+            "authorization": f"Bearer {access_token}",
+            "accept": "application/json",
+            "user-agent": "get1agent",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=IDENTITY_TIMEOUT_SECONDS) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 - identity is informational only
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    account: dict[str, Any] = {}
+    for key, path in (
+        ("accountLogin", config.get("login")),
+        ("accountName", config.get("name")),
+        ("accountAvatarUrl", config.get("avatar")),
+    ):
+        value = _account_field(data, path)
+        if value:
+            account[key] = value
+    return account
+
+
+def _backfill_account(user_id: str, connection: dict[str, Any]) -> None:
+    """Fill in the connected account for connections made before this feature.
+
+    Best-effort: only when the account is unknown and the entry declares an
+    identity endpoint, so refreshing shows *which* identity authorized it
+    without forcing a reconnect.
+    """
+    if connection.get("accountLogin"):
+        return
+    catalog_id = str(connection.get("catalogId") or "").strip()
+    entry = catalog.get_entry(catalog_id) if catalog_id else None
+    if not catalog.identity_config(entry):
+        return
+    try:
+        token = access_token(user_id, connection)
+    except Exception:  # noqa: BLE001 - never block a refresh on identity
+        return
+    account = _fetch_account(entry, token)
+    if not account:
+        return
+    try:
+        repo.update_connection(user_id, connection["connId"], **account)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def handle_callback(query: dict[str, str]) -> dict[str, Any]:
@@ -382,6 +471,18 @@ def handle_callback(query: dict[str, str]) -> dict[str, Any]:
         return _callback_redirect(status="error", message="token_exchange_failed")
 
     _store_tokens(user_id, conn_id, tokens)
+
+    catalog_id = str(payload.get("catalogId") or "").strip()
+    account = _fetch_account(
+        catalog.get_entry(catalog_id) if catalog_id else None,
+        tokens.get("access_token"),
+    )
+    if account:
+        try:
+            repo.update_connection(user_id, conn_id, **account)
+        except Exception:  # noqa: BLE001 - identity is informational only
+            pass
+
     try:
         tools = list_connection_tools(user_id, conn_id)
         repo.set_status(user_id, conn_id, STATUS_CONNECTED, tool_count=len(tools))
@@ -604,6 +705,9 @@ def refresh_connection(user_id: str, conn_id: str) -> dict[str, Any]:
     if not connection.get("refreshTokenEnc"):
         raise ApiError(409, "Reconnect required: the provider issued no refresh token")
     _refresh(user_id, connection)
+    refreshed = repo.get_connection(user_id, conn_id)
+    if refreshed is not None:
+        _backfill_account(user_id, refreshed)
     return get_connection(user_id, conn_id)
 
 
@@ -652,6 +756,7 @@ def reauthorize(user_id: str, conn_id: str) -> dict[str, Any]:
         "resource": connection.get("resource"),
         "serverUrl": connection.get("serverUrl"),
         "scopes": scopes,
+        "catalogId": connection.get("catalogId"),
     }
     if connection.get("clientSecretEnc"):
         payload["clientSecretEnc"] = connection["clientSecretEnc"]

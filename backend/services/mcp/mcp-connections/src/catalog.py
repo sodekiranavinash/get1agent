@@ -86,3 +86,16 @@ def client_credentials(entry: dict[str, Any] | None) -> tuple[str | None, str | 
     client_id = os.environ.get(auth.get("clientIdEnv") or "", "").strip() or None
     client_secret = os.environ.get(auth.get("clientSecretEnv") or "", "").strip() or None
     return client_id, client_secret
+
+
+def identity_config(entry: dict[str, Any] | None) -> dict[str, Any]:
+    """Where to read the connected account's identity after OAuth.
+
+    Optional: an entry may declare an ``identity`` block with an ``endpoint``
+    (called with the access token as a Bearer) and dotted field paths for the
+    login, display name and avatar. Used to show *which* account is connected.
+    """
+    if not entry:
+        return {}
+    identity = entry.get("identity")
+    return identity if isinstance(identity, dict) else {}

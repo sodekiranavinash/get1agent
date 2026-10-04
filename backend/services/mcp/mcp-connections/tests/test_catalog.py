@@ -52,6 +52,16 @@ class CatalogTests(unittest.TestCase):
         os.environ.pop("MCP_GITHUB_CLIENT_SECRET", None)
         self.assertEqual(catalog.client_credentials(catalog.get_entry("github")), (None, None))
 
+    def test_identity_config_declared(self) -> None:
+        config = catalog.identity_config(catalog.get_entry("github"))
+        self.assertEqual(config["endpoint"], "https://api.github.com/user")
+        self.assertEqual(config["login"], "login")
+        self.assertEqual(config["avatar"], "avatar_url")
+
+    def test_identity_config_absent(self) -> None:
+        self.assertEqual(catalog.identity_config(None), {})
+        self.assertEqual(catalog.identity_config({"id": "svc"}), {})
+
 
 if __name__ == "__main__":
     unittest.main()

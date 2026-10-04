@@ -29,6 +29,12 @@
           "notifications",
           "workflow"
         ]
+      },
+      "identity": {
+        "endpoint": "https://api.github.com/user",
+        "login": "login",
+        "name": "name",
+        "avatar": "avatar_url"
       }
     },
     {

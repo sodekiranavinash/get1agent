@@ -25,6 +25,9 @@ export type McpConnection = {
   status: McpConnectionStatus
   enabled: boolean
   toolCount: number
+  accountLogin: string | null
+  accountName: string | null
+  accountAvatarUrl: string | null
   lastError: string | null
   lastRefreshedAt: string | null
   createdAt: string
