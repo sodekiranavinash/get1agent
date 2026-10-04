@@ -160,7 +160,7 @@ floci-rebuild-changed:
 			if [ ! -f "$$package_path" ]; then \
 				echo "🔄 Rebuilding $$name (missing package)..."; \
 				($(MAKE) -C "$$dir" package >/dev/null 2>&1 && echo "✅ Rebuilt $$name" || echo "❌ Failed to rebuild $$name") & \
-			elif [ "$$dir/Makefile" -nt "$$package_path" ] || [ -f "$$dir/handler.py" -a "$$dir/handler.py" -nt "$$package_path" ] || [ -f "$$dir/pyproject.toml" -a "$$dir/pyproject.toml" -nt "$$package_path" ]; then \
+			elif [ "$$dir/Makefile" -nt "$$package_path" ] || [ -f "$$dir/handler.py" -a "$$dir/handler.py" -nt "$$package_path" ] || [ -f "$$dir/pyproject.toml" -a "$$dir/pyproject.toml" -nt "$$package_path" ] || [ -n "$$(find "$$dir/src" -type f -newer "$$package_path" 2>/dev/null | head -n1)" ]; then \
 				echo "🔄 Rebuilding $$name (key files changed)..."; \
 				($(MAKE) -C "$$dir" package >/dev/null 2>&1 && echo "✅ Rebuilt $$name" || echo "❌ Failed to rebuild $$name") & \
 			fi; \

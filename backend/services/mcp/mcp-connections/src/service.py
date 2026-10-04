@@ -162,7 +162,12 @@ def _disabled_tools(connection: dict[str, Any]) -> set[str]:
 
 
 def list_connections(user_id: str) -> list[dict[str, Any]]:
-    return [serialize(item) for item in repo.list_connections(user_id)]
+    items = repo.list_connections(user_id)
+    # One-time, best-effort: identify the account for connections made before
+    # the account feature existed, so the card shows it without a reconnect.
+    for item in items:
+        _backfill_account(user_id, item)
+    return [serialize(item) for item in items]
 
 
 def get_connection(user_id: str, conn_id: str) -> dict[str, Any]:
@@ -406,8 +411,8 @@ def _backfill_account(user_id: str, connection: dict[str, Any]) -> None:
     """Fill in the connected account for connections made before this feature.
 
     Best-effort: only when the account is unknown and the entry declares an
-    identity endpoint, so refreshing shows *which* identity authorized it
-    without forcing a reconnect.
+    identity endpoint. Mutates ``connection`` on success so the caller can
+    serialize the fresh fields.
     """
     if connection.get("accountLogin"):
         return
@@ -417,7 +422,7 @@ def _backfill_account(user_id: str, connection: dict[str, Any]) -> None:
         return
     try:
         token = access_token(user_id, connection)
-    except Exception:  # noqa: BLE001 - never block a refresh on identity
+    except Exception:  # noqa: BLE001 - never block on identity
         return
     account = _fetch_account(entry, token)
     if not account:
@@ -425,7 +430,8 @@ def _backfill_account(user_id: str, connection: dict[str, Any]) -> None:
     try:
         repo.update_connection(user_id, connection["connId"], **account)
     except Exception:  # noqa: BLE001
-        pass
+        return
+    connection.update(account)
 
 
 def handle_callback(query: dict[str, str]) -> dict[str, Any]:
