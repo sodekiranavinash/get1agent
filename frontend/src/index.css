@@ -463,6 +463,70 @@ body {
   animation: flow-y 3.4s ease-in-out infinite;
 }
 
+/* Landing: guardrails shield (orbiting dashed rings, vertical scan) and the
+   agent-memory preview (soft float + recall ripple). */
+@keyframes orbit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-orbit {
+  animation: orbit-spin 16s linear infinite;
+}
+
+.animate-orbit-rev {
+  animation: orbit-spin 24s linear infinite reverse;
+}
+
+@keyframes scan-y {
+  0% {
+    top: -12%;
+    opacity: 0;
+  }
+  12%,
+  88% {
+    opacity: 1;
+  }
+  100% {
+    top: 108%;
+    opacity: 0;
+  }
+}
+
+.animate-scan-y {
+  animation: scan-y 2.4s ease-in-out infinite;
+}
+
+@keyframes ripple-out {
+  from {
+    transform: scale(0.62);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+.animate-ripple {
+  animation: ripple-out 2.2s ease-out infinite;
+}
+
+@keyframes float-soft {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-float {
+  animation: float-soft 5s ease-in-out infinite;
+}
+
 /* Typewriter-style reveal for the streamed answer. */
 @keyframes reveal-x {
   from {
@@ -599,6 +663,11 @@ body {
   .animate-rise,
   .animate-pop,
   .animate-pulse-soft,
+  .animate-orbit,
+  .animate-orbit-rev,
+  .animate-scan-y,
+  .animate-ripple,
+  .animate-float,
   .animate-scan-line,
   .animate-trace-in,
   .animate-trace-row,

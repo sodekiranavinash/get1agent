@@ -381,10 +381,14 @@ resource "aws_iam_role_policy" "microvm_build" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "ReadArtifact"
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = "arn:aws:s3:::${var.artifact_bucket}/${var.microvm_artifact_key}"
+        Sid    = "ReadArtifact"
+        Effect = "Allow"
+        Action = ["s3:GetObject"]
+        # Grant the whole content-addressed microvm prefix, not one hash-specific
+        # key: a rebuilt zip changes the object key, and an exact-key policy was
+        # being applied *after* the image build started, failing it with
+        # "Access denied when fetching artifact from S3".
+        Resource = "arn:aws:s3:::${var.artifact_bucket}/${replace(var.microvm_artifact_key, "/[^/]+$/", "*")}"
       },
       {
         Sid      = "Logs"
@@ -434,8 +438,9 @@ resource "aws_lambdamicrovms_image" "agent_run" {
 
   tags = var.tags
 
-  # The image build reads the zip from S3, so upload it first.
-  depends_on = [aws_s3_object.microvm_artifact]
+  # The build role must be able to read the artifact before the build starts:
+  # upload the zip first, and apply the read policy first too.
+  depends_on = [aws_s3_object.microvm_artifact, aws_iam_role_policy.microvm_build]
 
   # The caller content-addresses `microvm_artifact_key`, so a changed zip yields a
   # new `code_artifact.uri` and the provider applies it as a new image version in

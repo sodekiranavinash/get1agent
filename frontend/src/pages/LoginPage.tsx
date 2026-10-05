@@ -25,6 +25,8 @@ import { AbTestPreview, EvalPreview } from '../components/landing/EvalPreview'
 import { LandingNav } from '../components/landing/LandingNav'
 import { AppFooter } from '../components/layout/AppFooter'
 import { McpBuilderPreview } from '../components/landing/McpBuilderPreview'
+import { GuardrailsPreview } from '../components/landing/GuardrailsPreview'
+import { MemoryPreview } from '../components/landing/MemoryPreview'
 import { Reveal } from '../components/landing/Reveal'
 import { AwsServicesStrip } from '../components/landing/AwsServicesStrip'
 import { SectionHeading } from '../components/landing/SectionHeading'
@@ -136,6 +138,20 @@ const MCP_POINTS = [
   'Every call runs under AgentCore Policy and is namespaced as server/tool.',
 ]
 
+const GUARDRAILS_POINTS = [
+  'Content filters for hate, insults, sexual, violence, misconduct and prompt attacks screen every input and output.',
+  'Denied topics, word filters and 25+ sensitive-information types are blocked or redacted automatically.',
+  'Contextual grounding checks each answer against the retrieved sources, so unsupported claims are caught.',
+  'Attach a guardrail per agent, per workflow or as the workspace default — and change it without touching code.',
+]
+
+const MEMORY_POINTS = [
+  'Facts, preferences and past decisions are extracted automatically after each run — no prompt-stuffing.',
+  'One user-scoped memory is shared by every agent and workflow, recalled across sessions and swarms.',
+  'The Memory page lists and searches every record; erase a single memory or all of it in one click.',
+  'On by default and easy to switch off — and included in your data export and account deletion.',
+]
+
 const DEMO_POINTS = [
   'Run agents and multi-agent workflows',
   'Inspect public traces with tokens and cost',
@@ -154,6 +170,8 @@ const CAPABILITIES = [
   'RAG evaluations',
   'A/B testing',
   'Schedules',
+  'Agent memory',
+  'Guardrails',
   'Secret Vault',
   'Bring your own model',
   'Serverless',
@@ -454,10 +472,10 @@ export function LoginPage() {
         {/* 3 — MCP Builder */}
         <Section className="py-20">
           <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
-            <Reveal className="lg:order-2">
+            <Reveal>
               <McpBuilderPreview />
             </Reveal>
-            <div className="lg:order-1">
+            <div>
               <SectionHeading
                 align="left"
                 eyebrow="MCP Builder"
@@ -469,7 +487,43 @@ export function LoginPage() {
           </div>
         </Section>
 
-        {/* 4 — Observability */}
+        {/* 4 — Guardrails */}
+        <Section className="py-20">
+          <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
+            <div>
+              <SectionHeading
+                align="left"
+                eyebrow="Guardrails"
+                title="Screen every prompt and reply, automatically."
+                description="Attach a Bedrock guardrail to an agent, a workflow or your whole workspace. It runs on every model call — before the model sees a prompt, and before you see a reply."
+              />
+              <CheckList items={GUARDRAILS_POINTS} />
+            </div>
+            <Reveal>
+              <GuardrailsPreview />
+            </Reveal>
+          </div>
+        </Section>
+
+        {/* 5 — Agent memory */}
+        <Section className="py-20">
+          <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
+            <Reveal>
+              <MemoryPreview />
+            </Reveal>
+            <div>
+              <SectionHeading
+                align="left"
+                eyebrow="Agent memory"
+                title="An agent that remembers you."
+                description="A single user-scoped memory is shared by every agent and workflow you run — so a preference told in one chat is recalled in the next, and by every teammate."
+              />
+              <CheckList items={MEMORY_POINTS} />
+            </div>
+          </div>
+        </Section>
+
+        {/* 6 — Observability */}
         <Section className="py-20">
           <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
             <div>
@@ -487,7 +541,7 @@ export function LoginPage() {
           </div>
         </Section>
 
-        {/* 5 — Evaluations & A/B */}
+        {/* 7 — Evaluations & A/B */}
         <Section className="py-20">
           <SectionHeading
             eyebrow="Evaluations & A/B testing"
@@ -526,7 +580,7 @@ export function LoginPage() {
 
         <AwsServicesStrip />
 
-        {/* 6 — Demo highlight (closing CTA) */}
+        {/* 8 — Demo highlight (closing CTA) */}
         <Section className="pb-8">
           <Reveal>
             <div className="relative overflow-hidden rounded-3xl border border-accent/30 bg-gradient-to-br from-accent-soft via-surface/50 to-violet-soft px-6 py-10 backdrop-blur-xl sm:px-10">
