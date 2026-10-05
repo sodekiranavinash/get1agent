@@ -20,12 +20,14 @@ import {
   fetchBedrockFeatures,
   fetchBrowser,
   fetchIdentity,
+  fetchNetworkSettings,
   fetchOptimization,
   fetchRegistry,
   openBrowserSession,
   publishRegistryRecord,
   requestIdentityToken,
   searchRegistry,
+  updateNetworkSettings,
   type BrowserSession,
   type IdentityTokenResult,
   type RegistryRecord,
@@ -65,14 +67,15 @@ function providerLabel(arn: string): string {
 export function AdminPlatformPage() {
   const api = useApiClient()
   const { data, isPending, error: loadError, refetch } = usePageQuery('admin-platform', async () => {
-    const [identity, registry, browser, optimization, bedrock] = await Promise.all([
+    const [identity, registry, browser, optimization, bedrock, network] = await Promise.all([
       settle(fetchIdentity(api)),
       settle(fetchRegistry(api)),
       settle(fetchBrowser(api)),
       settle(fetchOptimization(api)),
       settle(fetchBedrockFeatures(api)),
+      settle(fetchNetworkSettings(api)),
     ])
-    return { identity, registry, browser, optimization, bedrock }
+    return { identity, registry, browser, optimization, bedrock, network }
   })
 
   const [url, setUrl] = useState('')
@@ -478,6 +481,78 @@ export function AdminPlatformPage() {
               }
             />
           </dl>
+        )}
+      </section>
+
+      {/* Network tools — platform kill switch + limits */}
+      <section className="mt-4 rounded-lg border border-border bg-surface p-5">
+        <header className="flex items-center gap-2">
+          <Globe className="h-4 w-4 text-accent" strokeWidth={1.75} />
+          <h2 className="text-[13px] font-semibold text-foreground">Network tools</h2>
+          {data.network.data ? (
+            <span
+              className={`ml-auto rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                data.network.data.enabled
+                  ? 'border-accent text-accent'
+                  : 'border-border text-subtle'
+              }`}
+            >
+              {data.network.data.enabled ? 'Enabled' : 'Disabled'}
+            </span>
+          ) : null}
+        </header>
+        <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
+          The kill switch for user tools that reach the public internet — the MCP
+          Builder sandbox and the HTTP Fetch tool. When off, custom tools run with
+          no network and HTTP Fetch refuses; pure/calculation tools keep working.
+        </p>
+        {data.network.error || !data.network.data ? (
+          <Unavailable message={data.network.error ?? 'Unavailable'} />
+        ) : (
+          <>
+            <dl className="mt-3 grid gap-1.5 text-[12px] sm:grid-cols-2">
+              <Row
+                label="Kill switch"
+                value={data.network.data.enabled ? 'Network enabled' : 'Network disabled'}
+              />
+              <Row
+                label="Rate limit"
+                value={`${data.network.data.limitPerWindow}/hour`}
+              />
+              <Row
+                label="Connections per run"
+                value={String(data.network.data.maxConnectionsPerRun)}
+              />
+              <Row
+                label="Run timeout"
+                value={`${data.network.data.execTimeoutSeconds}s · test ${data.network.data.testExecTimeoutSeconds}s`}
+              />
+            </dl>
+            <button
+              type="button"
+              disabled={busy === 'network'}
+              onClick={() =>
+                run('network', async () => {
+                  await updateNetworkSettings(api, !data.network.data!.enabled)
+                  await refetch()
+                })
+              }
+              className={`mt-3 inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-[12px] font-medium disabled:opacity-60 ${
+                data.network.data.enabled
+                  ? 'border border-border text-rose'
+                  : 'bg-accent text-background'
+              }`}
+            >
+              {busy === 'network' ? <Spinner /> : null}
+              {data.network.data.enabled ? 'Disable network tools' : 'Enable network tools'}
+            </button>
+            {data.network.data.updatedBy ? (
+              <p className="mt-2 text-[11px] text-subtle">
+                Last changed by {data.network.data.updatedBy}
+                {data.network.data.updatedAt ? ` · ${data.network.data.updatedAt}` : ''}.
+              </p>
+            ) : null}
+          </>
         )}
       </section>
 

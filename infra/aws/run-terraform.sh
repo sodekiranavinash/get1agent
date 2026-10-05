@@ -117,7 +117,7 @@ run_env() {
       need_backend=true
     else
       case "$PROD_TARGETS" in
-        *user_api*|*knowledge_mcp*|*ingestion*|*admin_console*|*code_interpreter*|*http_fetch*|*custom_tools*|*mcp_connections*|*browser*|*scheduler*)
+        *user_api*|*knowledge_mcp*|*ingestion*|*admin_console*|*code_interpreter*|*http_fetch*|*storage*|*custom_tools*|*mcp_connections*|*browser*|*scheduler*)
           need_backend=true
           ;;
       esac
@@ -136,6 +136,7 @@ run_env() {
     check_zip "$ROOT/backend/services/admin/admin-console/dist/function.zip" "admin-console" "make -C backend/services/admin/admin-console package"
     check_zip "$ROOT/backend/services/mcp/code-interpreter/dist/function.zip" "code-interpreter" "make -C backend/services/mcp/code-interpreter package"
     check_zip "$ROOT/backend/services/mcp/http-fetch/dist/function.zip" "http-fetch" "make -C backend/services/mcp/http-fetch package"
+    check_zip "$ROOT/backend/services/mcp/storage/dist/function.zip" "storage" "make -C backend/services/mcp/storage package"
     check_zip "$ROOT/backend/services/mcp/mcp-connections/dist/function.zip" "mcp-connections" "make -C backend/services/mcp/mcp-connections package"
 
     # Never let an unset image URI destroy a deployed AgentCore runtime. An empty

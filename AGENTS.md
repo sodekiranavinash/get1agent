@@ -13,7 +13,7 @@ backend/
   services/            Lambda apps, grouped by category (see below)
   services/apis/       user-api
   services/admin/      admin-console
-  services/mcp/        knowledge-mcp, code-interpreter, http-fetch, browser, custom-tools, mcp-connections
+  services/mcp/        knowledge-mcp, code-interpreter, http-fetch, storage, browser, custom-tools, mcp-connections
   services/ingestion/  ingestion-{dispatcher,extract,embed,index,mark-failed,watchdog}
   services/scheduler/  scheduled agent/workflow runs
   services/agent-run/  AgentCore control-plane Lambda + MicroVM proxy
@@ -73,7 +73,7 @@ shared modules it uses, **and all third-party dependencies** to the zip root and
 | Lambda | Key Dependencies |
 |---|---|
 | `user-api` | `python-dateutil`, `tzdata` |
-| `knowledge-mcp`, `code-interpreter`, `http-fetch`, `custom-tools`, `mcp-connections`, `browser` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata` |
+| `knowledge-mcp`, `code-interpreter`, `http-fetch`, `storage`, `custom-tools`, `mcp-connections`, `browser` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata` |
 | `ingestion-extract` | `pymupdf`, `python-docx`, `openpyxl`, `python-dateutil`, `tzdata` |
 | `admin-console`, `scheduler` | `python-dateutil`, `tzdata` |
 | Other ingestion Lambdas | None (lightweight) |
@@ -115,6 +115,8 @@ chunks or postings in DynamoDB.
 | Conversation | `USER#<userId>` | `CHAT#<globalId>` | `byId` (`CHATAGENT#<agentId>`); `byUser` (`CHAT#<updatedAt>#<id>`) |
 | Playground session | `USER#<userId>` | `PGSESSION#<sessionId>` | `byUser` (`PGSESSION#<updatedAt>#<id>`) |
 | Conversation counter | `COUNTER#conversations` | `#SEQ` | — |
+| Platform settings | `PLATFORM#SETTINGS` | `#FLAGS` | — (admin flags incl. the network kill switch) |
+| Network rate window | `RATE#custom-tools#<userId>` | `W#<window>` | — (TTL; atomic per-window counter) |
 | Run feedback | `USER#<userId>` | `FEEDBACK#<runId>` | — |
 | MCP connection | `USER#<userId>` | `MCPCONN#<connId>` | — |
 | MCP OAuth state | `USER#<userId>` | `MCPSTATE#<state>` | — (TTL, single-use) |
@@ -268,8 +270,10 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   stateless) exposing its tools over its own `POST /mcp…` route behind the Auth0
   JWT authorizer, plus the direct Lambda invoke transport. `knowledge-mcp` owns
   the knowledge tools (`POST /mcp`), `code-interpreter` owns `code-interpreter`
-  (`POST /mcp/code-interpreter`) and `http-fetch` owns `http-fetch`,
-  `list-storage-files` and `read-storage-file` (`POST /mcp/http-fetch`).
+  (`POST /mcp/code-interpreter`), `http-fetch` owns `http-fetch`
+  (`POST /mcp/http-fetch`), and `storage` owns `list-storage-files`,
+  `read-storage-file`, `write-storage-file` and `delete-storage-file`
+  (`POST /mcp/storage`).
   `web-search` is **not** a Lambda: it is the AgentCore Gateway's built-in
   `web-search` connector (see "Web search tool").
 - Knowledge base names follow **S3-bucket-style rules** (lowercase letters,
@@ -328,13 +332,21 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - `code-interpreter` (`backend/services/mcp/code-interpreter/`) is its own MCP server
   Lambda (`POST /mcp/code-interpreter`) owning the `code-interpreter` tool. It
   runs LLM-generated Python in **Bedrock AgentCore Code Interpreter** sandboxes
-  (`aws.codeinterpreter.v1`, available in `ap-south-1`). It is **outside the
-  VPC** (AgentCore + DynamoDB are public endpoints).
+  (the restrictive system resource `aws.codeinterpreter.v1`, available in
+  `ap-south-1`) — **no public internet, and heavy ML is blocked**, because this
+  tool is for calculations. It is **outside the VPC** (AgentCore + DynamoDB are
+  public endpoints). The MCP Builder's `custom-tools` sandbox instead runs on a
+  **custom `aws_bedrockagentcore_code_interpreter` in PUBLIC network mode**
+  (`get1agent-prod-mcp-tools`), so user-built tools can call web APIs.
 - **Guard**: before any AWS call, the guard runs an AST/literal pass blocking
-  OS/shell, network/cloud SDKs, dynamic code and heavy ML. `BLOCKED_MODULES`/
-  `ALLOWED_MODULES` extend/except the list. Every execution is also prefixed with
-  an idempotent `sys.addaudithook` prelude. The microVM remains the real
-  isolation boundary.
+  OS/shell, dynamic code and heavy ML. `BLOCKED_MODULES`/`ALLOWED_MODULES`
+  extend/except the list. Every execution is also prefixed with an idempotent
+  `sys.addaudithook` prelude. The microVM remains the real isolation boundary.
+  When a sandbox is granted `allow_network` (`CUSTOM_TOOLS_ALLOW_NETWORK`), only
+  the HTTP(S) stack (`socket`/`ssl`/`urllib`/`requests`/…) is lifted; the
+  runtime hook still counts outbound connections (`CUSTOM_TOOLS_MAX_CONNECTIONS`,
+  25/run) and refuses private/loopback/link-local/reserved/cloud-metadata
+  addresses, and the heavy-ML/process/dynamic-code blocks stay in force.
 - The guard, AgentCore session/exec client and local-subprocess fallback live in
   the shared **`core.sandbox`** package (`packages/core/sandbox/`), used by both
   `code-interpreter` and `custom-tools` (`core.sandbox.run_code`).
@@ -373,36 +385,47 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   local `aggregator` transport (AgentCore Gateway is not emulated in Floci) the
   `web-search` tool is simply not offered.
 
-### HTTP fetch & storage access tool
+### HTTP fetch tool
 
 - `http-fetch` (`backend/services/mcp/http-fetch/`) is its own MCP server Lambda
-  (`POST /mcp/http-fetch`, group `mcp-tools`) owning three tools:
-  - **`http-fetch`** — fetch a public `http(s)` URL/API endpoint in **trusted
-    code** (never the sandbox) and **save the response to the caller's S3
-    storage** (`storage/<userId>/<fileId>/<fileName>` + a `STORAGE#` item), so
-    it is a first-class Storage file and obeys the 10-file / 30 MB / 100 MB
-    limits. It returns the file metadata + a presigned `downloadUrl`, never the
-    bytes. Supports HTML, JSON, XML, CSV, text and binary.
-  - **`list-storage-files`** — list the caller's stored files (fetched or
-    uploaded).
-  - **`read-storage-file`** — read one stored file back by id (JSON parsed,
-    text decoded, binary base64), capped at `maxChars` (default 20 000).
+  (`POST /mcp/http-fetch`, group `mcp-tools`) owning exactly one tool,
+  **`http-fetch`**: call a public `http(s)` URL/API endpoint in **trusted code**
+  (never the user sandbox) and **return the response inline** — JSON parsed, text
+  decoded, binary base64-encoded — capped at `maxBytes` (2 MB default, 10 MB
+  max) and `maxChars` (200 000 default). It has **no storage capability**; bytes
+  are never persisted (that is the separate `storage` server). Supports
+  GET/POST/PUT/PATCH/DELETE/HEAD with optional headers and body.
 - **SSRF guard** (`src/fetcher.py`): only `http`/`https`, no embedded
   credentials; the hostname is resolved and **every** address checked against a
   loopback/private/link-local/reserved/metadata denylist; the connection is
   **pinned to the validated IP** while keeping the `Host` header + TLS SNI (so a
   DNS rebind cannot redirect it); redirects are followed manually and
   re-validated; size/time capped. Optional `HTTP_FETCH_ALLOWED_DOMAINS`
-  (comma-separated suffix allowlist) hardens prod.
-- Identity: HTTP requests resolve the JWT `sub` → internal `userId`
-  (`resolve_user_id`); direct invokes carry `userId`. Files are scoped by that
-  userId, so one user can never read another's. This is also how the agent
-  runtime (and agent-to-agent handoff) accesses uploaded/stored S3 files.
-- Config: `HTTP_FETCH_ALLOWED_DOMAINS` (optional), `HTTP_FETCH_TIMEOUT_SECONDS`.
-  No local emulation branch — Floci containers reach the public internet
-  directly. The Playground's sandboxed custom tools cannot fetch themselves;
-  the agent calls `http-fetch`, then `read-storage-file`, and passes the content
-  to a custom tool as an argument.
+  (comma-separated suffix allowlist) hardens prod. No local emulation branch —
+  Floci containers reach the public internet directly.
+
+### Storage MCP server
+
+- `storage` (`backend/services/mcp/storage/`) is its own MCP server Lambda
+  (`POST /mcp/storage`, group `mcp-tools`) and owns the caller's standalone
+  storage files. Four tools: **`list-storage-files`** (id, name, content type,
+  size, status, timestamps), **`read-storage-file`**
+  (`{fileId, format? (auto|text|json|base64), maxChars?}` — default 20 000, max
+  200 000 chars), **`write-storage-file`** (`{fileName, content, contentType?,
+  encoding? (text|base64)}` — creates a new file and returns its metadata + a
+  presigned `downloadUrl`), and **`delete-storage-file`** (`{fileId}` — deletes
+  the S3 object and its item).
+- One DynamoDB item per file (`USER#<userId>` / `STORAGE#<fileId>`) and the
+  bytes at `storage/<userId>/<fileId>/<fileName>`; writes obey the same limits
+  as uploads (**10 files, 30 MB per file, 100 MB total**). Identity resolves the
+  JWT `sub` → internal `userId` for HTTP, and direct invokes carry `userId`, so a
+  user can never see another's files. This is how the agent runtime reads/writes
+  the user's uploaded/stored S3 files.
+- **Agent flow** — each tool does one job: **`http-fetch`** gets a URL's JSON,
+  **`code-interpreter`** calculates over it (no internet there), and
+  **`storage`** persists the result. The MCP Builder's own tools run with public
+  internet in their sandbox (below), so a self-contained tool may call an API
+  directly and return the conversion/result itself.
 
 ### Custom tools (MCP Builder)
 
@@ -463,14 +486,38 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   (`src/harness.py`) invokes `run` and prints a line-delimited marker so the
   result is recovered from the sandbox output.
 - **Execution** uses the shared `core.sandbox` (AgentCore in prod; guarded local
-  subprocess with `CUSTOM_TOOLS_MODE=local` under Floci). The test route
-  direct-invokes `custom-tools` (IAM-trusted, no API-Gateway 30s cap); the SPA
-  never executes user code.
+  subprocess with `CUSTOM_TOOLS_MODE=local` under Floci). In prod it runs on the
+  **custom PUBLIC Code Interpreter** (`CUSTOM_TOOLS_IDENTIFIER`), so user tools
+  can reach the public internet; the sandbox guard still caps outbound
+  connections (`CUSTOM_TOOLS_MAX_CONNECTIONS`, 25/run), refuses private/
+  loopback/metadata destinations, and blocks heavy ML, process spawning and
+  dynamic code. The test route direct-invokes `custom-tools` (IAM-trusted, no
+  API-Gateway 30s cap); the SPA never executes user code.
+- **Guardrails & limits** (surfaced in the generator prompt so the model tells
+  the user and offers a compliant alternative): public HTTP(S) only; **≤ 25
+  outbound connections per run**; **~90 s per real tool call**
+  (`CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS`) and **180 s while testing**
+  (`CUSTOM_TOOLS_TEST_EXEC_TIMEOUT_SECONDS`); a per-user **rate limit of 60
+  network-enabled runs/hour** (`CUSTOM_TOOLS_RUNS_PER_HOUR`, enforced with an
+  atomic `core.ratelimit` counter); heavy ML libraries, `subprocess`, `ctypes`
+  and `eval`/`exec` blocked. The custom-tools Lambda timeout is 300 s to fit the
+  test budget.
+- **Admin kill switch + usage.** `networkToolsEnabled` on the platform settings
+  item (`PLATFORM#SETTINGS` / `#FLAGS`, `data/repositories/platform.py`) is read
+  by `core.network.enabled()` and can be flipped at runtime from the admin
+  Platform page (`GET/POST /v1/admin/platform/network`). When off, custom tools
+  run with `allow_network=False` (pure tools still work) and `http-fetch`
+  returns `network_disabled`. Every network-enabled run is counted on the user's
+  quota item (`networkRuns` / `lastNetworkRunAt`) and, together with the
+  current-hour window (`core.ratelimit.current`) and the limits in force, is
+  served at **`GET /v1/user/network`** and shown on the **Usage** page.
 - **AI generation**: `POST /v1/custom-tools/generate` (and the turn worker above)
   makes one **Amazon Bedrock (Converse)** call (`CUSTOM_TOOLS_GENERATOR_MODEL`,
   default `zai.glm-4.7-flash`) returning `{name, description, code,
   inputSchema, outputSchema}`; the Playground re-sends the current code and last
-  test error to iteratively refine it. The synchronous `/generate` route is
+  test error to iteratively refine it. The system prompt states the network
+  capability and the limits above so the model refuses/gwarns instead of emitting
+  code that will fail. The synchronous `/generate` route is
   capped at `CUSTOM_TOOLS_GENERATE_TIMEOUT_SECONDS` (25, under the gateway's
   30s); the turn worker uses `CUSTOM_TOOLS_GENERATE_ASYNC_TIMEOUT_SECONDS` (240,
   under user-api's 300s Lambda timeout). `CUSTOM_TOOLS_GENERATE_MAX_TOKENS`
@@ -501,8 +548,8 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - The parse/render/validation logic lives in the user-api app's `src/skills/`
   (no PyYAML). `POST /parse` is what the editor calls when a user uploads a `.md`.
 - **allowed-tools** lists whole **MCP servers**, not individual tools. Built-in
-  servers `code-interpreter`, `web-search` and `http-fetch` are offered to
-  everyone;
+  servers `code-interpreter`, `web-search`, `http-fetch` and `storage` are
+  offered to everyone;
   knowledge-base tools are internal and never shown. The user's connected,
   enabled remote servers are offered by server id (slug). Individual tools are
   enabled/disabled on the MCP page, so skills never reference tool names.
@@ -1303,7 +1350,10 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   and a Manage link), and the **Resources** tab aggregates the real limits already
   returned by `/v1/knowledge-bases`, `/v1/storage/files`, `/v1/agents`,
   `/v1/workflows`, `/v1/agent-skills`, `/v1/mcp/connections` and
-  `/v1/vault/secrets`. There is **no billing/credit backend**, so no invoice or
+  `/v1/vault/secrets`. The **Network tools** card reads `GET /v1/user/network`
+  (current-hour runs vs the rate limit, all-time network runs, the per-run
+  connection cap, timeouts and whether an admin disabled network access). There
+  is **no billing/credit backend**, so no invoice or
   balance data is fabricated — every number on the page is server-derived.
 - The eval lab is fully AWS-native: datasets + cases in DynamoDB, per-case
   artifacts in S3, metrics on the run item. The worker can run either the RAG task
@@ -1386,7 +1436,7 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
 - The platform's MCP servers are fronted by one **AgentCore Gateway**
   (`aws_bedrockagentcore_gateway`, protocol `MCP`, `AWS_IAM` authorizer, semantic
   tool search). Every MCP Lambda (knowledge, code-interpreter,
-  http-fetch, custom-tools, remote MCP) is registered as a **Lambda target**
+  http-fetch, storage, custom-tools, remote MCP) is registered as a **Lambda target**
   (`aws_bedrockagentcore_gateway_target`, `target_configuration.mcp.lambda`), so
   agents call a single signed HTTPS endpoint instead of invoking each function.
 - The deployed runtime sets `MCP_TRANSPORT=gateway` and receives the endpoint as
@@ -1577,7 +1627,7 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
   (`GET /v1/admin/users`, `POST /v1/admin/users/{userId}/{credits|reset}`), the
   support/security inboxes and the admin **Platform status** routes
   (`/v1/admin/platform/*`: Identity, Registry, Browser, Optimization, Bedrock
-  levers) — see
+  levers, Network tools) — see
   the budget section. The admin SPA pages are `AdminIntegrationsPage`
   (`/admin/mcp-tools`) and `AdminUsersPage` (`/admin/users`, sidebar "AI Credits").
 

@@ -182,8 +182,9 @@ export const ARCHITECTURE: DiagramSpec = {
         [
           { id: 'knowledge', kind: 'lambda', title: 'knowledge-mcp', subtitle: 'hybrid search · RRF', icon: Search, aws: 'lambda' },
           { id: 'codeint', kind: 'lambda', title: 'code-interpreter', subtitle: 'Python sandbox', icon: SquareTerminal, aws: 'lambda' },
-          { id: 'fetch', kind: 'lambda', title: 'http-fetch', subtitle: 'URL + storage access', icon: Download, aws: 'lambda' },
-          { id: 'customtools', kind: 'lambda', title: 'custom-tools', subtitle: 'user-built MCP tools', icon: Wrench, aws: 'lambda' },
+          { id: 'fetch', kind: 'lambda', title: 'http-fetch', subtitle: 'public URL → inline response', icon: Download, aws: 'lambda' },
+          { id: 'storage', kind: 'lambda', title: 'storage', subtitle: 'user files · list/read/write', icon: HardDrive, aws: 'lambda' },
+          { id: 'customtools', kind: 'lambda', title: 'custom-tools', subtitle: 'user-built MCP tools · net-guarded', icon: Wrench, aws: 'lambda' },
           { id: 'mcpconn', kind: 'lambda', title: 'mcp-connections', subtitle: 'remote MCP · OAuth broker', icon: Plug, aws: 'lambda' },
           { id: 'browsermcp', kind: 'lambda', title: 'browser', subtitle: 'AgentCore Browser sessions', icon: Globe, aws: 'lambda' },
         ],

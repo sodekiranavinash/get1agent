@@ -75,7 +75,7 @@ export const DOCS: DocGroup[] = [
               'Agent: one saved configuration — a system prompt, a model, an answer mode, optional knowledge bases, MCP servers, skills and attached files. Runs stream live in Chat.',
               'Workflow: several saved agents coordinated by a host agent, either as a deterministic graph or a dynamic swarm. Workflows reference agents by id; they never embed them.',
               'Knowledge base: a searchable collection of documents. Hybrid search (semantic + keyword) with small-to-big retrieval returns precise passages plus their surrounding page.',
-              'MCP server: a Model Context Protocol tool server. Built-ins are web-search, code-interpreter, http-fetch and browser; remote servers are connected over OAuth or an API key; custom servers are Python tools you build in the MCP Builder. Every tool call is routed through AgentCore Gateway and checked by AgentCore Policy.',
+              'MCP server: a Model Context Protocol tool server. Built-ins are web-search, code-interpreter, http-fetch, storage and browser; remote servers are connected over OAuth or an API key; custom servers are Python tools you build in the MCP Builder. Every tool call is routed through AgentCore Gateway and checked by AgentCore Policy.',
               'Skill: a Strands-format markdown document (YAML frontmatter plus a body) that grants an agent reusable instructions and declares which MCP servers it may use.',
               'Memory: durable facts and preferences an agent keeps across sessions in AgentCore Memory, shared by that user\u2019s agents.',
               'Conversation: one persisted transcript. Chat and builder runs each create a conversation that can be reopened later from the sidebar or History tab.',
@@ -473,7 +473,7 @@ export const DOCS: DocGroup[] = [
           {
             kind: 'steps',
             items: [
-              'To author your own, create a skill in the editor: set the name, description and allowed MCP servers (the built-ins code-interpreter, web-search and http-fetch are always offered), then write the body — or upload an existing .md file and let the parser fill the fields.',
+              'To author your own, create a skill in the editor: set the name, description and allowed MCP servers (the built-ins code-interpreter, web-search, http-fetch and storage are always offered), then write the body — or upload an existing .md file and let the parser fill the fields.',
               'To browse, open the Marketplace or Skills Registry tab, optionally filter by kind, and search.',
               'To import, click Import on a card. An import preview fetches and parses the skill; choose the name and which MCP servers to grant, then confirm.',
               'To import from a repository, use resolve-repo with an owner/repo reference to list the SKILL.md files it contains, then preview and import.',
@@ -505,7 +505,7 @@ export const DOCS: DocGroup[] = [
         blocks: [
           {
             kind: 'paragraph',
-            text: 'The MCP Tools page lists the built-in tools that need no setup, then your connected remote servers. Built-ins are Web Search (real-time web results with citations), Code Interpreter (Python in a sandbox) and HTTP Fetch (call a public URL and save the response to Storage, plus list-storage-files and read-storage-file).',
+            text: 'The MCP Tools page lists the built-in tools that need no setup, then your connected remote servers. Built-ins are Web Search (real-time web results with citations), Code Interpreter (Python in a sandbox, no internet), HTTP Fetch (call a public URL and return the response inline), and Storage (list, read, write and delete the user’s files).',
           },
           {
             kind: 'paragraph',
@@ -987,7 +987,7 @@ export const DOCS: DocGroup[] = [
               'A document stays Processing: ingestion retries automatically and a watchdog fails anything stuck past the threshold. Re-upload the document and note its id.',
               'Search returns nothing: confirm the knowledge base is Ready and attached to the agent, and that your query is not restricted by tags that no document carries.',
               'A remote MCP connection shows Reconnect: the token was revoked or expired. Run Reconnect from the connection card.',
-              'A custom tool times out or errors: check the Test dialog first. Tools cannot reach the network — use HTTP Fetch and read-storage-file instead.',
+              'A custom tool times out or errors: check the Test dialog first. Tools run sandboxed with public HTTP(S) access (up to 25 network calls and ~90s per run, 180s while testing); heavy ML libraries and private hosts are blocked. Use Storage for files and Code Interpreter for heavy calculations.',
               'The Chat composer stops accepting messages and the context meter is full: start a new chat to continue with a fresh context.',
               'Credits are exhausted: add a provider key in the Vault to run on your own account, or ask an admin for more credits.',
               'A workflow run produces no visible answer: open View final answer to read the persisted conversation in Chat. Intermediate agent text is intentionally not streamed.',

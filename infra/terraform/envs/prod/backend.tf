@@ -10,6 +10,7 @@ locals {
   admin_console_zip        = abspath("${path.module}/../../../../backend/services/admin/admin-console/dist/function.zip")
   code_interpreter_zip     = abspath("${path.module}/../../../../backend/services/mcp/code-interpreter/dist/function.zip")
   http_fetch_zip           = abspath("${path.module}/../../../../backend/services/mcp/http-fetch/dist/function.zip")
+  storage_zip              = abspath("${path.module}/../../../../backend/services/mcp/storage/dist/function.zip")
   custom_tools_zip         = abspath("${path.module}/../../../../backend/services/mcp/custom-tools/dist/function.zip")
   mcp_connections_zip      = abspath("${path.module}/../../../../backend/services/mcp/mcp-connections/dist/function.zip")
   ingestion_dispatcher_zip = abspath("${path.module}/../../../../backend/services/ingestion/ingestion-dispatcher/dist/function.zip")
@@ -84,6 +85,7 @@ resource "aws_iam_role_policy" "gateway" {
           module.knowledge_mcp[0].function_arn,
           module.code_interpreter[0].function_arn,
           module.http_fetch[0].function_arn,
+          module.storage[0].function_arn,
           module.custom_tools[0].function_arn,
           module.mcp_connections[0].function_arn,
         ]
@@ -194,7 +196,8 @@ locals {
   gateway_lambda_targets = var.enable_backend_lambdas ? {
     knowledge        = { arn = module.knowledge_mcp[0].function_arn, desc = "User knowledge bases (hybrid search)", schema = "knowledge" }
     code-interpreter = { arn = module.code_interpreter[0].function_arn, desc = "Sandboxed code execution", schema = "code-interpreter" }
-    http-fetch       = { arn = module.http_fetch[0].function_arn, desc = "Fetch URLs and read stored files", schema = "http-fetch" }
+    http-fetch       = { arn = module.http_fetch[0].function_arn, desc = "Fetch public URLs and return the response", schema = "http-fetch" }
+    storage          = { arn = module.storage[0].function_arn, desc = "List, read and write user storage files", schema = "storage" }
     custom-tools     = { arn = module.custom_tools[0].function_arn, desc = "User-built MCP tools", schema = "custom-tools" }
     remote-mcp       = { arn = module.mcp_connections[0].function_arn, desc = "Connected remote MCP servers", schema = "remote-mcp" }
   } : {}
@@ -729,6 +732,13 @@ check "http_fetch_zip_exists" {
   }
 }
 
+check "storage_zip_exists" {
+  assert {
+    condition     = !var.enable_backend_lambdas || fileexists(local.storage_zip)
+    error_message = "storage zip not found at ${local.storage_zip}. Run: make -C backend/services/mcp/storage package"
+  }
+}
+
 check "custom_tools_zip_exists" {
   assert {
     condition     = !var.enable_backend_lambdas || fileexists(local.custom_tools_zip)
@@ -892,8 +902,13 @@ module "user_api" {
     # Custom-tools (Playground): run tests + generate tool code.
     CUSTOM_TOOLS_FUNCTION        = module.custom_tools[0].function_name
     CUSTOM_TOOLS_GENERATOR_MODEL = "zai.glm-4.7-flash"
-    BEDROCK_REGION               = var.aws_region
-    BEDROCK_CHAT_MODEL           = "zai.glm-4.7-flash"
+    # Reported by GET /v1/user/network (must mirror the custom-tools Lambda).
+    CUSTOM_TOOLS_RUNS_PER_HOUR             = "60"
+    CUSTOM_TOOLS_MAX_CONNECTIONS           = "25"
+    CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS      = "90"
+    CUSTOM_TOOLS_TEST_EXEC_TIMEOUT_SECONDS = "180"
+    BEDROCK_REGION                         = var.aws_region
+    BEDROCK_CHAT_MODEL                     = "zai.glm-4.7-flash"
     # Bedrock Guardrails: the standalone tester + workspace reference.
     GUARDRAIL_ID = local.guardrail_id
     # Cost/latency levers for the Labs.
@@ -1060,6 +1075,7 @@ module "admin_console" {
     module.knowledge_mcp[0].function_arn,
     module.code_interpreter[0].function_arn,
     module.http_fetch[0].function_arn,
+    module.storage[0].function_arn,
   ]
 
   environment = {
@@ -1068,6 +1084,7 @@ module "admin_console" {
       module.knowledge_mcp[0].function_name,
       module.code_interpreter[0].function_name,
       module.http_fetch[0].function_name,
+      module.storage[0].function_name,
     ])
     MCP_GATEWAY_URL = length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_url : ""
     MCP_TRANSPORT   = "gateway"
@@ -1098,6 +1115,7 @@ module "admin_console" {
     module.knowledge_mcp,
     module.code_interpreter,
     module.http_fetch,
+    module.storage,
   ]
 }
 
@@ -1158,6 +1176,33 @@ module "http_fetch" {
     S3_BUCKET                  = module.knowledge_storage[0].bucket_name
     S3_REGION                  = var.aws_region
     HTTP_FETCH_ALLOWED_DOMAINS = var.http_fetch_allowed_domains
+  }
+
+  depends_on = [module.database, module.knowledge_storage]
+}
+
+module "storage" {
+  count  = var.enable_backend_lambdas ? 1 : 0
+  source = "../../modules/lambda_function"
+
+  name             = "get1agent-prod-storage"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.storage_zip
+  source_code_hash = try(filebase64sha256(local.storage_zip), "")
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = []
+
+  memory_size = 512
+  timeout     = 60
+
+  s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
+  dynamodb_table_arns = [module.database[0].table_arn]
+
+  environment = {
+    DYNAMODB_TABLE = module.database[0].table_name
+    S3_BUCKET      = module.knowledge_storage[0].bucket_name
+    S3_REGION      = var.aws_region
   }
 
   depends_on = [module.database, module.knowledge_storage]
@@ -1269,31 +1314,64 @@ module "custom_tools" {
   layer_arns       = []
 
   memory_size = 1024
-  timeout     = 180
+  # The MCP Builder test path may run up to
+  # CUSTOM_TOOLS_TEST_EXEC_TIMEOUT_SECONDS (180s); allow room for session setup.
+  timeout = 300
 
   bedrock_agentcore_arns = [
-    "arn:aws:bedrock-agentcore:${var.aws_region}:aws:code-interpreter/*",
+    aws_bedrockagentcore_code_interpreter.mcp_tools[0].code_interpreter_arn,
   ]
   s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
   dynamodb_table_arns = [module.database[0].table_arn]
 
   environment = {
-    CUSTOM_TOOLS_MODE                    = "agentcore"
-    CUSTOM_TOOLS_IDENTIFIER              = "aws.codeinterpreter.v1"
-    CUSTOM_TOOLS_REGION                  = var.aws_region
-    CUSTOM_TOOLS_SESSIONS_TABLE          = module.database[0].table_name
-    DYNAMODB_TABLE                       = module.database[0].table_name
-    S3_BUCKET                            = module.knowledge_storage[0].bucket_name
-    S3_REGION                            = var.aws_region
-    CUSTOM_TOOLS_SESSION_TIMEOUT_SECONDS = "900"
-    CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS    = "60"
-    CUSTOM_TOOLS_MAX_SESSIONS_PER_USER   = "1"
-    CUSTOM_TOOLS_MAX_CODE_BYTES          = "65536"
-    CUSTOM_TOOLS_MAX_OUTPUT_CHARS        = "50000"
-    CUSTOM_TOOLS_MAX_RESULT_CHARS        = "20000"
+    CUSTOM_TOOLS_MODE = "agentcore"
+    # A custom Code Interpreter in PUBLIC network mode: user-built tools may call
+    # web APIs. The sandbox guard still caps outbound connections per run and
+    # refuses private/loopback/metadata addresses, and heavy libraries stay
+    # blocked.
+    CUSTOM_TOOLS_IDENTIFIER                = aws_bedrockagentcore_code_interpreter.mcp_tools[0].code_interpreter_id
+    CUSTOM_TOOLS_REGION                    = var.aws_region
+    CUSTOM_TOOLS_SESSIONS_TABLE            = module.database[0].table_name
+    DYNAMODB_TABLE                         = module.database[0].table_name
+    S3_BUCKET                              = module.knowledge_storage[0].bucket_name
+    S3_REGION                              = var.aws_region
+    CUSTOM_TOOLS_SESSION_TIMEOUT_SECONDS   = "900"
+    CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS      = "90"
+    CUSTOM_TOOLS_TEST_EXEC_TIMEOUT_SECONDS = "180"
+    CUSTOM_TOOLS_ALLOW_NETWORK             = "true"
+    CUSTOM_TOOLS_MAX_CONNECTIONS           = "25"
+    CUSTOM_TOOLS_RUNS_PER_HOUR             = "60"
+    CUSTOM_TOOLS_MAX_SESSIONS_PER_USER     = "1"
+    CUSTOM_TOOLS_MAX_CODE_BYTES            = "65536"
+    CUSTOM_TOOLS_MAX_OUTPUT_CHARS          = "50000"
+    CUSTOM_TOOLS_MAX_RESULT_CHARS          = "20000"
   }
 
-  depends_on = [module.database, module.knowledge_storage]
+  depends_on = [
+    module.database,
+    module.knowledge_storage,
+    aws_bedrockagentcore_code_interpreter.mcp_tools,
+  ]
+}
+
+# The MCP Builder sandbox needs public internet (the default
+# ``aws.codeinterpreter.v1`` resource is the most restrictive mode), so it runs
+# on a custom Code Interpreter in PUBLIC network mode. The calculation-only
+# ``code-interpreter`` tool keeps the restrictive system resource.
+resource "aws_bedrockagentcore_code_interpreter" "mcp_tools" {
+  count = var.enable_backend_lambdas ? 1 : 0
+
+  name        = "get1agent_prod_mcp_tools"
+  description = "Sandbox for user-built MCP tools (public API access, guarded)"
+
+  network_configuration {
+    network_mode = "PUBLIC"
+  }
+
+  tags = {
+    Name = "get1agent-prod-mcp-tools"
+  }
 }
 
 module "ingestion_extract" {
@@ -1624,6 +1702,7 @@ module "agent_runtime" {
     module.knowledge_mcp[0].function_arn,
     module.code_interpreter[0].function_arn,
     module.http_fetch[0].function_arn,
+    module.storage[0].function_arn,
     module.mcp_connections[0].function_arn,
     module.custom_tools[0].function_arn,
   ]
@@ -1676,6 +1755,7 @@ module "agent_runtime" {
       WEB_SEARCH_GATEWAY_REGION     = local.web_search_gateway_region
       CODE_INTERPRETER_MCP_FUNCTION = module.code_interpreter[0].function_name
       HTTP_FETCH_MCP_FUNCTION       = module.http_fetch[0].function_name
+      STORAGE_MCP_FUNCTION          = module.storage[0].function_name
       REMOTE_MCP_FUNCTION           = module.mcp_connections[0].function_name
       CUSTOM_TOOLS_MCP_FUNCTION     = module.custom_tools[0].function_name
       # Trust the eval worker's Auth0 M2M token (sub == <id>@clients) so it can
@@ -1704,6 +1784,7 @@ module "agent_runtime" {
     module.knowledge_mcp,
     module.code_interpreter,
     module.http_fetch,
+    module.storage,
     module.mcp_connections,
     module.custom_tools,
     module.vault_kms,

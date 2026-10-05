@@ -966,6 +966,13 @@ export function ExperimentsPage() {
               </div>
             )}
           </div>
+          {tab === 'Code' ? (
+            <p className="border-t border-border px-3 py-1.5 text-[11px] text-subtle">
+              Tools run sandboxed with public HTTP(S) access — up to 25 network
+              calls and ~90s per run (180s while testing). Private/loopback hosts
+              and heavy ML libraries are blocked.
+            </p>
+          ) : null}
         </Card>
       </div>
 

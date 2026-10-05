@@ -1,7 +1,7 @@
-"""http-fetch: fetch → save to storage → list → read (moto-backed DynamoDB).
+"""http-fetch: the response is returned inline (no storage).
 
-The outbound HTTP call is stubbed (no network); the storage double is the
-in-memory S3 fixture. Identity scoping is exercised by reading as another user.
+The outbound HTTP call is stubbed (no network). Storing/reading files is covered
+by ``test_storage.py`` against the separate storage server.
 """
 
 from __future__ import annotations
@@ -13,9 +13,6 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 APP = REPO / "backend" / "services" / "mcp" / "http-fetch"
-
-USER = "u_7k3f9qz2mpx8n4rq"
-OTHER = "u_zzzzzzzzzzzzzzzz"
 
 SAMPLE = b'{"hello": "world"}'
 
@@ -40,7 +37,9 @@ def _load_service():
 service = _load_service()
 
 
-def _stub_fetch(monkeypatch, *, body: bytes = SAMPLE, content_type: str = "application/json"):
+def _stub_fetch(
+    monkeypatch, *, body: bytes = SAMPLE, content_type: str = "application/json"
+):
     def fake(url, **kwargs):
         return service.fetcher.FetchResult(
             status=200,
@@ -55,53 +54,38 @@ def _stub_fetch(monkeypatch, *, body: bytes = SAMPLE, content_type: str = "appli
     monkeypatch.setattr(service.fetcher, "fetch", fake)
 
 
-def test_fetch_save_list_read(fake_storage, monkeypatch):
-    monkeypatch.setattr(service, "_storage", lambda: fake_storage)
+def test_fetch_returns_json_inline(monkeypatch):
     _stub_fetch(monkeypatch)
-
-    saved = service.fetch_and_save(
-        USER, {"url": "https://api.example.com/data", "fileName": "data.json"}
-    )
-    assert saved["error"] is None
-    file_id = saved["file"]["id"]
-    assert saved["file"]["fileName"] == "data.json"
-    assert saved["file"]["contentType"] == "application/json"
-    assert saved["file"]["sizeBytes"] == len(SAMPLE)
-    assert saved["usage"]["fileCount"] == 1
-    assert any(key.startswith(f"storage/{USER}/") for key in fake_storage.data)
-
-    listed = service.list_files(USER)
-    assert [item["id"] for item in listed["files"]] == [file_id]
-
-    read = service.read_file(USER, {"fileId": file_id})
-    assert read["error"] is None
-    assert read["format"] == "json"
-    assert '"hello": "world"' in read["content"]
-
-    # Files are scoped by userId: another user cannot read them.
-    assert service.read_file(OTHER, {"fileId": file_id})["error"]["code"] == "not_found"
+    out = service.fetch({"url": "https://api.example.com/data"})
+    assert out["error"] is None
+    assert out["status"] == 200
+    assert out["format"] == "json"
+    assert out["content"] == {"hello": "world"}
+    assert out["bytes"] == len(SAMPLE)
 
 
-def test_blocked_target_returns_error(fake_storage, monkeypatch):
-    monkeypatch.setattr(service, "_storage", lambda: fake_storage)
+def test_fetch_truncates_text(monkeypatch):
+    _stub_fetch(monkeypatch, body=b"a" * 2500, content_type="text/plain")
+    out = service.fetch({"url": "https://x/y", "format": "text", "maxChars": 1000})
+    assert out["format"] == "text"
+    assert out["content"] == "a" * 1000
+    assert out["truncated"] is True
 
+
+def test_blocked_target_returns_error(monkeypatch):
     def boom(url, **kwargs):
         raise service.fetcher.FetchError("blocked_target", "nope")
 
     monkeypatch.setattr(service.fetcher, "fetch", boom)
-    out = service.fetch_and_save(USER, {"url": "http://169.254.169.254/"})
+    out = service.fetch({"url": "http://169.254.169.254/"})
     assert out["error"]["code"] == "blocked_target"
-    assert fake_storage.data == {}
 
 
-def test_empty_body_is_not_saved(fake_storage, monkeypatch):
-    monkeypatch.setattr(service, "_storage", lambda: fake_storage)
+def test_empty_body_is_an_error(monkeypatch):
     _stub_fetch(monkeypatch, body=b"", content_type="text/plain")
-    out = service.fetch_and_save(USER, {"url": "https://api.example.com/empty"})
+    out = service.fetch({"url": "https://api.example.com/empty"})
     assert out["error"]["code"] == "empty_response"
 
 
-def test_read_missing_file(fake_storage, monkeypatch):
-    monkeypatch.setattr(service, "_storage", lambda: fake_storage)
-    assert service.read_file(USER, {"fileId": "nope"})["error"]["code"] == "not_found"
-    assert service.read_file(USER, {})["error"]["code"] == "invalid_request"
+def test_missing_url_is_an_error():
+    assert service.fetch({})["error"]["code"] == "invalid_request"

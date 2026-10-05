@@ -7,6 +7,7 @@ import {
   Database,
   FileStack,
   Gauge,
+  Globe,
   HardDrive,
   KeyRound,
   Plug,
@@ -79,6 +80,18 @@ type SettingsUsage = {
   pricing?: Record<string, { input: number; output: number }>
 }
 
+type NetworkUsage = {
+  enabled: boolean
+  windowSeconds: number
+  limitPerWindow: number
+  maxConnectionsPerRun: number
+  execTimeoutSeconds: number
+  testExecTimeoutSeconds: number
+  usedInWindow: number
+  runsAllTime: number
+  lastRunAt: string | null
+}
+
 type UsageOverview = {
   metrics: UsageMetrics | null
   vault: VaultList | null
@@ -97,6 +110,7 @@ type UsageOverview = {
   workflows: { usage?: { workflows: number; limits: { workflows: number } } } | null
   skills: { usage?: { skills: number; limits: { skills: number } } } | null
   mcp: { connections: unknown[] } | null
+  network: NetworkUsage | null
 }
 
 function safe<T>(promise: Promise<T>): Promise<T | null> {
@@ -104,20 +118,44 @@ function safe<T>(promise: Promise<T>): Promise<T | null> {
 }
 
 async function loadOverview(api: ApiClient): Promise<UsageOverview> {
-  const [metrics, vault, providers, settings, storage, kbs, agents, workflows, skills, mcp] =
-    await Promise.all([
-      safe(api.get<UsageMetrics>('/v1/lab/metrics?days=30')),
-      safe(api.get<VaultList>('/v1/vault/secrets')),
-      safe(api.get<{ providers: VaultProvider[] }>('/v1/vault/providers')),
-      safe(api.get<SettingsUsage>('/v1/user/settings')),
-      safe(api.get<{ usage: StorageUsage }>('/v1/storage/files')),
-      safe(api.get<UsageOverview['kbs']>('/v1/knowledge-bases')),
-      safe(api.get<UsageOverview['agents']>('/v1/agents')),
-      safe(api.get<UsageOverview['workflows']>('/v1/workflows')),
-      safe(api.get<UsageOverview['skills']>('/v1/agent-skills')),
-      safe(api.get<{ connections: unknown[] }>('/v1/mcp/connections')),
-    ])
-  return { metrics, vault, providers, settings, storage, kbs, agents, workflows, skills, mcp }
+  const [
+    metrics,
+    vault,
+    providers,
+    settings,
+    storage,
+    kbs,
+    agents,
+    workflows,
+    skills,
+    mcp,
+    network,
+  ] = await Promise.all([
+    safe(api.get<UsageMetrics>('/v1/lab/metrics?days=30')),
+    safe(api.get<VaultList>('/v1/vault/secrets')),
+    safe(api.get<{ providers: VaultProvider[] }>('/v1/vault/providers')),
+    safe(api.get<SettingsUsage>('/v1/user/settings')),
+    safe(api.get<{ usage: StorageUsage }>('/v1/storage/files')),
+    safe(api.get<UsageOverview['kbs']>('/v1/knowledge-bases')),
+    safe(api.get<UsageOverview['agents']>('/v1/agents')),
+    safe(api.get<UsageOverview['workflows']>('/v1/workflows')),
+    safe(api.get<UsageOverview['skills']>('/v1/agent-skills')),
+    safe(api.get<{ connections: unknown[] }>('/v1/mcp/connections')),
+    safe(api.get<NetworkUsage>('/v1/user/network')),
+  ])
+  return {
+    metrics,
+    vault,
+    providers,
+    settings,
+    storage,
+    kbs,
+    agents,
+    workflows,
+    skills,
+    mcp,
+    network,
+  }
 }
 
 // --- formatting --------------------------------------------------------------
@@ -248,6 +286,7 @@ export function UsagePage() {
   const vaultUsage = data?.vault?.usage
   const storageUsage = data?.storage?.usage
   const kbUsage = data?.kbs?.usage
+  const networkUsage = data?.network ?? null
 
   const resources: {
     key: string
@@ -554,6 +593,69 @@ export function UsagePage() {
                 </Card>
               </motion.div>
             </div>
+
+            {networkUsage ? (
+              <motion.div variants={fadeUp} className="mt-3">
+                <Card padding="none" className="overflow-hidden">
+                  <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+                    <Globe className="size-3.5 text-accent" strokeWidth={1.75} />
+                    <h2 className="text-[13px] font-semibold text-foreground">
+                      Network tools · MCP Builder
+                    </h2>
+                    {networkUsage.enabled ? (
+                      <span className="ml-auto rounded-full border border-accent px-2 py-0.5 text-[10px] font-medium text-accent">
+                        Enabled
+                      </span>
+                    ) : (
+                      <span className="ml-auto rounded-full border border-border px-2 py-0.5 text-[10px] font-medium text-subtle">
+                        Disabled by admin
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-3 p-4">
+                    <div>
+                      <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
+                        <span className="text-muted">Runs this hour</span>
+                        <span className="tabular-nums text-foreground">
+                          {networkUsage.usedInWindow} / {networkUsage.limitPerWindow}
+                        </span>
+                      </div>
+                      <Progress
+                        value={pct(
+                          networkUsage.usedInWindow,
+                          networkUsage.limitPerWindow,
+                        )}
+                      />
+                    </div>
+                    <div className="grid gap-3 text-[12px] sm:grid-cols-3">
+                      <div>
+                        <p className="text-subtle">Network runs (all time)</p>
+                        <p className="mt-0.5 font-medium tabular-nums text-foreground">
+                          {networkUsage.runsAllTime}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-subtle">Connections per run</p>
+                        <p className="mt-0.5 font-medium tabular-nums text-foreground">
+                          {networkUsage.maxConnectionsPerRun}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-subtle">Run timeout</p>
+                        <p className="mt-0.5 font-medium tabular-nums text-foreground">
+                          {networkUsage.execTimeoutSeconds}s
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-subtle">
+                      {networkUsage.enabled
+                        ? 'User-built MCP tools may call public APIs from a guarded sandbox; private hosts and heavy libraries stay blocked.'
+                        : 'A workspace admin has disabled network access for user tools. Custom tools still run, but without internet.'}
+                    </p>
+                  </div>
+                </Card>
+              </motion.div>
+            ) : null}
           </motion.div>
         </TabsContent>
 

@@ -248,6 +248,7 @@ export const demoAgentMcpServers = {
     { id: 'code-interpreter', name: 'Code Interpreter', source: 'builtin' },
     { id: 'web-search', name: 'Web Search', source: 'builtin' },
     { id: 'http-fetch', name: 'HTTP Fetch', source: 'builtin' },
+    { id: 'storage', name: 'Storage Files', source: 'builtin' },
     { id: 'github', name: 'GitHub', source: 'remote' },
     { id: 'linear', name: 'Linear', source: 'remote' },
     { id: 'notion', name: 'Notion', source: 'remote' },

@@ -6,7 +6,10 @@ abuse/cost-control layer on top of that isolation. It blocks:
 
 * OS/shell escape and process spawning (``subprocess``, ``pty``, ``ctypes``,
   dangerous ``os.*`` calls);
-* network egress and cloud SDKs (so a user cannot download models or data);
+* network egress and cloud SDKs (so a user cannot download models or data),
+  unless the sandbox is explicitly granted ``allow_network`` — in which case
+  only the HTTP(S) stack is unblocked and every outbound connection is still
+  counted and range-checked against private/reserved addresses;
 * dynamic code execution (``exec``/``eval``/``importlib``);
 * heavy machine-learning frameworks (``torch``, ``tensorflow``, ...).
 
@@ -124,6 +127,27 @@ DENY_MODULES: frozenset[str] = frozenset(
 # Every other ``urllib`` submodule (``request``/``error``/…) stays blocked.
 ALLOW_MODULES: frozenset[str] = frozenset({"urllib.parse"})
 
+# Network modules that are lifted from the deny set when a sandbox is explicitly
+# granted internet access (``allow_network``). Only the HTTP(S) stack is
+# unblocked; other protocols stay denied so the surface stays focused on calling
+# web APIs. Even when allowed, outbound connections are counted and
+# private/loopback/link-local/reserved destinations are refused at runtime.
+NETWORK_MODULES: frozenset[str] = frozenset(
+    {
+        "socket",
+        "ssl",
+        "http",
+        "urllib",
+        "urllib2",
+        "urllib3",
+        "requests",
+        "httpx",
+        "aiohttp",
+        "websocket",
+        "websockets",
+    }
+)
+
 # Calls whose bare name is always blocked.
 DENY_CALLS: frozenset[str] = frozenset({"__import__", "exec", "eval", "compile"})
 
@@ -207,9 +231,21 @@ def _split_modules(raw: str) -> set[str]:
     return {part.strip().lower() for part in (raw or "").split(",") if part.strip()}
 
 
-def deny_set(blocked_extra: str = "", allowed_extra: str = "") -> frozenset[str]:
-    """The effective deny set: built-ins + ``BLOCKED_MODULES`` - ``ALLOWED_MODULES``."""
+def deny_set(
+    blocked_extra: str = "",
+    allowed_extra: str = "",
+    *,
+    allow_network: bool = False,
+) -> frozenset[str]:
+    """The effective deny set: built-ins + ``BLOCKED_MODULES`` - ``ALLOWED_MODULES``.
+
+    ``allow_network`` lifts the HTTP(S) stack (``NETWORK_MODULES``) from the deny
+    set so a tool may call web APIs; every other abuse/cost control (process
+    spawning, native code, dynamic code, heavy ML, cloud SDKs) stays in place.
+    """
     deny = set(DENY_MODULES)
+    if allow_network:
+        deny -= NETWORK_MODULES
     deny |= _split_modules(blocked_extra)
     deny -= _split_modules(allowed_extra)
     return frozenset(deny)
@@ -248,6 +284,7 @@ def check(
     max_bytes: int = 102_400,
     blocked_extra: str = "",
     allowed_extra: str = "",
+    allow_network: bool = False,
 ) -> GuardResult:
     """Run the static policy pass over ``code``."""
     if not isinstance(code, str) or not code.strip():
@@ -268,7 +305,7 @@ def check(
             f"line {exc.lineno}: {exc.msg}",
         )
 
-    deny = deny_set(blocked_extra, allowed_extra)
+    deny = deny_set(blocked_extra, allowed_extra, allow_network=allow_network)
     for name, lineno in _import_names(tree):
         root = name.split(".")[0]
         if name in ALLOW_MODULES:
@@ -310,14 +347,24 @@ def check(
     return GuardResult(True)
 
 
-def prelude(*, blocked_extra: str = "", allowed_extra: str = "") -> str:
+def prelude(
+    *,
+    blocked_extra: str = "",
+    allowed_extra: str = "",
+    allow_network: bool = False,
+    max_connections: int = 25,
+) -> str:
     """Return the sandbox prologue that installs the runtime audit hook.
 
     Prepended to every execution. It is idempotent: the ``sys`` flag prevents a
-    duplicate hook when the same sandbox is reused across calls.
+    duplicate hook when the same sandbox is reused across calls, and the
+    per-execution connection counter is reset at the top of every run.
+
+    When ``allow_network`` is true the socket block is lifted, but outbound
+    connections are still counted (``max_connections`` per execution) and
+    private/loopback/link-local/reserved destinations are refused.
     """
-    deny = sorted(deny_set(blocked_extra, allowed_extra))
-    events = sorted(DENY_AUDIT_EVENTS)
+    deny = sorted(deny_set(blocked_extra, allowed_extra, allow_network=allow_network))
     allow = sorted(name.lower() for name in ALLOW_MODULES)
     # Parent packages of an allowed submodule must load too (importing
     # ``urllib.parse`` first imports ``urllib``), but the submodule itself is
@@ -325,27 +372,81 @@ def prelude(*, blocked_extra: str = "", allowed_extra: str = "") -> str:
     allow_parents = sorted(
         {name.rsplit(".", 1)[0] for name in allow if "." in name}
     )
+
+    if allow_network:
+        # Socket events are no longer denied outright; they are counted and
+        # range-checked instead. Process/native-code guards stay.
+        events = sorted(
+            {"os.system", "subprocess.Popen", "ctypes.dlopen", "ctypes.dlsym"}
+        )
+        net_events = sorted({"socket.connect", "socket.sendto", "socket.sendmsg"})
+        extra = (
+            f"    _g1_net_events = frozenset({net_events!r})\n"
+            f"    _g1_max_conn = {max(1, int(max_connections))}\n"
+            "    import ipaddress as _g1_ipaddress\n"
+            "    def _g1_conn_addr(_g1_args):\n"
+            "        for _g1_a in _g1_args:\n"
+            "            if isinstance(_g1_a, (tuple, list)) and _g1_a and isinstance(_g1_a[0], str):\n"
+            "                return _g1_a[0]\n"
+            "            if isinstance(_g1_a, str):\n"
+            "                return _g1_a\n"
+            "        return None\n"
+            "    def _g1_blocked_ip(_g1_host):\n"
+            "        try:\n"
+            "            _g1_addr = _g1_ipaddress.ip_address(_g1_host)\n"
+            "        except ValueError:\n"
+            "            return True\n"
+            "        if getattr(_g1_addr, 'ipv4_mapped', None):\n"
+            "            _g1_addr = _g1_addr.ipv4_mapped\n"
+            "        return (_g1_addr.is_private or _g1_addr.is_loopback or _g1_addr.is_link_local or _g1_addr.is_multicast or _g1_addr.is_reserved or _g1_addr.is_unspecified)\n"
+        )
+        body = (
+            "    def _g1_hook(_g1_event, _g1_args):\n"
+            "        if _g1_event == 'import':\n"
+            "            _g1_name = str(_g1_args[0]).lower() if _g1_args else ''\n"
+            "            _g1_root = _g1_name.split('.')[0]\n"
+            "            if _g1_name in _g1_allow or _g1_name in _g1_allow_parents:\n"
+            "                return\n"
+            "            if _g1_root in _g1_deny:\n"
+            "                raise PermissionError('import of ' + _g1_root + ' is blocked by policy')\n"
+            "        elif _g1_event in _g1_net_events:\n"
+            "            _g1_run = getattr(_g1_sys, '_g1_run', None)\n"
+            "            if _g1_run is not None:\n"
+            "                _g1_run['n'] = _g1_run.get('n', 0) + 1\n"
+            "                if _g1_run['n'] > _g1_max_conn:\n"
+            "                    raise PermissionError('network connection limit reached for this run')\n"
+            "            _g1_host = _g1_conn_addr(_g1_args)\n"
+            "            if _g1_host is not None and _g1_blocked_ip(_g1_host):\n"
+            "                raise PermissionError('connections to private, loopback or reserved addresses are blocked by policy')\n"
+            "        elif _g1_event in _g1_events:\n"
+            "            raise PermissionError('operation ' + _g1_event + ' is blocked by policy')\n"
+        )
+    else:
+        events = sorted(DENY_AUDIT_EVENTS)
+        extra = ""
+        body = (
+            "    def _g1_hook(_g1_event, _g1_args):\n"
+            "        if _g1_event == 'import':\n"
+            "            _g1_name = str(_g1_args[0]).lower() if _g1_args else ''\n"
+            "            _g1_root = _g1_name.split('.')[0]\n"
+            "            if _g1_name in _g1_allow or _g1_name in _g1_allow_parents:\n"
+            "                return\n"
+            "            if _g1_root in _g1_deny:\n"
+            "                raise PermissionError('import of ' + _g1_root + ' is blocked by policy')\n"
+            "        elif _g1_event in _g1_events:\n"
+            "            raise PermissionError('operation ' + _g1_event + ' is blocked by policy')\n"
+        )
+
     return (
         "import sys as _g1_sys\n"
+        "_g1_sys._g1_run = {'n': 0}\n"
         "if not getattr(_g1_sys, '_get1agent_guard', False):\n"
         "    _g1_sys._get1agent_guard = True\n"
         f"    _g1_deny = frozenset({deny!r})\n"
         f"    _g1_events = frozenset({events!r})\n"
         f"    _g1_allow = frozenset({allow!r})\n"
         f"    _g1_allow_parents = frozenset({allow_parents!r})\n"
-        "    def _g1_hook(_g1_event, _g1_args):\n"
-        "        if _g1_event == 'import':\n"
-        "            _g1_name = str(_g1_args[0]).lower() if _g1_args else ''\n"
-        "            _g1_root = _g1_name.split('.')[0]\n"
-        "            if _g1_name in _g1_allow or _g1_name in _g1_allow_parents:\n"
-        "                return\n"
-        "            if _g1_root in _g1_deny:\n"
-        "                raise PermissionError(\n"
-        "                    \"import of '\" + _g1_root + \"' is blocked by policy\"\n"
-        "                )\n"
-        "        elif _g1_event in _g1_events:\n"
-        "            raise PermissionError(\n"
-        "                \"operation '\" + _g1_event + \"' is blocked by policy\"\n"
-        "            )\n"
-        "    _g1_sys.addaudithook(_g1_hook)\n"
+        + extra
+        + body
+        + "    _g1_sys.addaudithook(_g1_hook)\n"
     )

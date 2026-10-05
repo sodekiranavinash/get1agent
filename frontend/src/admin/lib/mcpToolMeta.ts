@@ -18,6 +18,8 @@ const TOOL_LABELS: Record<string, string> = {
   'http-fetch': 'HTTP fetch',
   'list-storage-files': 'List stored files',
   'read-storage-file': 'Read stored file',
+  'write-storage-file': 'Write stored file',
+  'delete-storage-file': 'Delete stored file',
 }
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
@@ -28,6 +30,8 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   'http-fetch': Download,
   'list-storage-files': List,
   'read-storage-file': FileText,
+  'write-storage-file': FileText,
+  'delete-storage-file': FileText,
 }
 
 export function toolLabel(name: string): string {

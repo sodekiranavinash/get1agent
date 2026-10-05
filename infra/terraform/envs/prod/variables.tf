@@ -154,8 +154,8 @@ variable "web_search_connector_region" {
 
 variable "http_fetch_timeout_seconds" {
   type        = number
-  default     = 60
-  description = "Lambda timeout for the http-fetch MCP tool"
+  default     = 90
+  description = "Lambda timeout for the http-fetch MCP tool (must exceed the 60s max request timeout)"
 }
 
 variable "http_fetch_allowed_domains" {

@@ -265,6 +265,28 @@ def reset_spend(sub: str) -> None:
     )
 
 
+def record_network_run(sub: str) -> None:
+    """Count one network-enabled sandbox run for the user (best-effort)."""
+    timestamp = now_iso()
+    table().update_item(
+        Key={"pk": user_pk(sub), "sk": QUOTA_SK},
+        UpdateExpression=(
+            "ADD networkRuns :one SET lastNetworkRunAt = :t, updatedAt = :t"
+        ),
+        ExpressionAttributeValues={":one": 1, ":t": timestamp},
+    )
+
+
+def get_network_usage(sub: str) -> dict[str, Any]:
+    """All-time network-enabled run count and last-run timestamp."""
+    item = table().get_item(Key={"pk": user_pk(sub), "sk": QUOTA_SK}).get("Item") or {}
+    return {
+        "runs": _to_int(item.get("networkRuns"), 0),
+        "lastRunAt": item.get("lastNetworkRunAt"),
+    }
+
+
+
 def get_quota(sub: str) -> Quota:
     response = table().get_item(Key={"pk": user_pk(sub), "sk": QUOTA_SK})
     item = response.get("Item") or {}

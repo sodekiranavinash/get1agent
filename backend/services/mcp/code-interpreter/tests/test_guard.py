@@ -139,5 +139,69 @@ class PreludeTests(unittest.TestCase):
         self.assertIn("blocked by policy", proc.stderr)
 
 
+class NetworkPreludeTests(unittest.TestCase):
+    """The network-enabled sandbox (`allow_network`) used by the MCP Builder."""
+
+    def test_check_allows_http_stack(self) -> None:
+        for code in (
+            "import requests",
+            "import urllib.request",
+            "import httpx",
+            "import socket",
+        ):
+            self.assertTrue(guard.check(code, allow_network=True).ok, code)
+
+    def test_check_still_blocks_heavy_and_dangerous(self) -> None:
+        for code in (
+            "import torch",
+            "import subprocess",
+            "import ctypes",
+            "exec('print(1)')",
+            "x = 'curl https://a'",
+        ):
+            self.assertFalse(guard.check(code, allow_network=True).ok, code)
+
+    def test_prelude_blocks_private_address(self) -> None:
+        script = (
+            guard.prelude(allow_network=True)
+            + "\nimport socket\n"
+            + "s = socket.socket()\n"
+            + "try:\n"
+            + "    s.connect(('127.0.0.1', 9))\n"
+            + "except PermissionError:\n"
+            + "    print('blocked')\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertIn("blocked", proc.stdout)
+
+    def test_prelude_enforces_connection_cap(self) -> None:
+        script = (
+            guard.prelude(allow_network=True, max_connections=1)
+            + "\nimport socket\n"
+            + "msgs = []\n"
+            + "for _ in range(2):\n"
+            + "    s = socket.socket()\n"
+            + "    try:\n"
+            + "        s.connect(('127.0.0.1', 9))\n"
+            + "    except PermissionError as exc:\n"
+            + "        msgs.append(str(exc))\n"
+            + "    finally:\n"
+            + "        s.close()\n"
+            + "print('|'.join(msgs))\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertIn("limit reached", proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

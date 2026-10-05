@@ -34,6 +34,13 @@ module "api_gateway" {
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
+    user_network_usage = {
+      method               = "GET"
+      path                 = "/v1/user/network"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
     knowledge_bases_list = {
       method               = "GET"
       path                 = "/v1/knowledge-bases"
@@ -974,6 +981,15 @@ module "api_gateway" {
       throttle_burst_limit = 20
       throttle_rate_limit  = 10
     }
+    storage_mcp = {
+      method               = "POST"
+      path                 = "/mcp/storage"
+      lambda_invoke_arn    = module.storage[0].invoke_arn
+      lambda_function_name = module.storage[0].function_name
+      authorization_type   = "JWT"
+      throttle_burst_limit = 20
+      throttle_rate_limit  = 10
+    }
     browser_mcp = {
       method               = "POST"
       path                 = "/mcp/browser"
@@ -1140,6 +1156,20 @@ module "api_gateway" {
     admin_platform_bedrock_features = {
       method               = "GET"
       path                 = "/v1/admin/platform/bedrock-features"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_network_get = {
+      method               = "GET"
+      path                 = "/v1/admin/platform/network"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_platform_network_update = {
+      method               = "POST"
+      path                 = "/v1/admin/platform/network"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"

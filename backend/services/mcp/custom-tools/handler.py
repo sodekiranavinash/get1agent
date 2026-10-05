@@ -160,6 +160,7 @@ def _handle_test(event: dict[str, Any]) -> dict[str, Any]:
             input_schema=event.get("inputSchema"),
             output_schema=event.get("outputSchema"),
             entrypoint=str(event.get("entrypoint") or "run"),
+            is_test=True,
             conversation_id=str(event.get("conversationId") or "test"),
             log=_log,
         )

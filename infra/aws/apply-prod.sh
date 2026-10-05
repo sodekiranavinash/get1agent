@@ -25,7 +25,12 @@ TARGETS=()
   TARGETS+=(-target='module.admin_console[0]')
   TARGETS+=(-target='module.code_interpreter[0]')
   TARGETS+=(-target='module.http_fetch[0]')
+  TARGETS+=(-target='module.storage[0]')
   TARGETS+=(-target='module.custom_tools[0]')
+  # New root resources introduced with the MCP Builder network + storage split:
+  # the custom Code Interpreter (PUBLIC network) and the gateway targets map.
+  TARGETS+=(-target='aws_bedrockagentcore_code_interpreter.mcp_tools')
+  TARGETS+=(-target='aws_bedrockagentcore_gateway_target.mcp')
   TARGETS+=(-target='module.browser[0]')
   TARGETS+=(-target='module.mcp_connections[0]')
   TARGETS+=(-target='module.scheduler[0]')

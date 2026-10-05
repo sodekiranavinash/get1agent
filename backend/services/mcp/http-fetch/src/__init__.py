@@ -1,1 +1,1 @@
-"""http-fetch service: trusted web fetch + user storage access."""
+"""http-fetch service: trusted web fetch that returns the response inline."""

@@ -803,6 +803,37 @@ def _platform_bedrock_features(claims: dict[str, Any], method: str) -> dict[str,
     return _json(200, bedrock_features.describe())
 
 
+def _platform_network(
+    claims: dict[str, Any], method: str, body: dict[str, Any]
+) -> dict[str, Any]:
+    """Platform network-tools kill switch + the limits currently in force."""
+    from core import network
+    from data.repositories import platform as platform_repo
+
+    settings = platform_repo.get_settings()
+    if method == "GET":
+        payload = network.describe(enabled_override=settings["networkToolsEnabled"])
+        payload["updatedAt"] = settings.get("updatedAt")
+        payload["updatedBy"] = settings.get("updatedBy")
+        return _json(200, payload)
+    if method != "POST":
+        return _json(405, {"error": f"Method not allowed: {method}"})
+    enabled = body.get("enabled")
+    if not isinstance(enabled, bool):
+        return _json(400, {"error": "enabled (boolean) is required"})
+    updated_by = str(
+        claims.get("name")
+        or claims.get("https://get1agent.com/email")
+        or claims.get("email")
+        or "admin"
+    )
+    updated = platform_repo.set_network_tools_enabled(enabled, updated_by=updated_by)
+    payload = network.describe(enabled_override=updated["networkToolsEnabled"])
+    payload["updatedAt"] = updated.get("updatedAt")
+    payload["updatedBy"] = updated.get("updatedBy")
+    return _json(200, payload)
+
+
 def _route_platform(
     event: dict[str, Any],
     claims: dict[str, Any],
@@ -824,6 +855,7 @@ def _route_platform(
                     "browser",
                     "optimization",
                     "bedrock-features",
+                    "network",
                 ]
             },
         )
@@ -838,6 +870,8 @@ def _route_platform(
         return _platform_optimization(claims, method)
     if service == "bedrock-features":
         return _platform_bedrock_features(claims, method)
+    if service == "network":
+        return _platform_network(claims, method, body)
     return _json(404, {"error": "Not found"})
 
 

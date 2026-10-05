@@ -28,6 +28,7 @@ def _config(**overrides):
         knowledge_function="",
         code_interpreter_function="",
         http_fetch_function="",
+        storage_function="",
         browser_function="",
         remote_function="",
         custom_tools_function="",

@@ -7,7 +7,10 @@ import os
 from core.sandbox import SandboxConfig
 from core.sandbox import agentcore
 
-DEFAULT_EXEC_TIMEOUT = 60
+DEFAULT_EXEC_TIMEOUT = 90
+DEFAULT_TEST_EXEC_TIMEOUT = 180
+DEFAULT_MAX_CONNECTIONS = 25
+DEFAULT_RUNS_PER_HOUR = 60
 DEFAULT_MAX_CODE_BYTES = 65_536
 DEFAULT_MAX_OUTPUT = 50_000
 DEFAULT_MAX_RESULT_CHARS = 20_000
@@ -27,6 +30,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw not in ("0", "false", "no", "off")
+
+
 def sandbox_config() -> SandboxConfig:
     return SandboxConfig(
         mode=_env("CUSTOM_TOOLS_MODE", "agentcore").lower(),
@@ -40,7 +50,24 @@ def sandbox_config() -> SandboxConfig:
         max_output=_env_int("CUSTOM_TOOLS_MAX_OUTPUT_CHARS", DEFAULT_MAX_OUTPUT),
         thread_prefix="CTOOLCONV#",
         session_name_prefix="ct-",
+        # MCP Builder tools may call the public internet (HTTP(S)). Outbound
+        # connections are capped per run and private/reserved destinations are
+        # refused by the sandbox guard.
+        allow_network=_env_bool("CUSTOM_TOOLS_ALLOW_NETWORK", True),
+        max_connections=max(
+            _env_int("CUSTOM_TOOLS_MAX_CONNECTIONS", DEFAULT_MAX_CONNECTIONS), 1
+        ),
     )
+
+
+def test_exec_timeout() -> int:
+    """Wall-clock budget for an MCP Builder test run (longer than a real call)."""
+    return _env_int("CUSTOM_TOOLS_TEST_EXEC_TIMEOUT_SECONDS", DEFAULT_TEST_EXEC_TIMEOUT)
+
+
+def runs_per_hour() -> int:
+    """Network-enabled custom-tool runs allowed per user per hour."""
+    return max(_env_int("CUSTOM_TOOLS_RUNS_PER_HOUR", DEFAULT_RUNS_PER_HOUR), 1)
 
 
 def max_result_chars() -> int:

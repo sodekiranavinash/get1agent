@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Callable
 
+from core import network, ratelimit
 from core.sandbox import run_code
+
+from data.repositories import quotas
 
 from . import config, harness, schema
 
@@ -17,6 +21,7 @@ def run_tool(
     input_schema: dict[str, Any] | None,
     output_schema: dict[str, Any] | None,
     entrypoint: str = harness.DEFAULT_ENTRYPOINT,
+    is_test: bool = False,
     conversation_id: str | None = None,
     log: Callable[..., None] | None = None,
 ) -> dict[str, Any]:
@@ -32,14 +37,34 @@ def run_tool(
             detail="; ".join(input_errors),
         )
 
+    cfg = config.sandbox_config()
+    # Admin kill switch: when platform network is off, run offline (pure tools
+    # still work) and skip the network rate limit.
+    network_on = cfg.allow_network and network.enabled()
+    if network_on and not ratelimit.allow(
+        sub, kind="custom-tools", limit=config.runs_per_hour()
+    ):
+        return _error(
+            "rate_limited",
+            "Too many custom-tool runs in the last hour. "
+            "Please wait a few minutes and try again.",
+        )
+    cfg = replace(cfg, allow_network=network_on)
+    if network_on:
+        try:
+            quotas.record_network_run(sub)
+        except Exception:  # noqa: BLE001 - usage counting must not fail a run
+            pass
+
     program = harness.build_program(code, args, entrypoint)
     result = run_code(
         sub,
         program,
         conversation_id=conversation_id,
-        config=config.sandbox_config(),
+        config=cfg,
         blocked_extra=config.blocked_modules(),
         allowed_extra=config.allowed_modules(),
+        exec_timeout=config.test_exec_timeout() if is_test else None,
         log=log,
     )
 

@@ -75,6 +75,7 @@ FUNCTIONS = {
     "admin_console": "get1agent-local-admin-console",
     "code_interpreter": "get1agent-local-code-interpreter",
     "http_fetch": "get1agent-local-http-fetch",
+    "storage": "get1agent-local-storage",
     "mcp_connections": "get1agent-local-mcp-connections",
     "custom_tools": "get1agent-local-custom-tools",
     "scheduler": "get1agent-local-scheduler",
@@ -85,6 +86,7 @@ ROUTES = {
     "user_api": [
         ("GET", "/v1/user/settings"),
         ("POST", "/v1/user/settings"),
+        ("GET", "/v1/user/network"),
         ("GET", "/v1/knowledge-bases"),
         ("POST", "/v1/knowledge-bases"),
         ("GET", "/v1/knowledge-bases/tags"),
@@ -221,6 +223,9 @@ ROUTES = {
     "http_fetch": [
         ("POST", "/mcp/http-fetch"),
     ],
+    "storage": [
+        ("POST", "/mcp/storage"),
+    ],
     "custom_tools": [
         ("POST", "/mcp/custom-tools"),
     ],
@@ -248,6 +253,8 @@ ROUTES = {
         ("POST", "/v1/admin/platform/browser/session/close"),
         ("GET", "/v1/admin/platform/optimization"),
         ("GET", "/v1/admin/platform/bedrock-features"),
+        ("GET", "/v1/admin/platform/network"),
+        ("POST", "/v1/admin/platform/network"),
     ],
     "mcp_connections": [
         ("GET", "/v1/mcp/catalog"),
@@ -1074,7 +1081,8 @@ def main() -> int:
     )
     # User-defined Python tools (Playground). AgentCore is not emulated, so the
     # tool source runs through the shared guarded local subprocess, like
-    # code-interpreter above.
+    # code-interpreter above. Network is allowed locally (the sandbox prelude
+    # still caps connections per run and refuses private addresses).
     custom_tools_arn = ensure_function(
         lm,
         FUNCTIONS["custom_tools"],
@@ -1083,7 +1091,11 @@ def main() -> int:
         layers=[],
         environment={
             "CUSTOM_TOOLS_MODE": "local",
-            "CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS": "60",
+            "CUSTOM_TOOLS_ALLOW_NETWORK": "true",
+            "CUSTOM_TOOLS_MAX_CONNECTIONS": "25",
+            "CUSTOM_TOOLS_RUNS_PER_HOUR": "60",
+            "CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS": "90",
+            "CUSTOM_TOOLS_TEST_EXEC_TIMEOUT_SECONDS": "180",
             "CUSTOM_TOOLS_SESSION_TIMEOUT_SECONDS": "900",
             "CUSTOM_TOOLS_MAX_SESSIONS_PER_USER": "1",
             "CUSTOM_TOOLS_MAX_CODE_BYTES": "65536",
@@ -1096,12 +1108,11 @@ def main() -> int:
             "AWS_REGION": REGION,
             "AWS_DEFAULT_REGION": REGION,
         },
-        timeout=180,
+        timeout=300,
         memory=1024,
     )
-    # Trusted web fetch + user storage access. Runs outside a VPC and reaches
-    # public HTTPS directly (with a per-request SSRF guard); stores results in
-    # the user's S3 storage area, so it needs the table + bucket.
+    # Trusted web fetch. Runs outside a VPC and reaches public HTTPS directly
+    # (with a per-request SSRF guard) and returns the response inline.
     http_fetch_arn = ensure_function(
         lm,
         FUNCTIONS["http_fetch"],
@@ -1122,6 +1133,25 @@ def main() -> int:
         timeout=60,
         memory=512,
     )
+    # User storage files: list, read, write, delete. Bytes go to the user's S3
+    # storage prefix; metadata to the table.
+    storage_arn = ensure_function(
+        lm,
+        FUNCTIONS["storage"],
+        f"{ROOT}/backend/services/mcp/storage/dist/function.zip",
+        handler="handler.lambda_handler",
+        layers=[],
+        environment={
+            "DYNAMODB_TABLE": DYNAMODB_TABLE,
+            "DYNAMODB_ENDPOINT_URL": DYNAMODB_ENDPOINT_URL,
+            "S3_BUCKET": BUCKET,
+            "S3_REGION": REGION,
+            "AWS_REGION": REGION,
+            "AWS_DEFAULT_REGION": REGION,
+        },
+        timeout=60,
+        memory=512,
+    )
     admin_console_arn = ensure_function(
         lm,
         FUNCTIONS["admin_console"],
@@ -1135,6 +1165,7 @@ def main() -> int:
                     FUNCTIONS["knowledge_mcp"],
                     FUNCTIONS["code_interpreter"],
                     FUNCTIONS["http_fetch"],
+                    FUNCTIONS["storage"],
                 ]
             ),
             "BROWSER_ID": os.environ.get("BROWSER_ID", ""),
@@ -1178,6 +1209,7 @@ def main() -> int:
             "knowledge_mcp": mcp_arn,
             "code_interpreter": code_interpreter_arn,
             "http_fetch": http_fetch_arn,
+            "storage": storage_arn,
             "custom_tools": custom_tools_arn,
             "admin_console": admin_console_arn,
             "mcp_connections": mcp_connections_arn,

@@ -64,6 +64,19 @@
       "runtime": "python3.14",
       "packages": [
         "core",
+        "data"
+      ],
+      "layers": []
+    },
+    {
+      "name": "storage",
+      "group": "mcp-tools",
+      "dir": "backend/services/mcp/storage",
+      "function_name": "get1agent-prod-storage",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
         "data",
         "retrieval"
       ],

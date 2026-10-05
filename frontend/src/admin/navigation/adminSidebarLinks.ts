@@ -67,8 +67,13 @@ const SERVER_META: Record<string, McpServerMeta> = {
   },
   'http-fetch': {
     label: 'HTTP Fetch',
-    description: 'Fetch a public URL and read stored files.',
+    description: 'Call a public URL and return the response inline.',
     icon: Download,
+  },
+  storage: {
+    label: 'Storage',
+    description: 'List, read, write and delete the user’s storage files.',
+    icon: FileStack,
   },
 }
 

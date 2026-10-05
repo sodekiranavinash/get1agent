@@ -1,7 +1,8 @@
 """Build Strands tools for an agent from its MCP-server + knowledge selection.
 
-Built-in servers (``web-search``, ``code-interpreter``, ``http-fetch``) and remote servers
-(through the ``mcp-connections`` aggregator) are exposed over the shared
+Built-in servers (``web-search``, ``code-interpreter``, ``http-fetch``,
+``storage``) and remote servers (through the ``mcp-connections`` aggregator) are
+exposed over the shared
 ``core.mcp_client`` direct-invoke transport. Knowledge retrieval exposes the
 knowledge server's real tools (``get-user-knowledge-bases`` +
 ``search-user-knowledge-bases``) bound to the agent's KB names and rerank
@@ -141,6 +142,7 @@ _GATEWAY_TARGETS = {
     "knowledge": "knowledge",
     "code-interpreter": "code-interpreter",
     "http-fetch": "http-fetch",
+    "storage": "storage",
     "browser": "browser",
     "custom-tools": "custom-tools",
     "remote-mcp": "remote-mcp",
@@ -381,6 +383,9 @@ def build_tools(
         elif source == "builtin" and server_id == "http-fetch":
             function = config.http_fetch_function
             gateway_target = "http-fetch"
+        elif source == "builtin" and server_id == "storage":
+            function = config.storage_function
+            gateway_target = "storage"
         elif source == "builtin" and server_id == "browser":
             function = config.browser_function
             gateway_target = "browser"

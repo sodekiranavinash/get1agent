@@ -192,6 +192,7 @@ class WebSearchAvailabilityTests(unittest.TestCase):
             knowledge_function="",
             code_interpreter_function="",
             http_fetch_function="",
+            storage_function="",
             browser_function="",
             custom_tools_function="",
             remote_function="",

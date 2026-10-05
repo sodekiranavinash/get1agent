@@ -93,6 +93,7 @@ floci-build-parallel: \
 	floci-build-admin-console \
 	floci-build-code-interpreter \
 	floci-build-http-fetch \
+	floci-build-storage \
 	floci-build-custom-tools \
 	floci-build-mcp-connections \
 	floci-build-ingestion-dispatcher \
@@ -119,6 +120,9 @@ floci-build-code-interpreter:
 
 floci-build-http-fetch:
 	$(MAKE) -C backend/services/mcp/http-fetch package
+
+floci-build-storage:
+	$(MAKE) -C backend/services/mcp/storage package
 
 floci-build-custom-tools:
 	$(MAKE) -C backend/services/mcp/custom-tools package
@@ -178,6 +182,7 @@ floci-artifacts:
 		backend/services/admin/admin-console/dist/function.zip \
 		backend/services/mcp/code-interpreter/dist/function.zip \
 		backend/services/mcp/http-fetch/dist/function.zip \
+		backend/services/mcp/storage/dist/function.zip \
 		backend/services/mcp/custom-tools/dist/function.zip \
 		backend/services/mcp/mcp-connections/dist/function.zip \
 		backend/services/ingestion/ingestion-dispatcher/dist/function.zip \

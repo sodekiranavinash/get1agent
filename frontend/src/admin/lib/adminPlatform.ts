@@ -144,3 +144,27 @@ export type BedrockFeatures = {
 export function fetchBedrockFeatures(api: ApiClient): Promise<BedrockFeatures> {
   return api.get<BedrockFeatures>(`${BASE}/bedrock-features`)
 }
+
+// --- Network tools (platform kill switch) -------------------------------------
+
+export type NetworkSettings = {
+  enabled: boolean
+  windowSeconds: number
+  limitPerWindow: number
+  maxConnectionsPerRun: number
+  execTimeoutSeconds: number
+  testExecTimeoutSeconds: number
+  updatedAt: string | null
+  updatedBy: string | null
+}
+
+export function fetchNetworkSettings(api: ApiClient): Promise<NetworkSettings> {
+  return api.get<NetworkSettings>(`${BASE}/network`)
+}
+
+export function updateNetworkSettings(
+  api: ApiClient,
+  enabled: boolean,
+): Promise<NetworkSettings> {
+  return api.post<NetworkSettings>(`${BASE}/network`, { enabled })
+}

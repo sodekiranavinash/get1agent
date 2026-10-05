@@ -111,6 +111,19 @@ function match(path: string, params: URLSearchParams): unknown {
 
   // --- account ---------------------------------------------------------
   if (path === '/v1/user/settings') return demoAccount
+  if (path === '/v1/user/network') {
+    return {
+      enabled: true,
+      windowSeconds: 3600,
+      limitPerWindow: 60,
+      maxConnectionsPerRun: 25,
+      execTimeoutSeconds: 90,
+      testExecTimeoutSeconds: 180,
+      usedInWindow: 4,
+      runsAllTime: 37,
+      lastRunAt: null,
+    }
+  }
 
   // --- notifications ---------------------------------------------------
   if (path === '/v1/notifications') return demoNotificationsPayload()

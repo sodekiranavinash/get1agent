@@ -6926,7 +6926,34 @@ def _route_user(
         if method == "POST":
             return _handle_grievance_create(claims, body)
         raise ApiError(405, f"Method not allowed: {method}")
+    if rest == ["network"]:
+        if method == "GET":
+            return _handle_network_usage(claims)
+        raise ApiError(405, f"Method not allowed: {method}")
     raise ApiError(404, "Not found")
+
+
+def _handle_network_usage(claims: dict[str, Any]) -> dict[str, Any]:
+    """Per-user network-tool usage + the effective platform policy (Usage page)."""
+    from core import network, ratelimit
+    from data.repositories import quotas
+
+    profile = get_or_create_user(claims)
+    user_id = profile["userId"]
+    policy = network.describe()
+    usage = quotas.get_network_usage(user_id)
+    window = int(policy.get("windowSeconds") or 3600)
+    return _json(
+        200,
+        {
+            **policy,
+            "usedInWindow": ratelimit.current(
+                user_id, kind="custom-tools", window_seconds=window
+            ),
+            "runsAllTime": usage["runs"],
+            "lastRunAt": usage["lastRunAt"],
+        },
+    )
 
 
 def _route_conversations(

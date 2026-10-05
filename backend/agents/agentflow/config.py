@@ -25,6 +25,7 @@ class RuntimeConfig:
     knowledge_function: str
     code_interpreter_function: str
     http_fetch_function: str
+    storage_function: str
     browser_function: str
     remote_function: str
     # User-defined Python tools (Playground), served by the custom-tools Lambda.
@@ -71,6 +72,7 @@ def load_config() -> RuntimeConfig:
         knowledge_function=_env("KNOWLEDGE_MCP_FUNCTION"),
         code_interpreter_function=_env("CODE_INTERPRETER_MCP_FUNCTION"),
         http_fetch_function=_env("HTTP_FETCH_MCP_FUNCTION"),
+        storage_function=_env("STORAGE_MCP_FUNCTION"),
         browser_function=_env("BROWSER_MCP_FUNCTION"),
         remote_function=_env("REMOTE_MCP_FUNCTION"),
         custom_tools_function=_env("CUSTOM_TOOLS_MCP_FUNCTION"),

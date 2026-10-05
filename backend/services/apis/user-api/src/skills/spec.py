@@ -47,7 +47,13 @@ DEFAULT_TOOLS: list[dict[str, str]] = [
     {
         "name": "http-fetch",
         "label": "HTTP Fetch",
-        "description": "Call a public URL/API and read stored files from the user's storage.",
+        "description": "Call a public URL/API and return the response inline.",
+        "source": "builtin",
+    },
+    {
+        "name": "storage",
+        "label": "Storage Files",
+        "description": "List, read, write and delete the user's storage files.",
         "source": "builtin",
     },
 ]

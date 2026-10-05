@@ -31,23 +31,35 @@ Hard rules for "code":
 - Define exactly one entrypoint: `def run(args):` taking a single dict and
   returning a JSON-serializable value (dict, list, str, number, bool, None).
 - Read inputs from `args` using `args.get("name")` etc., matching inputSchema.
-- Use only the Python standard library. Never use the network, subprocess,
-  `os.system`, `eval`, `exec`, file writes, or third-party packages.
-- There is NO network access and the tool cannot fetch URLs. When a task needs a
-  web page or an API response, define an input (e.g. `html`, `text` or `json`)
-  and process the content the agent passes in — never import `urllib.request`,
-  `requests`, `httpx` or `socket`.
-- `urllib.parse` (pure URL string parsing) IS allowed; use it for `urljoin`,
-  `quote`, `urlsplit`, etc. HTML parsing via the stdlib `html.parser` is allowed.
+- Use only the Python standard library (third-party packages are NOT installed).
+- The tool runs in a sandbox WITH public internet access (HTTP(S) only), so it
+  may call external APIs directly. Use `urllib.request` together with
+  `urllib.parse` and `json`. Always set an explicit timeout and bound the bytes
+  you read, e.g. `urllib.request.urlopen(req, timeout=15)`.
+- Honour and, when relevant, state the platform safety limits to the user:
+  * at most 25 outbound network connections per run;
+  * the code must finish within about 90 seconds (180 seconds while testing);
+  * only public HTTP(S) hosts are reachable — private, loopback, link-local and
+    cloud-metadata addresses are refused by the sandbox;
+  * heavy machine-learning libraries (torch, tensorflow, transformers, ...),
+    process spawning (`subprocess`), native code (`ctypes`) and dynamic code
+    (`eval`, `exec`, `importlib`) are blocked by policy.
+- The tool CANNOT read or write the user's Storage files; the agent has separate
+  Storage tools for that. Fetch/return the data instead of persisting it.
+- Never download files, install packages, or fetch machine-learning models. If a
+  request would need a blocked library or exceed a limit, tell the user plainly
+  and offer a compliant alternative rather than emitting code that will fail.
+- `urllib.parse` and `html.parser` are available for URL and HTML handling.
 - Be self-contained: no imports from local modules, no reading files.
-- Keep it deterministic and under ~150 lines. Handle missing inputs gracefully.
+- Keep it deterministic and under ~150 lines. Handle missing inputs and network
+  errors gracefully (return an `error` field instead of raising).
 - Do not print the result; return it.
 
 Hard rules for the schemas:
 - JSON Schema objects. Every property has a "type" and a short "description".
 - "required" lists the properties that must be provided.
 
-Naming: lowercase, digits and hyphens only (e.g. `text-summarizer`)."""
+Naming: lowercase, digits and hyphens only (e.g. `currency-converter`)."""
 
 
 class GenerationError(Exception):

@@ -40,6 +40,10 @@ class SandboxConfig:
     # distinct prefix keeps two services from sharing one sandbox by accident.
     thread_prefix: str = "CONV#"
     session_name_prefix: str = "ci-"
+    # When true the sandbox may reach the public internet (HTTP(S)); outbound
+    # connections are counted and private/reserved destinations are refused.
+    allow_network: bool = False
+    max_connections: int = 25
 
 
 def _log_default(event: str, **fields: Any) -> None:
@@ -133,12 +137,14 @@ def _execute_agentcore(
     cfg: SandboxConfig,
     started: float,
     log: Callable[..., None],
+    timeout: int | None = None,
 ) -> dict[str, Any]:
     if not cfg.table:
         return error("not_configured", "The sandbox session table is not set")
+    deadline = timeout or cfg.exec_timeout
 
     now = int(time.time())
-    client = agentcore.client(cfg.region, cfg.exec_timeout)
+    client = agentcore.client(cfg.region, deadline)
     store = sessions.SessionStore(cfg.table, cfg.region)
     pk = sessions.partition_key(sub)
     sk = sessions.sort_key(thread, cfg.thread_prefix)
@@ -164,7 +170,7 @@ def _execute_agentcore(
             session_id,
             code=script,
             language="python",
-            timeout=cfg.exec_timeout,
+            timeout=deadline,
             max_output=cfg.max_output,
         )
 
@@ -218,11 +224,18 @@ def run_code(
     blocked_extra: str = "",
     allowed_extra: str = "",
     prelude: str | None = None,
+    exec_timeout: int | None = None,
     log: Callable[..., None] | None = None,
 ) -> dict[str, Any]:
-    """Run ``code`` for ``sub``; returns the shared result payload."""
+    """Run ``code`` for ``sub``; returns the shared result payload.
+
+    ``exec_timeout`` overrides the config's wall-clock limit for this call (used
+    by the MCP Builder test path, which is allowed a longer budget than a real
+    tool invocation).
+    """
     log = log or _log_default
     started = time.perf_counter()
+    timeout = exec_timeout or config.exec_timeout
 
     language = (language or "python").strip().lower()
     if language != "python":
@@ -235,13 +248,17 @@ def run_code(
         max_bytes=config.max_code_bytes,
         blocked_extra=blocked_extra,
         allowed_extra=allowed_extra,
+        allow_network=config.allow_network,
     )
     if not decision.ok:
         log("sandbox blocked", reason=decision.reason, detail=decision.detail)
         return error("blocked", decision.reason or "Blocked by policy", decision.detail)
 
     preamble = prelude or guard.prelude(
-        blocked_extra=blocked_extra, allowed_extra=allowed_extra
+        blocked_extra=blocked_extra,
+        allowed_extra=allowed_extra,
+        allow_network=config.allow_network,
+        max_connections=config.max_connections,
     )
     thread = sessions.sanitize_thread(conversation_id)
 
@@ -251,7 +268,7 @@ def run_code(
         )
         result = local_exec.run(
             code,
-            timeout=config.exec_timeout,
+            timeout=timeout,
             prelude=preamble,
             max_output=config.max_output,
         )
@@ -265,4 +282,6 @@ def run_code(
         )
         return _shape(result, session_id=ref.session_id, reused=ref.reused, started=started)
 
-    return _execute_agentcore(sub, thread, code, preamble, config, started, log)
+    return _execute_agentcore(
+        sub, thread, code, preamble, config, started, log, timeout=timeout
+    )

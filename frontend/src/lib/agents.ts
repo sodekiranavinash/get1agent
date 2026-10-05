@@ -584,6 +584,7 @@ export const BUILTIN_AGENT_SERVERS = [
   { id: 'code-interpreter', name: 'Code Interpreter' },
   { id: 'web-search', name: 'Web Search' },
   { id: 'http-fetch', name: 'HTTP Fetch' },
+  { id: 'storage', name: 'Storage Files' },
 ] as const
 
 export function agentModelLabel(model: string | null | undefined): string {
