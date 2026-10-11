@@ -88,6 +88,7 @@ import {
   createWorkflow,
   validateWorkflowDescription,
   validateWorkflowName,
+  verifyWorkflow,
   WORKFLOW_LAYOUT,
   WORKFLOW_MODES,
   WORKFLOW_NODE_HEIGHT,
@@ -313,23 +314,14 @@ export function WorkflowBuilderPage() {
 
   // Live run flow: which agent card is executing and which connections are
   // carrying the handoff/dispatch. Derived from the run panel's state.
-  const scheduleEnabled = useMemo(
-    () =>
-      nodes.some(
-        (node) => node.type === 'schedule' && (node.data.schedule?.enabled ?? false),
-      ),
-    [nodes],
-  )
-
   const flow = useMemo(
     () =>
       computeWorkflowFlow({
         nodes: nodes.map((node) => ({ id: node.id, type: node.type ?? '' })),
         edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
         run,
-        scheduleEnabled,
       }),
-    [nodes, edges, run, scheduleEnabled],
+    [nodes, edges, run],
   )
 
   const displayEdges = useMemo(
@@ -588,6 +580,11 @@ export function WorkflowBuilderPage() {
       const saved = workflowId
         ? await updateWorkflow(api, workflowId, payload)
         : await createWorkflow(api, payload)
+      // Run the server's config dry-run after the save so the stored
+      // `verifiedAt` is set — otherwise every workflow shows "Draft" forever
+      // (the builder has no separate Verify action). Best-effort: a failed
+      // verification must never fail the save.
+      await verifyWorkflow(api, saved.id).catch(() => null)
       clearWorkflowDraft(workflowId)
       clearWorkflowDraft(null)
       invalidateWorkflows()

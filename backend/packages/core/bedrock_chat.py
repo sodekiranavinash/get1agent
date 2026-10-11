@@ -10,6 +10,7 @@ so the account-level Bedrock quota is respected across all Lambdas.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -73,9 +74,16 @@ def _cache_point() -> dict[str, Any] | None:
     return {"cachePoint": point}
 
 
+_VALID_SERVICE_TIERS = frozenset({"priority", "default", "flex", "reserved"})
+
+
 def _service_tier() -> str | None:
     tier = (os.environ.get("BEDROCK_SERVICE_TIER") or "").strip().lower()
-    return tier if tier in ("standard", "flex", "priority") else None
+    # The platform calls the default tier "standard"; Bedrock's API calls it
+    # "default". Everything else is passed through only when the API accepts it.
+    if tier == "standard":
+        tier = "default"
+    return tier if tier in _VALID_SERVICE_TIERS else None
 
 
 def _normalize_messages(
@@ -97,6 +105,23 @@ def _normalize_messages(
     if turns[0]["role"] != "user":
         turns.insert(0, {"role": "user", "content": [{"text": "(conversation continued)"}]})
     return turns
+
+
+def _structured_value(blocks: list[Any], text: str) -> Any:
+    """Extract the schema-constrained value from a Converse response.
+
+    Bedrock returns Structured Outputs as the JSON string in the content
+    ``text`` block; some models also return it as a ``json`` content block.
+    """
+    for block in blocks:
+        if isinstance(block, dict) and isinstance(block.get("json"), (dict, list)):
+            return block["json"]
+    if text.strip():
+        try:
+            return json.loads(text)
+        except (ValueError, TypeError):
+            return None
+    return None
 
 
 def converse(
@@ -140,17 +165,40 @@ def converse(
             blocks.append(cache_point)
         kwargs["system"] = blocks
     if output_schema:
-        kwargs["outputConfig"] = {"textFormat": {"structure": {"jsonSchema": {
-            "schema": json.dumps(output_schema),
-            "name": "response",
-        }}}}
+        kwargs["outputConfig"] = {
+            "textFormat": {
+                "type": "json_schema",
+                "structure": {
+                    "jsonSchema": {
+                        "schema": json.dumps(output_schema),
+                        "name": "response",
+                        "description": "Structured response",
+                    }
+                },
+            }
+        }
     tier = _service_tier()
     if tier:
         kwargs["serviceTier"] = {"type": tier}
     try:
         response = _client().converse(**kwargs)
     except Exception as exc:  # noqa: BLE001
-        raise BedrockChatError(str(exc)) from exc
+        # Some models (and regions) reject prompt caching. When the cache point is
+        # the cause, retry once without it rather than failing the whole call.
+        if "prompt caching" in str(exc).lower() and "system" in kwargs:
+            kwargs["system"] = [
+                block
+                for block in kwargs["system"]
+                if not (isinstance(block, dict) and "cachePoint" in block)
+            ]
+            if not kwargs["system"]:
+                del kwargs["system"]
+            try:
+                response = _client().converse(**kwargs)
+            except Exception as exc2:  # noqa: BLE001
+                raise BedrockChatError(str(exc2)) from exc2
+        else:
+            raise BedrockChatError(str(exc)) from exc
 
     output_message = (response.get("output") or {}).get("message") or {}
     blocks = output_message.get("content") or []
@@ -163,7 +211,7 @@ def converse(
         "text": text,
         "stopReason": response.get("stopReason"),
         "usage": response.get("usage") or {},
-        "structured": (output_message.get("content") or [{}])[0].get("json") if output_schema else None,
+        "structured": _structured_value(blocks, text) if output_schema else None,
     }
 
 
@@ -174,14 +222,20 @@ def chat_result(
     model: str | None = None,
     max_tokens: int = 4096,
     temperature: float = 0.2,
+    output_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """One single-turn Bedrock Converse call; returns ``{text, stopReason, usage}``."""
+    """One single-turn Bedrock Converse call; returns ``{text, stopReason, usage}``.
+
+    Pass ``output_schema`` (JSON Schema) to use **Bedrock Structured Outputs**;
+    the constrained object is returned under ``structured``.
+    """
     return converse(
         system,
         [{"role": "user", "content": user}],
         model=model,
         max_tokens=max_tokens,
         temperature=temperature,
+        output_schema=output_schema,
     )
 
 

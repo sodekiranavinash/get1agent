@@ -31,9 +31,9 @@ import {
   AGENT_ANSWER_MODE_OPTIONS,
   AGENT_MODELS,
   AGENT_OUTPUT_FORMATS,
+  AUTO_AGENT_MODEL_OPTION,
   AGENT_REASONING_LEVELS,
   AGENT_TIMEZONES,
-  BUILTIN_AGENT_SERVERS,
   cronFromParts,
   DEFAULT_AGENT_SCHEDULE,
   DEFAULT_SCHEDULE_PARTS,
@@ -55,6 +55,7 @@ import {
   type AgentServerSelection,
 } from '../../lib/agents'
 import { useAgentBuilder } from './AgentBuilderContext'
+import { useBuiltInMcpServers } from '../../lib/agentSkills'
 import { AGENT_KIND_META } from './AgentNode'
 import {
   EmptyHint,
@@ -412,6 +413,15 @@ export function ScheduleFields({
         </>
       )}
 
+      <LineTextArea
+        label="Run question"
+        value={schedule.question ?? ''}
+        onChange={(question) => onChange({ question })}
+        placeholder="What should this agent do each time it runs?"
+        rows={2}
+        hint="Asked on every scheduled run. Without it the run gets a generic prompt."
+      />
+
       {schedule.enabled && runs.length > 0 ? (
         <div className="rounded-xl border border-border bg-canvas/50 p-3">
           <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold tracking-wider text-subtle uppercase">
@@ -710,6 +720,8 @@ export function AgentNodeDialog({
   onClose,
 }: Props) {
   const { knowledgeBases, skills, connections, customServers } = useAgentBuilder()
+  // Built-ins the platform can actually serve (see useBuiltInMcpServers).
+  const builtInServers = useBuiltInMcpServers()
   const providerSecrets = useVaultProviderSecrets().data
   const guardrails = useGuardrails()
   const defaultGuardrailName = (guardrails.data?.guardrails ?? []).find(
@@ -812,7 +824,11 @@ export function AgentNodeDialog({
                     label="Model"
                     value={data.model ?? AGENT_MODELS[0].id}
                     onChange={(value) => patch({ model: value })}
-                    options={AGENT_MODELS.map((model) => ({ value: model.id, label: model.label }))}
+                    options={[
+                      { value: AUTO_AGENT_MODEL_OPTION.id, label: AUTO_AGENT_MODEL_OPTION.label },
+                      ...AGENT_MODELS.map((model) => ({ value: model.id, label: model.label })),
+                    ]}
+                    hint="Auto picks the best model for each run."
                   />
                 )}
                 <LineSelect
@@ -1018,7 +1034,7 @@ export function AgentNodeDialog({
         return (
           <FieldGroup title="MCP servers & tools">
             <div>
-              {BUILTIN_AGENT_SERVERS.map((server) => {
+              {builtInServers.map((server) => {
                 const checked = selected.some((entry) => entry.id === server.id)
                 return (
                   <CheckRow

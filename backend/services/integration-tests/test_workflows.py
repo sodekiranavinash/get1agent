@@ -130,7 +130,12 @@ def test_workflow_crud_and_verify(fake_storage, monkeypatch):
 
     detail = _call("GET", f"/v1/workflows/{created['id']}")
     assert detail["config"]["nodes"][1]["data"]["overrides"]["model"] == "deepseek.v3.2"
-    assert detail["config"]["schedule"] == {"enabled": True, "cron": "0 9 * * 1-5", "timezone": "UTC"}
+    assert detail["config"]["schedule"] == {
+        "enabled": True,
+        "cron": "0 9 * * 1-5",
+        "timezone": "UTC",
+        "question": "",
+    }
 
     verified = _call("POST", f"/v1/workflows/{created['id']}/verify")
     assert verified["valid"] is True
@@ -236,3 +241,45 @@ def test_workflow_conversation_and_runs(fake_storage, monkeypatch):
         {"agentId": workflow["id"], "targetType": "agent", "kind": "chat"},
         expect=404,
     )
+
+
+def test_workflow_schedule_survives_the_canvas_payload(fake_storage, monkeypatch):
+    """The canvas nests the schedule under the node's data.
+
+    The builder sends `{kind: "schedule", schedule: {...}}` for the schedule
+    node and the schedule again at the config's top level. Both must survive —
+    otherwise an enabled workflow schedule is silently stored disabled, never
+    registered with the scheduler, and never runs.
+    """
+    from data.repositories import schedules as schedules_repo
+
+    patch_lambda_storage(monkeypatch, handler, fake_storage)
+    agent = _call("POST", "/v1/agents", _agent_payload(), expect=201)
+
+    schedule = {
+        "enabled": True,
+        "cron": "0 9 * * 1-5",
+        "timezone": "UTC",
+        "question": "Summarise yesterday's tickets.",
+    }
+    payload = _workflow_payload(agent["id"])
+    payload["name"] = "scheduled-pipeline"
+    payload["config"]["schedule"] = schedule
+    for node in payload["config"]["nodes"]:
+        if node["type"] == "schedule":
+            node["data"] = {"kind": "schedule", "schedule": schedule}
+
+    created = _call("POST", "/v1/workflows", payload, expect=201)
+    stored = created["config"]["schedule"]
+    assert stored == schedule
+
+    # The node keeps the nested shape the inspector reads back.
+    node_data = next(
+        node["data"] for node in created["config"]["nodes"] if node["type"] == "schedule"
+    )
+    assert node_data["schedule"] == schedule
+
+    # And the question reaches the scheduler registry for the workflow.
+    due = schedules_repo.list_due("2999-01-01T00:00:00+00:00")
+    entry = next(row for row in due if row["targetId"] == created["id"])
+    assert entry["payload"]["query"] == schedule["question"]

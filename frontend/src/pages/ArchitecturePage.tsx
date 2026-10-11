@@ -66,10 +66,10 @@ function TabContent({ tab }: { tab: TabId }) {
       return (
         <DiagramTab
           title="Platform overview"
-          blurb="How a request flows through the platform: user → edge auth → application Lambdas → isolated agent runtime → AgentCore Gateway → tool servers, models and state. Fully AWS-native; Auth0 and Cloudflare are the only deliberate non-AWS dependencies."
+          blurb="How a request flows through the platform: browser → Cloudflare (serves the UI, proxies the API) → edge auth → application Lambdas → isolated agent runtime → AgentCore Gateway → tool servers, models and state. Fully AWS-native; Auth0 and Cloudflare are the only deliberate non-AWS dependencies."
           spec={ARCHITECTURE}
           legend={ARCHITECTURE_LEGEND}
-          note="9 stages · application flow"
+          note="11 stages · application flow"
         />
       )
     case 'deployment':

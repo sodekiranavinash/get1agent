@@ -3,9 +3,14 @@ import { EditorView } from '@codemirror/view'
 import { tags as t } from '@lezer/highlight'
 
 /**
- * CodeMirror theme wired to the app's CSS variables so it tracks the app
- * surface in both palettes. The syntax palette is chosen per app theme because
- * a single set of token colors does not read well on both backgrounds.
+ * CodeMirror theme wired to the app's CSS variables so the surface tracks the
+ * app theme. The syntax palette is chosen per theme because a single set of
+ * token colors does not read well on both backgrounds.
+ *
+ * Note: the `@uiw/react-codemirror` wrapper defaults its `theme` prop to
+ * "light", which injects a white `background-color` on `&`. CodeMirror mounts
+ * style modules in reverse order, so that default would override this theme —
+ * the wrapper must be rendered with `theme="none"`.
  */
 function baseTheme(dark: boolean) {
   return EditorView.theme(

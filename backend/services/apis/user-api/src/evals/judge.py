@@ -33,10 +33,32 @@ _JSON_SCHEMA: dict[str, Any] = {
     "properties": {
         "score": {"type": "number"},
         "reasoning": {"type": "string"},
-        "claims": {"type": "array", "items": {"type": "object"}},
-        "passages": {"type": "array", "items": {"type": "object"}},
+        "claims": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "claim": {"type": "string"},
+                    "supported": {"type": "boolean"},
+                },
+                "required": ["claim", "supported"],
+                "additionalProperties": False,
+            },
+        },
+        "passages": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "relevant": {"type": "boolean"},
+                },
+                "required": ["index", "relevant"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "additionalProperties": True,
+    "additionalProperties": False,
 }
 
 
@@ -129,8 +151,19 @@ def _chat(
             # of hoping for parseable JSON in prose.
             output_schema=_JSON_SCHEMA,
         )
-    except Exception as exc:  # noqa: BLE001
-        raise JudgeError(f"Model call failed: {exc}") from exc
+    except Exception:  # noqa: BLE001
+        # Structured Outputs may be unavailable for the model/schema; retry as a
+        # plain call and parse the JSON from the text.
+        try:
+            result = bedrock_chat.chat_result(
+                system,
+                user,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        except Exception as exc2:  # noqa: BLE001
+            raise JudgeError(f"Model call failed: {exc2}") from exc2
     if result.get("stopReason") == "max_tokens":
         raise JudgeError("Model ran out of output space before it finished")
     content = str(result.get("text") or "")

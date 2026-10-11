@@ -894,7 +894,7 @@ export const DOCS: DocGroup[] = [
               'Identity: AgentCore Identity holds third-party OAuth tokens in a managed vault, so they are never stored in this app. Each wired provider can request an on-behalf-of token.',
               'Registry: a governed catalog of agents, MCP servers, tools and skills. Publish a record from here and search the catalog semantically.',
               'Browser: open a managed browser session for an allowlisted domain and watch it through the live-view link. Only approved domains can be opened.',
-              'Optimization: AgentCore Optimization analyses evaluated traces and recommends better prompts and tool descriptions.',
+              'Optimization: status only — AgentCore Optimization analyses evaluated traces and recommends better prompts and tool descriptions; supply its Insights ARN to light the feature up.',
               'Bedrock levers: the cost and latency settings currently applied — prompt caching, service tier, prompt routing and per-workload inference profiles.',
             ],
           },

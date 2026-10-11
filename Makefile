@@ -63,6 +63,10 @@ architecture:
 # `make floci-reload`). This target just (re)builds + starts that container.
 agent: floci-env
 	@eval "$$(aws configure export-credentials --format env 2>/dev/null)" 2>/dev/null || true; \
+	if [ -z "$${AWS_ACCESS_KEY_ID:-}" ] && [ ! -f "$${HOME}/.aws/credentials" ] && [ ! -f "$${HOME}/.aws/config" ]; then \
+		echo "⚠️  No AWS credentials found (env or ~/.aws) — the agent calls real Bedrock and will fail with UnrecognizedClientException."; \
+		echo "    Run 'aws sso login' (or configure ~/.aws), then re-run 'make agent'."; \
+	fi; \
 	$(COMPOSE) up -d --build agent
 
 # Backend integration tests: moto-backed DynamoDB + in-memory S3. No Docker/AWS.
@@ -207,6 +211,10 @@ floci-up: floci-env
 	@# Floci container so non-emulated services (Bedrock) work locally. Skipped
 	@# silently when the AWS CLI is unavailable or logged out (emulator default).
 	@eval "$$(aws configure export-credentials --format env 2>/dev/null)" 2>/dev/null || true; \
+	if [ -z "$${AWS_ACCESS_KEY_ID:-}" ] && [ ! -f "$${HOME}/.aws/credentials" ] && [ ! -f "$${HOME}/.aws/config" ]; then \
+		echo "⚠️  No AWS credentials found (env or ~/.aws) — the agent runtime's Bedrock calls will fail with UnrecognizedClientException."; \
+		echo "    Run 'aws sso login' (or configure ~/.aws), then re-run 'make floci-up'."; \
+	fi; \
 	$(COMPOSE) up -d
 
 floci-wait:

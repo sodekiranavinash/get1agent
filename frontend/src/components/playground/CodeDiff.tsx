@@ -12,12 +12,13 @@ import { codeThemeExtensions } from './codeMirrorTheme'
  * lines are shown as read-only widgets and changed lines are highlighted; the
  * single accept/reject pair lives in the toolbar above (no per-chunk controls).
  * The parent remounts this component with a `key` whenever a new proposal
- * arrives, so it is created once per mount.
+ * arrives, so it is created once per mount. The theme tracks the app palette
+ * via `dark`, like the editor.
  */
 export function CodeDiff({
   original,
   value,
-  dark = true,
+  dark = false,
   onChange,
 }: {
   original: string

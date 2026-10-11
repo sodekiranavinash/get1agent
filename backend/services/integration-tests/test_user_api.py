@@ -353,3 +353,82 @@ def test_guardrails_crud(fake_storage, monkeypatch):
     _call("DELETE", "/v1/guardrails/strict-support")
     final = _call("GET", "/v1/guardrails")
     assert final["guardrails"] == []
+
+
+def test_scheduled_run_carries_its_question(fake_storage, monkeypatch):
+    """A schedule keeps its own question and mirrors it into the scheduler.
+
+    The builder's run question is never persisted, so without this the scheduler
+    falls back to a generic "Run the scheduled task for <name>.".
+    """
+    from data.repositories import schedules as schedules_repo
+
+    question = "Summarise yesterday's support tickets."
+    created = _call(
+        "POST",
+        "/v1/agents",
+        {
+            "name": "nightly-digest",
+            "description": "d",
+            "config": {
+                "version": 2,
+                "prompt": "You are a careful research assistant.",
+                "model": "zai.glm-4.7-flash",
+                "schedule": {
+                    "enabled": True,
+                    "cron": "0 9 * * *",
+                    "timezone": "UTC",
+                    "question": question,
+                },
+                "graph": {"nodes": [{"id": "agent-1", "type": "agent"}], "edges": []},
+            },
+        },
+        expect=201,
+    )
+    assert created["config"]["schedule"]["question"] == question
+
+    due = schedules_repo.list_due("2999-01-01T00:00:00+00:00")
+    row = next(entry for entry in due if entry["targetId"] == created["id"])
+    assert row["payload"]["query"] == question
+
+    # The question is capped so a config cannot smuggle unbounded text.
+    _call(
+        "POST",
+        "/v1/agents",
+        {
+            "name": "too-long",
+            "description": "d",
+            "config": {
+                "prompt": "You are a careful research assistant.",
+                "schedule": {
+                    "enabled": True,
+                    "cron": "0 9 * * *",
+                    "timezone": "UTC",
+                    "question": "x" * 2001,
+                },
+                "graph": {"nodes": [{"id": "agent-1", "type": "agent"}], "edges": []},
+            },
+        },
+        expect=400,
+    )
+
+
+def test_browser_is_offered_only_when_usable(fake_storage, monkeypatch):
+    """Capability-gated built-ins: an unusable browser is never advertised."""
+    monkeypatch.delenv("BROWSER_ID", raising=False)
+    monkeypatch.delenv("BROWSER_ALLOWED_DOMAINS", raising=False)
+    servers = _call("GET", "/v1/agent-skills/mcp-servers")["servers"]
+    ids = [server["id"] for server in servers]
+    assert "browser" not in ids
+    # The always-available built-ins are still offered, with their descriptions.
+    assert {"web-search", "code-interpreter", "http-fetch", "storage"} <= set(ids)
+    assert all(server["source"] == "builtin" and server["description"] for server in servers)
+
+    # A provisioned browser with an allowlist becomes offerable.
+    monkeypatch.setenv("BROWSER_ID", "b-1234567890")
+    monkeypatch.setenv("BROWSER_ALLOWED_DOMAINS", "example.com")
+    ids = [
+        server["id"]
+        for server in _call("GET", "/v1/agent-skills/mcp-servers")["servers"]
+    ]
+    assert "browser" in ids

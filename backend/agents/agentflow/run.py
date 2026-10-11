@@ -31,8 +31,10 @@ from agentflow.memory import (
 )
 from agentflow.models import (
     DEFAULT_CONTEXT_WINDOW,
+    AUTO_MODEL,
     build_model,
     context_window_limit,
+    is_auto_model,
     resolve_model_id,
 )
 from agentflow.observability import flush, run_trace, trace_identity
@@ -195,6 +197,7 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
     agent_config: dict[str, Any] = {}
     conversation_id: str | None = None
     resolved_model = ""
+    auto_routed = False
     provider: dict[str, Any] | None = None
     provider_secret_id = ""
     run_usage: dict[str, Any] = {}
@@ -260,6 +263,10 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
         else:
             provider_secret_id = str(agent_config.get("providerSecretId") or "").strip()
         if provider_secret_id:
+            # "Auto" is a platform-gateway concept: a user provider has its own
+            # model, so drop the sentinel and use the provider's default.
+            if is_auto_model(requested_model):
+                requested_model = ""
             provider = resolve_model_provider(user_id, provider_secret_id)
             resolved_model = (
                 str(requested_model or "").strip()
@@ -267,6 +274,16 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
             )
             if not resolved_model:
                 raise ValueError("Select a model for the chosen provider")
+        elif is_auto_model(requested_model):
+            # "Auto": choose a platform model for this run *before* executing it,
+            # so every downstream consumer (context meter, budget, trace) sees the
+            # real model. Falls back to the default when routing is unavailable.
+            from agentflow.routing import choose_model
+
+            resolved_model = await choose_model(
+                config, user_input, str(agent_config.get("prompt") or "")
+            )
+            auto_routed = True
         else:
             resolved_model = resolve_model_id(requested_model)
 
@@ -323,7 +340,7 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
             )
         )
 
-        yield {
+        started_event: dict[str, Any] = {
             "type": "run.started",
             "runId": run_id,
             "agentId": agent_id,
@@ -332,6 +349,11 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
             # Present only when the run is on the user's own Vault provider.
             "provider": (provider or {}).get("name"),
         }
+        if auto_routed:
+            # Tell the client the user asked for "Auto" and this is the model the
+            # runtime chose for this run.
+            started_event["auto"] = {"selected": resolved_model}
+        yield started_event
 
         # One trace per run: the planner, every model turn and every tool call
         # nest under it. Exported by AgentCore's ADOT collector to CloudWatch.

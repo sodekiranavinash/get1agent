@@ -145,6 +145,7 @@ function cardSubtitle(data: AgentNodeData, { knowledgeBases, skills }: Lookups):
         enabled: false,
         cron: '',
         timezone: 'UTC',
+        question: '',
       }
       if (!schedule.enabled) return 'Not scheduled'
       return schedule.cron ? describeSchedule(schedule.cron) : 'Not scheduled'

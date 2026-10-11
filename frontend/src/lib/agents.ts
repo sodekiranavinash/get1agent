@@ -49,6 +49,12 @@ export type AgentSchedule = {
   enabled: boolean
   cron: string
   timezone: string
+  /**
+   * The question each scheduled run asks. The builder's run question is never
+   * persisted, so a schedule carries its own; empty falls back to the
+   * scheduler's generic "Run the scheduled task for <name>.".
+   */
+  question: string
 }
 
 export type AgentMemory = {
@@ -243,7 +249,20 @@ export const AGENT_MODELS = [
 
 export const DEFAULT_AGENT_CONTEXT_WINDOW = 128_000
 
+// "Auto" is not a model: it asks the runtime to choose one for the run before
+// executing the question (see the agent runtime's model routing). It is a
+// platform-gateway concept, so it is never offered with a Vault provider.
+export const AUTO_AGENT_MODEL = 'auto'
+
+export const AUTO_AGENT_MODEL_OPTION = {
+  id: AUTO_AGENT_MODEL,
+  label: 'Auto',
+  blurb: 'Picks the best model for each request',
+  contextWindow: DEFAULT_AGENT_CONTEXT_WINDOW,
+} as const
+
 export function agentModelContextWindow(model?: string | null): number {
+  if (model === AUTO_AGENT_MODEL) return DEFAULT_AGENT_CONTEXT_WINDOW
   return AGENT_MODELS.find((entry) => entry.id === model)?.contextWindow ?? DEFAULT_AGENT_CONTEXT_WINDOW
 }
 
@@ -293,6 +312,7 @@ export const DEFAULT_AGENT_MODEL = AGENT_MODELS[0].id
 
 /** Map a saved (possibly legacy) model id onto a supported one. */
 export function resolveAgentModel(model?: string | null): string {
+  if (model === AUTO_AGENT_MODEL) return AUTO_AGENT_MODEL
   return AGENT_MODELS.some((entry) => entry.id === model)
     ? (model as string)
     : DEFAULT_AGENT_MODEL
@@ -302,6 +322,7 @@ export const DEFAULT_AGENT_SCHEDULE: AgentSchedule = {
   enabled: false,
   cron: '',
   timezone: 'UTC',
+  question: '',
 }
 
 export type AgentScheduleFrequency = 'hourly' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
@@ -588,6 +609,7 @@ export const BUILTIN_AGENT_SERVERS = [
 ] as const
 
 export function agentModelLabel(model: string | null | undefined): string {
+  if (model === AUTO_AGENT_MODEL) return AUTO_AGENT_MODEL_OPTION.label
   return AGENT_MODELS.find((entry) => entry.id === model)?.label ?? model ?? 'Model'
 }
 

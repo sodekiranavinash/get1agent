@@ -82,3 +82,19 @@ def test_workflow_schedules_are_registered_too() -> None:
     )
     due = schedules.list_due("2999-01-01T00:00:00+00:00")
     assert [entry["kind"] for entry in due] == ["workflow"]
+
+
+def test_scheduled_run_uses_the_stored_question() -> None:
+    """The question mirrored onto the registry row is what the run asks."""
+    from support import load_module
+
+    scheduler = load_module("backend/services/scheduler/handler.py", "scheduler_handler")
+    assert (
+        scheduler._input_text({"payload": {"query": "Summarise yesterday's tickets."}})
+        == "Summarise yesterday's tickets."
+    )
+    # No question stored: the generic fallback still applies.
+    assert (
+        scheduler._input_text({"name": "nightly-digest"})
+        == "Run the scheduled task for nightly-digest."
+    )

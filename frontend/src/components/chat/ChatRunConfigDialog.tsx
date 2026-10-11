@@ -4,9 +4,8 @@ import { Button } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { formatBytes, useStorageFiles, type StorageFile } from '../../lib/storage'
 import { useKnowledgeBases } from '../../lib/knowledgeBases'
-import { useAgentSkills } from '../../lib/agentSkills'
+import { useAgentSkills, useBuiltInMcpServers } from '../../lib/agentSkills'
 import {
-  BUILTIN_AGENT_SERVERS,
   agentModelLabel,
   useAgentDetail,
   useAgents,
@@ -99,6 +98,8 @@ function RunConfigDialog({
   const files = useStorageFiles()
   const connections = useMcpConnectionOptions()
   const custom = useCustomServerOptions()
+  // Built-ins the platform can actually serve (see useBuiltInMcpServers).
+  const builtInServers = useBuiltInMcpServers()
 
   const [selection, setSelection] = useState<Selection>(() => ({
     knowledgeBaseIds: [...(value?.knowledgeBaseIds ?? [])],
@@ -120,7 +121,7 @@ function RunConfigDialog({
   }, [detail.data])
 
   const serverOptions = useMemo(() => {
-    const builtins = BUILTIN_AGENT_SERVERS.map((server) => ({
+    const builtins = builtInServers.map((server) => ({
       id: server.id,
       name: server.name,
       source: 'builtin' as const,
@@ -139,7 +140,7 @@ function RunConfigDialog({
       subtitle: 'Custom tool server',
     }))
     return [...builtins, ...remotes, ...customs]
-  }, [connections.data, custom.servers])
+  }, [builtInServers, connections.data, custom.servers])
 
   const toggleServer = (option: {
     id: string

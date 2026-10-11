@@ -2,6 +2,7 @@ import { useApiClient, type ApiClient } from './api'
 import { invalidateQuery, useQuery } from './query'
 import { usePageQuery } from '../hooks/usePageQuery'
 import { formatBytes, formatRelative } from './knowledgeBases'
+import { BUILTIN_AGENT_SERVERS } from './agents'
 
 export const AGENT_SKILLS_QUERY_KEY = 'agent-skills'
 export const AGENT_MCP_SERVERS_QUERY_KEY = 'agent-skills-mcp-servers'
@@ -37,6 +38,8 @@ export type AgentSkillDetail = AgentSkill & {
 export type AgentMcpServer = {
   id: string
   name: string
+  /** Present for built-in servers (the canonical list lives in user-api). */
+  description?: string
   source: string
 }
 
@@ -298,4 +301,21 @@ export function useMcpServers(): { servers: AgentMcpServer[]; refetch: () => voi
     return response.servers
   })
   return { servers: query.data ?? [], refetch: query.refetch }
+}
+
+/**
+ * The built-in MCP servers the platform offers right now.
+ *
+ * The API owns this list and only advertises a built-in it can actually serve
+ * (e.g. `browser` needs a provisioned browser plus a non-empty domain
+ * allowlist), so the builders offer exactly the usable set instead of drifting
+ * from the backend. The static catalog is only a fallback until it loads.
+ */
+export function useBuiltInMcpServers(): AgentMcpServer[] {
+  const { servers } = useMcpServers()
+  const builtIns = servers.filter((server) => server.source === 'builtin')
+  if (builtIns.length === 0) {
+    return BUILTIN_AGENT_SERVERS.map((server) => ({ ...server, source: 'builtin' }))
+  }
+  return builtIns
 }

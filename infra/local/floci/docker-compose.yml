@@ -52,6 +52,11 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      # Floci injects *emulated* execution-role credentials into Lambda containers,
+      # so functions can't reach real AWS with just AWS_ACCESS_KEY_ID above. This
+      # mount makes each Lambda discover the host's real ~/.aws credentials
+      # (AWS_SHARED_CREDENTIALS_FILE), which the Labs use for real Bedrock.
+      FLOCI_SERVICES_LAMBDA_AWS_CONFIG_PATH: ${HOME}/.aws
       # Read by the init hook (infra/local/floci/init/ready.d/10-provision.py).
       KB_BUCKET: ${S3_BUCKET:-get1agent-local}
       DYNAMODB_TABLE: ${DYNAMODB_TABLE:-get1agent-local}
@@ -80,6 +85,9 @@ services:
       # Remote MCP connections (GitHub OAuth App + callback overrides).
       MCP_GITHUB_CLIENT_ID: ${MCP_GITHUB_CLIENT_ID:-}
       MCP_GITHUB_CLIENT_SECRET: ${MCP_GITHUB_CLIENT_SECRET:-}
+      # Optional GitHub token for skill repo resolution + registry imports
+      # (user-api). Empty = anonymous, rate-limited.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       MCP_OAUTH_REDIRECT_URI: ${MCP_OAUTH_REDIRECT_URI:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       # HMAC secret for signed, expiring public trace links (user-api).
@@ -92,6 +100,7 @@ services:
       SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED:-true}
       SEMANTIC_CACHE_THRESHOLD: ${SEMANTIC_CACHE_THRESHOLD:-0.95}
       SEMANTIC_CACHE_TTL_SECONDS: ${SEMANTIC_CACHE_TTL_SECONDS:-600}
+      SEMANTIC_CACHE_MAX_BYTES: ${SEMANTIC_CACHE_MAX_BYTES:-200000}
       # Single-flight locks to dedupe concurrent identical work.
       SINGLE_FLIGHT_ENABLED: ${SINGLE_FLIGHT_ENABLED:-true}
       SINGLE_FLIGHT_LOCK_SECONDS: ${SINGLE_FLIGHT_LOCK_SECONDS:-20}
@@ -100,6 +109,10 @@ services:
       # Bedrock (IAM-authenticated; local containers need AWS credentials).
       BEDROCK_REGION: ${BEDROCK_REGION:-ap-south-1}
       BEDROCK_CHAT_MODEL: ${BEDROCK_CHAT_MODEL:-zai.glm-4.7-flash}
+      # Floci's bedrock-runtime is a stub, so the Labs must reach real Bedrock.
+      # boto3's service-specific endpoint wins over the global AWS_ENDPOINT_URL
+      # (http://floci:4566) that Floci injects into every Lambda.
+      AWS_ENDPOINT_URL_BEDROCK_RUNTIME: ${AWS_ENDPOINT_URL_BEDROCK_RUNTIME:-}
       AGENT_MEMORY_BACKEND: ${AGENT_MEMORY_BACKEND:-dynamo}
       MCP_TRANSPORT: ${MCP_TRANSPORT:-aggregator}
       AGENT_WORKLOAD_IDENTITY_ARN: ${AGENT_WORKLOAD_IDENTITY_ARN:-}
@@ -189,10 +202,18 @@ services:
       # Docker can't resolve the virtual-host style bucket host, so use path style.
       S3_ADDRESSING_STYLE: path
       AGENT_PORT: "8080"
-      # Real AWS credentials (Bedrock + X-Ray), exported by `make floci-up`.
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      # Real AWS credentials (Bedrock + X-Ray). `make floci-up` / `make agent`
+      # export the host chain and an explicit export always wins. Otherwise the
+      # host's ~/.aws is mounted below, so the container reads *live* credentials
+      # (and an SSO refresh) instead of a snapshot baked in at create time —
+      # a stale/baked credential used to surface as UnrecognizedClientException
+      # on every ConverseStream call.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    volumes:
+      # Live host AWS credentials for the real Bedrock/X-Ray calls. Read-only.
+      - ${HOME}/.aws:/root/.aws:ro
     ports:
       - "${AGENT_PORT:-8090}:8080"
     networks:

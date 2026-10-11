@@ -360,8 +360,9 @@ locals {
   workload_identity_arn = length(aws_bedrockagentcore_workload_identity.agents) > 0 ? aws_bedrockagentcore_workload_identity.agents[0].workload_identity_arn : ""
   token_vault_id        = length(aws_bedrockagentcore_token_vault_cmk.agents) > 0 ? aws_bedrockagentcore_token_vault_cmk.agents[0].token_vault_id : ""
 
-  # Phases A5–A8.
-  prompt_router_arn    = var.bedrock_prompt_router_arn
+  # Phases A5–A8. The prompt router is only wired when `enable_nova_prompt_router`
+  # is on (and an ARN was supplied); otherwise routing stays off.
+  prompt_router_arn    = var.enable_nova_prompt_router ? var.bedrock_prompt_router_arn : ""
   guardrail_id         = length(aws_bedrock_guardrail.agents) > 0 ? aws_bedrock_guardrail.agents[0].guardrail_id : var.guardrail_id
   guardrail_version    = length(aws_bedrock_guardrail_version.agents) > 0 ? tostring(aws_bedrock_guardrail_version.agents[0].version) : var.guardrail_version
   registry_id          = ""
@@ -495,10 +496,8 @@ resource "aws_bedrockagentcore_browser" "agents" {
 # NOTE: intelligent prompt routers are created with the Bedrock Agents
 # control-plane API (`create_prompt_router`); the AWS provider does not yet expose
 # a prompt-router resource, so the router ARN is supplied via
-# `bedrock_prompt_router_arn` (created once out of band) and used when non-empty.
-locals {
-  nova_router_configured = var.enable_nova_prompt_router && var.bedrock_prompt_router_arn != ""
-}
+# `bedrock_prompt_router_arn` (created once out of band) and used when
+# `enable_nova_prompt_router` is true and the ARN is non-empty.
 
 # --- Guardrails as IaC (Tier 2) ----------------------------------------------
 # The guardrail the runtime applies is now reproducible instead of console-made.
@@ -911,6 +910,9 @@ module "user_api" {
     BEDROCK_CHAT_MODEL                     = "zai.glm-4.7-flash"
     # Bedrock Guardrails: the standalone tester + workspace reference.
     GUARDRAIL_ID = local.guardrail_id
+    # Skill repo resolution / registry imports (optional; raises the GitHub
+    # API rate limit and enables private repos).
+    GITHUB_TOKEN = var.github_token
     # Cost/latency levers for the Labs.
     BEDROCK_PROMPT_CACHE      = var.bedrock_prompt_cache
     BEDROCK_PROMPT_CACHE_TTL  = var.bedrock_prompt_cache_ttl
@@ -1031,6 +1033,7 @@ module "knowledge_mcp" {
     SEMANTIC_CACHE_ENABLED     = "true"
     SEMANTIC_CACHE_THRESHOLD   = "0.95"
     SEMANTIC_CACHE_TTL_SECONDS = "600"
+    SEMANTIC_CACHE_MAX_BYTES   = tostring(var.semantic_cache_max_bytes)
     # Per-user rate limits + single-flight locks.
     # Single-flight locks (dedupe concurrent identical searches).
     SINGLE_FLIGHT_ENABLED      = "true"
@@ -1091,23 +1094,24 @@ module "admin_console" {
     BEDROCK_REGION  = var.aws_region
     # Platform status routes (/v1/admin/platform/*): Identity, Registry,
     # Browser, Optimization and the Bedrock cost/latency levers.
-    AGENT_WORKLOAD_IDENTITY_ARN = local.workload_identity_arn
-    AGENT_TOKEN_VAULT_ID        = local.token_vault_id
-    AGENT_IDENTITY_PROVIDERS    = join(",", local.identity_provider_arns)
-    AGENT_IDENTITY_RETURN_URL   = var.agent_identity_return_url
-    AGENTCORE_REGISTRY_ARN      = local.registry_arn
-    AGENTCORE_REGISTRY_ID       = local.registry_id
-    BROWSER_ID                  = local.browser_id
-    BROWSER_REGION              = var.aws_region
-    BROWSER_ALLOWED_DOMAINS     = var.browser_allowed_domains
-    AGENT_OPTIMIZATION_ENABLED  = "true"
-    BEDROCK_PROMPT_CACHE        = var.bedrock_prompt_cache
-    BEDROCK_PROMPT_CACHE_TTL    = var.bedrock_prompt_cache_ttl
-    BEDROCK_SERVICE_TIER        = var.bedrock_service_tier
-    BEDROCK_PROMPT_ROUTER_ARN   = local.prompt_router_arn
-    BEDROCK_PROFILE_CHAT        = var.bedrock_profile_chat
-    BEDROCK_PROFILE_EVAL        = var.bedrock_profile_eval
-    BEDROCK_PROFILE_INGESTION   = var.bedrock_profile_ingestion
+    AGENT_WORKLOAD_IDENTITY_ARN     = local.workload_identity_arn
+    AGENT_TOKEN_VAULT_ID            = local.token_vault_id
+    AGENT_IDENTITY_PROVIDERS        = join(",", local.identity_provider_arns)
+    AGENT_IDENTITY_RETURN_URL       = var.agent_identity_return_url
+    AGENTCORE_REGISTRY_ARN          = local.registry_arn
+    AGENTCORE_REGISTRY_ID           = local.registry_id
+    BROWSER_ID                      = local.browser_id
+    BROWSER_REGION                  = var.aws_region
+    BROWSER_ALLOWED_DOMAINS         = var.browser_allowed_domains
+    AGENT_OPTIMIZATION_ENABLED      = "true"
+    AGENT_OPTIMIZATION_INSIGHTS_ARN = var.optimization_insights_arn
+    BEDROCK_PROMPT_CACHE            = var.bedrock_prompt_cache
+    BEDROCK_PROMPT_CACHE_TTL        = var.bedrock_prompt_cache_ttl
+    BEDROCK_SERVICE_TIER            = var.bedrock_service_tier
+    BEDROCK_PROMPT_ROUTER_ARN       = local.prompt_router_arn
+    BEDROCK_PROFILE_CHAT            = var.bedrock_profile_chat
+    BEDROCK_PROFILE_EVAL            = var.bedrock_profile_eval
+    BEDROCK_PROFILE_INGESTION       = var.bedrock_profile_ingestion
   }
 
   depends_on = [
@@ -1488,15 +1492,10 @@ module "ingestion_index" {
     CACHE_BACKEND               = "dynamodb"
     CACHE_SEARCH_TTL_SECONDS    = "300"
     CACHE_EMBEDDING_TTL_SECONDS = "2592000"
-    # Semantic cache: S3 Vectors ANN (per-user) + DynamoDB payload.
-    SEMANTIC_CACHE_ENABLED     = "true"
-    SEMANTIC_CACHE_THRESHOLD   = "0.95"
-    SEMANTIC_CACHE_TTL_SECONDS = "600"
-    # Per-user rate limits + single-flight locks.
-    # Single-flight locks (dedupe concurrent identical searches).
-    SINGLE_FLIGHT_ENABLED      = "true"
-    SINGLE_FLIGHT_LOCK_SECONDS = "20"
-    SINGLE_FLIGHT_WAIT_SECONDS = "6"
+    # NOTE: the semantic cache and the single-flight locks belong to
+    # knowledge-mcp — the only module that imports core.semantic_cache /
+    # core.singleflight — so they are configured there, not on the ingestion
+    # workers (setting them here had no effect).
   }
 
   depends_on = [
@@ -1714,40 +1713,38 @@ module "agent_runtime" {
   runtime_environment = merge(
     {
       AGENT_PLANNER_MODEL = "zai.glm-4.7-flash"
+      # Automatic model routing for agents/workflows set to model="auto".
+      AGENT_MODEL_ROUTING          = "true"
+      AGENT_ROUTER_MODEL           = "zai.glm-4.7-flash"
+      AGENT_ROUTER_TIMEOUT_SECONDS = "20"
       # Cost/latency levers (core.bedrock_features + agentflow.models).
-      BEDROCK_PROMPT_CACHE        = var.bedrock_prompt_cache
-      BEDROCK_PROMPT_CACHE_TTL    = var.bedrock_prompt_cache_ttl
-      BEDROCK_SERVICE_TIER        = var.bedrock_service_tier
-      BEDROCK_PROMPT_ROUTER_ARN   = local.prompt_router_arn
-      BEDROCK_PROFILE_CHAT        = var.bedrock_profile_chat
-      BEDROCK_PROFILE_EVAL        = var.bedrock_profile_eval
-      BEDROCK_PROFILE_INGESTION   = var.bedrock_profile_ingestion
-      GUARDRAIL_ID                = local.guardrail_id
-      GUARDRAIL_VERSION           = var.guardrail_version
-      MCP_TRANSPORT               = "gateway"
-      MCP_GATEWAY_URL             = length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_url : ""
-      AGENT_WORKLOAD_IDENTITY_ARN = local.workload_identity_arn
-      AGENT_TOKEN_VAULT_ID        = local.token_vault_id
-      AGENT_IDENTITY_PROVIDERS    = join(",", local.identity_provider_arns)
-      AGENTCORE_REGISTRY_ARN      = local.registry_arn
-      AGENTCORE_REGISTRY_ID       = local.registry_id
-      BROWSER_ID                  = local.browser_id
-      BROWSER_REGION              = var.aws_region
-      BROWSER_ALLOWED_DOMAINS     = var.browser_allowed_domains
-      AGENT_OPTIMIZATION_ENABLED  = "true"
-      BROWSER_MCP_FUNCTION        = local.browser_function_arn
-      AGENTCORE_MEMORY_ID         = local.agentcore_memory_id
-      AGENT_POLICY_ENGINE         = local.agent_policy_engine_id
-      AGENT_POLICY_MODE           = "enforce"
-      AGENT_POLICY_DENY_TOOLS     = var.agent_policy_deny_tools
-      DYNAMODB_TABLE              = module.database[0].table_name
-      S3_BUCKET                   = module.knowledge_storage[0].bucket_name
-      S3_VECTOR_BUCKET            = module.vectors[0].vector_bucket_name
-      EMBED_MODE                  = "bedrock"
-      TEXT_EMBED_MODEL            = "amazon.titan-embed-text-v2:0"
-      IMAGE_EMBED_MODEL           = "amazon.titan-embed-image-v1"
-      BEDROCK_REGION              = var.aws_region
-      KNOWLEDGE_MCP_FUNCTION      = module.knowledge_mcp[0].function_name
+      BEDROCK_PROMPT_CACHE      = var.bedrock_prompt_cache
+      BEDROCK_PROMPT_CACHE_TTL  = var.bedrock_prompt_cache_ttl
+      BEDROCK_SERVICE_TIER      = var.bedrock_service_tier
+      BEDROCK_PROMPT_ROUTER_ARN = local.prompt_router_arn
+      BEDROCK_PROFILE_CHAT      = var.bedrock_profile_chat
+      BEDROCK_PROFILE_EVAL      = var.bedrock_profile_eval
+      BEDROCK_PROFILE_INGESTION = var.bedrock_profile_ingestion
+      GUARDRAIL_ID              = local.guardrail_id
+      GUARDRAIL_VERSION         = var.guardrail_version
+      MCP_TRANSPORT             = "gateway"
+      MCP_GATEWAY_URL           = length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_url : ""
+      BROWSER_ID                = local.browser_id
+      BROWSER_REGION            = var.aws_region
+      BROWSER_ALLOWED_DOMAINS   = var.browser_allowed_domains
+      BROWSER_MCP_FUNCTION      = local.browser_function_arn
+      AGENTCORE_MEMORY_ID       = local.agentcore_memory_id
+      AGENT_POLICY_ENGINE       = local.agent_policy_engine_id
+      AGENT_POLICY_MODE         = "enforce"
+      AGENT_POLICY_DENY_TOOLS   = var.agent_policy_deny_tools
+      DYNAMODB_TABLE            = module.database[0].table_name
+      S3_BUCKET                 = module.knowledge_storage[0].bucket_name
+      S3_VECTOR_BUCKET          = module.vectors[0].vector_bucket_name
+      EMBED_MODE                = "bedrock"
+      TEXT_EMBED_MODEL          = "amazon.titan-embed-text-v2:0"
+      IMAGE_EMBED_MODEL         = "amazon.titan-embed-image-v1"
+      BEDROCK_REGION            = var.aws_region
+      KNOWLEDGE_MCP_FUNCTION    = module.knowledge_mcp[0].function_name
       # Web Search is the AgentCore Gateway built-in connector, not a Lambda.
       # It runs on a dedicated gateway in a supported Region (cross-region call).
       WEB_SEARCH_GATEWAY_TOOL       = local.web_search_gateway_tool

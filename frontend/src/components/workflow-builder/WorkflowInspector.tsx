@@ -24,6 +24,7 @@ import {
 import {
   AGENT_MODELS,
   AGENT_OUTPUT_FORMATS,
+  AUTO_AGENT_MODEL_OPTION,
   DEFAULT_AGENT_MODEL,
   DEFAULT_AGENT_SCHEDULE,
   agentModelLabel,
@@ -186,6 +187,9 @@ function AgentInspector({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={INHERIT}>Inherit · {agentModelLabel(inheritedModel)}</SelectItem>
+            <SelectItem value={AUTO_AGENT_MODEL_OPTION.id}>
+              {AUTO_AGENT_MODEL_OPTION.label}
+            </SelectItem>
             {AGENT_MODELS.map((model) => (
               <SelectItem key={model.id} value={model.id}>
                 {model.label}
@@ -372,6 +376,9 @@ function HostInspector({ node }: { node: WorkflowFlowNode }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value={AUTO_AGENT_MODEL_OPTION.id}>
+              {AUTO_AGENT_MODEL_OPTION.label}
+            </SelectItem>
             {AGENT_MODELS.map((model) => (
               <SelectItem key={model.id} value={model.id}>
                 {model.label}

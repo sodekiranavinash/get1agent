@@ -41,7 +41,11 @@ def _limits(timeout: int):
 
 def run(code: str, *, timeout: int, prelude: str, max_output: int) -> dict[str, Any]:
     """Execute ``code`` in a subprocess; return ``{output, is_error, timed_out}``."""
-    script = f"{prelude}\n{code}\n"
+    # `-I` ignores PYTHONPATH, and the temp cwd is not the Lambda task root, so the
+    # bundled third-party deps (requests, bs4, ...) would not be importable. Put the
+    # task root on sys.path explicitly to match the prod sandbox image's packages.
+    task_root = os.environ.get("LAMBDA_TASK_ROOT") or os.getcwd()
+    script = f"import sys\nsys.path.insert(0, {task_root!r})\n{prelude}\n{code}\n"
     with tempfile.TemporaryDirectory(prefix="g1ci-") as workdir:
         try:
             proc = subprocess.run(

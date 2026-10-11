@@ -1,10 +1,12 @@
 import {
   Activity,
+  AppWindow,
   Bot,
   Boxes,
   Brain,
   CalendarClock,
   ClipboardCheck,
+  Cloud,
   Database,
   Download,
   FileStack,
@@ -110,13 +112,35 @@ export const ARCHITECTURE: DiagramSpec = {
   id: 'architecture',
   bands: [
     {
-      id: 'client',
-      title: 'User',
-      hint: 'browser · untrusted',
+      id: 'webbrowser',
+      title: 'Client',
+      hint: 'untrusted · the end user',
       tone: 'request',
       rows: [
         [
-          { id: 'spa', kind: 'client', title: 'React SPA', subtitle: 'chat · builders · labs', code: 'Vite · TypeScript', icon: MonitorSmartphone },
+          { id: 'webbrowser', kind: 'client', title: 'Web browser', subtitle: 'loads the app · untrusted', icon: MonitorSmartphone },
+        ],
+      ],
+    },
+    {
+      id: 'cdn',
+      title: 'Edge delivery',
+      hint: 'Cloudflare · CDN · DNS · WAF',
+      tone: 'request',
+      rows: [
+        [
+          { id: 'cloudflare', kind: 'external', title: 'Cloudflare', subtitle: 'serves the UI · proxies the API', code: 'CDN · DNS · TLS · WAF', icon: Cloud },
+        ],
+      ],
+    },
+    {
+      id: 'client',
+      title: 'User interface',
+      hint: 'single-page app · untrusted',
+      tone: 'request',
+      rows: [
+        [
+          { id: 'spa', kind: 'client', title: 'React SPA', subtitle: 'chat · builders · labs', code: 'Vite · TypeScript', icon: AppWindow },
         ],
       ],
     },
@@ -248,7 +272,10 @@ export const ARCHITECTURE: DiagramSpec = {
   ],
   edges: [
     // the application flow, top to bottom
-    { from: 'spa', to: 'apigw', tone: 'request', label: 'HTTPS + JWT' },
+    { from: 'webbrowser', to: 'cloudflare', tone: 'request', label: 'HTTPS' },
+    { from: 'cloudflare', to: 'spa', tone: 'request', label: 'serves UI' },
+    { from: 'spa', to: 'cloudflare', tone: 'request', label: 'API calls' },
+    { from: 'cloudflare', to: 'apigw', tone: 'request', label: 'proxies API' },
     { from: 'idp', to: 'apigw', tone: 'security', label: 'OIDC' },
     { from: 'apigw', to: 'userapi', tone: 'request', label: 'REST' },
     { from: 'apigw', to: 'agentrun', tone: 'request', label: 'start run' },

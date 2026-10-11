@@ -485,7 +485,14 @@ export function ChatPage() {
               input: question,
               conversationId: String(activeConversationId),
               signal: controller.signal,
-              onEvent: (event) => patch((current) => reduceRunEvent(current, event)),
+              onEvent: (event) =>
+                patch((current) => {
+                  const next = reduceRunEvent(current, event)
+                  // "Auto": show the model the runtime chose for this run.
+                  return event.type === 'run.started' && event.model
+                    ? { ...next, model: event.model }
+                    : next
+                }),
             })
           }
         }

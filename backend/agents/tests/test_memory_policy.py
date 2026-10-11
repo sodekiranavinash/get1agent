@@ -160,9 +160,27 @@ class PolicyConfigTests(unittest.TestCase):
             "AGENT_POLICY_MODE": "report",
         }
         with mock.patch.dict(os.environ, env, clear=False):
+            # The guard itself is mode-aware, so the runtimes that call
+            # build_evaluator() honor `report` without extra wiring.
             evaluate = policy.build_evaluator()
-            allowed, _ = policy.evaluate_or_report("http-fetch", {}, evaluate)
+            allowed, _ = evaluate("http-fetch", {})
+            # Wrapping again stays idempotent.
+            allowed_again, _ = policy.evaluate_or_report("http-fetch", {}, evaluate)
         self.assertTrue(allowed)
+        self.assertTrue(allowed_again)
+
+    def test_enforce_mode_still_blocks(self) -> None:
+        from core import policy
+
+        env = {
+            "AGENT_POLICY_ENGINE": "pe-1",
+            "AGENT_POLICY_DENY_TOOLS": "http-fetch",
+            "AGENT_POLICY_MODE": "enforce",
+        }
+        with mock.patch.dict(os.environ, env, clear=False):
+            allowed, reason = policy.build_evaluator()("http-fetch", {})
+        self.assertFalse(allowed)
+        self.assertIn("denied", reason)
 
 
 if __name__ == "__main__":

@@ -46,9 +46,6 @@ const ScheduledJobsPage = lazy(() =>
 const UsagePage = lazy(() =>
   import('./pages/UsagePage').then((m) => ({ default: m.UsagePage })),
 )
-const InsightsPage = lazy(() =>
-  import('./pages/InsightsPage').then((m) => ({ default: m.InsightsPage })),
-)
 const TracesPage = lazy(() =>
   import('./pages/TracesPage').then((m) => ({ default: m.TracesPage })),
 )
@@ -181,7 +178,6 @@ function PrefetchRoutes() {
       void import('./pages/WorkflowStorePage')
       void import('./pages/ScheduledJobsPage')
       void import('./pages/UsagePage')
-      void import('./pages/InsightsPage')
       void import('./pages/TracesPage')
       void import('./pages/ExperimentsPage')
       void import('./pages/PlaygroundPage')
@@ -266,7 +262,6 @@ function App() {
             <Route path="/workflow-store" element={<WorkflowStorePage />} />
             <Route path="/scheduled-jobs" element={<ScheduledJobsPage />} />
             <Route path="/usage" element={<UsagePage />} />
-            <Route path="/insights" element={<InsightsPage />} />
             <Route path="/traces" element={<TracesPage />} />
             <Route path="/mcp-builder" element={<ExperimentsPage />} />
             <Route path="/playground" element={<PlaygroundPage />} />

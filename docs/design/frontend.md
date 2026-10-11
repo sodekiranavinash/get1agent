@@ -74,8 +74,9 @@ Resources, Marketplace, Labs, Manage, Help.
   strings, referenced as `{{vault:name}}`.
 - **Guardrails** (`/guardrails`) — the workspace Amazon Bedrock Guardrail and a
   test surface.
-- **Platform** (`/platform`) — managed AgentCore/Identity/Registry/Browser/
-  Optimization status and the active Bedrock levers.
+- **Platform** (`/admin/platform`, **admin-only**) — managed
+  AgentCore/Identity/Registry/Browser/Optimization status and the active Bedrock
+  levers. There is no user-facing `/platform` route.
 - **Usage** (`/usage`) — AI credits, 30-day analytics, provider keys and
   resource limits.
 - **Docs, Support** (`/docs`, `/support`) — in-app documentation, help and

@@ -56,7 +56,12 @@ def allowed_tools() -> list[str]:
 
 
 def build_evaluator() -> Guard | None:
-    """Return the guard for this run, or None when no engine is configured."""
+    """Return the guard for this run, or None when no engine is configured.
+
+    The guard honours ``AGENT_POLICY_MODE``: under ``enforce`` (the default) a
+    denied call is blocked; under ``report`` the denial is logged and the call is
+    admitted, which is how a new rule is staged before it is enforced.
+    """
     if not enabled():
         return None
 
@@ -75,6 +80,10 @@ def build_evaluator() -> Guard | None:
             return False, "tool arguments must be an object"
         return True, ""
 
+    if mode() == "report":
+        return lambda tool_name, arguments: evaluate_or_report(
+            tool_name, arguments, evaluate
+        )
     return evaluate
 
 

@@ -365,7 +365,7 @@ const images: { file: string; svg: string }[] = []
 
 images.push({
   file: 'architecture',
-  svg: renderDiagram(layoutDiagram(ARCHITECTURE), ARCHITECTURE_LEGEND, '9 stages · application flow · 10+ AWS services'),
+  svg: renderDiagram(layoutDiagram(ARCHITECTURE), ARCHITECTURE_LEGEND, '11 stages · application flow · 10+ AWS services'),
 })
 images.push({
   file: 'architecture-deployment',

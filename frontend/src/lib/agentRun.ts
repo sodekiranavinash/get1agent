@@ -81,7 +81,15 @@ export type AgentAttachmentRef = {
 }
 
 export type AgentRunEvent =
-  | { type: 'run.started'; runId: string; agentId: string; sessionId: string }
+  | {
+      type: 'run.started'
+      runId: string
+      agentId: string
+      sessionId: string
+      /** The model the runtime is using (present when the agent's model is "auto"). */
+      model?: string
+      auto?: { selected: string }
+    }
   | { type: 'skills'; skills?: AgentSkillRef[] }
   | { type: 'attachments'; files?: AgentAttachmentRef[] }
   | { type: 'plan.started' }

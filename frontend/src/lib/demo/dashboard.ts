@@ -84,20 +84,6 @@ export const demoDashboard = {
       time: 'Yesterday',
     },
   ],
-  insights: {
-    avgDailyTokens: compact(Math.round((demoMetrics.totals.tokens ?? 0) / 30)),
-    successRate: '96%',
-    activeAgents: String(demoAgents.length),
-    costPerDay: `$${((demoMetrics.totals.cost ?? 0) / 30).toFixed(2)}`,
-    weeklyTokens: last7.map((row, index) => ({
-      label: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][index % 7],
-      value: row.tokens ?? row.count * 3_800,
-    })),
-    weeklyRuns: last7.map((row, index) => ({
-      label: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][index % 7],
-      value: row.count,
-    })),
-  },
 }
 
 /** Referenced so tree-shaking keeps the recent-activity relationship obvious. */

@@ -237,6 +237,25 @@ body {
   animation: builder-node-pulse 1.2s ease-out infinite;
 }
 
+/* Live edges: the dotted curve flows source → target while a step runs
+   (marching ants), then settles to a solid line once it completes. Keep the dot
+   spacing and the offset in sync with `FLOW_DASH` in `lib/builderFlow.ts`. */
+@keyframes builder-edge-flow {
+  to {
+    stroke-dashoffset: -9;
+  }
+}
+
+.react-flow__edge.builder-edge-active .react-flow__edge-path {
+  stroke-dasharray: 2 7;
+  stroke-linecap: round;
+  animation: builder-edge-flow 0.7s linear infinite;
+}
+
+.react-flow__edge.builder-edge-done .react-flow__edge-path {
+  stroke-dasharray: none;
+}
+
 .react-flow__edge.selected .react-flow__edge-path {
   stroke: var(--app-accent);
 }
@@ -673,7 +692,8 @@ body {
   .animate-trace-row,
   .builder-node-active,
   .builder-node-error,
-  .react-flow__edge.animated .react-flow__edge-path {
+  .react-flow__edge.animated .react-flow__edge-path,
+  .react-flow__edge.builder-edge-active .react-flow__edge-path {
     animation: none;
   }
   .reveal {

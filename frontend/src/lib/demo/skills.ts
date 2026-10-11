@@ -245,10 +245,30 @@ export const demoSkillRegistry = {
 /** MCP servers a skill editor may grant — `/v1/agent-skills/mcp-servers`. */
 export const demoAgentMcpServers = {
   servers: [
-    { id: 'code-interpreter', name: 'Code Interpreter', source: 'builtin' },
-    { id: 'web-search', name: 'Web Search', source: 'builtin' },
-    { id: 'http-fetch', name: 'HTTP Fetch', source: 'builtin' },
-    { id: 'storage', name: 'Storage Files', source: 'builtin' },
+    {
+      id: 'code-interpreter',
+      name: 'Code Interpreter',
+      description: 'Run Python in a sandbox for data analysis and file processing.',
+      source: 'builtin',
+    },
+    {
+      id: 'web-search',
+      name: 'Web Search',
+      description: 'Search the web for current information and citations.',
+      source: 'builtin',
+    },
+    {
+      id: 'http-fetch',
+      name: 'HTTP Fetch',
+      description: 'Call a public URL/API and return the response inline.',
+      source: 'builtin',
+    },
+    {
+      id: 'storage',
+      name: 'Storage Files',
+      description: 'List, read, write and delete the user’s storage files.',
+      source: 'builtin',
+    },
     { id: 'github', name: 'GitHub', source: 'remote' },
     { id: 'linear', name: 'Linear', source: 'remote' },
     { id: 'notion', name: 'Notion', source: 'remote' },

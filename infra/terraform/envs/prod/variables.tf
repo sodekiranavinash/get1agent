@@ -276,12 +276,6 @@ variable "bedrock_service_tier" {
   description = "Bedrock service tier for chat/agent calls (standard|flex|priority)"
 }
 
-variable "bedrock_ingestion_service_tier" {
-  type        = string
-  default     = "flex"
-  description = "Bedrock service tier for ingestion embedding (flex is ~50% cheaper)"
-}
-
 variable "bedrock_prompt_router_arn" {
   type        = string
   default     = ""
@@ -291,7 +285,26 @@ variable "bedrock_prompt_router_arn" {
 variable "enable_nova_prompt_router" {
   type        = bool
   default     = true
-  description = "Create the default Nova prompt router (Lite <-> Pro cost routing)"
+  description = "Use the supplied prompt router ARN (no-op when the ARN is empty)"
+}
+
+variable "optimization_insights_arn" {
+  type        = string
+  default     = ""
+  description = "AgentCore Optimization Insights ARN, created out of band via the console/API; empty reports Insights as unavailable"
+}
+
+variable "github_token" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Optional GitHub token for skill repo resolution + registry imports (raises the API rate limit, allows private repos)"
+}
+
+variable "semantic_cache_max_bytes" {
+  type        = number
+  default     = 200000
+  description = "Largest search payload the semantic cache will store (bytes)"
 }
 
 variable "bedrock_profile_chat" {
@@ -327,7 +340,7 @@ variable "enable_browser" {
 variable "online_evaluation_sampling_percentage" {
   type        = number
   default     = 5
-  description = "Percentage of live agent traces sampled by AgentCore Evaluations"
+  description = "RESERVED: sampling percentage for the AgentCore online-evaluation config, which Terraform cannot create yet (it needs the CloudWatch aws/spans group). Currently unused."
 }
 
 variable "agent_policy_deny_tools" {

@@ -119,7 +119,7 @@ can never drift from the product. Regenerate them with **`make architecture`**.
 **Platform overview** — every service, boundary and hop
 
 <p align="center">
-  <img src="docs/assets/architecture.svg" alt="get1agent platform overview: browser, AWS edge, Lambda services, isolated AgentCore runtime, data plane and external providers" width="100%">
+  <img src="docs/assets/architecture.svg" alt="get1agent platform overview: browser, Cloudflare edge delivery serving the SPA and proxying the API, API Gateway with Auth0, Lambda services, isolated AgentCore runtime, data plane and external providers" width="100%">
 </p>
 
 **Deployment & environments** — delivery, infrastructure as code, local parity

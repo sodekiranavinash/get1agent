@@ -29,6 +29,12 @@ SUPPORTED_MODELS = (
     "global.amazon.nova-2-lite-v1:0",
 )
 
+# Sentinel: the user did not pick a model, so the runtime chooses one for the
+# run (see ``agentflow.routing``). ``resolve_model_id`` falls back to the default
+# when routing is unavailable, so the sentinel never reaches a provider.
+AUTO_MODEL = "auto"
+MODEL_ROUTING_ALIASES = frozenset({AUTO_MODEL, "automatic"})
+
 CLIENT_USER_AGENT = "get1agent/1.0"
 
 # Sentinel: ``build_model`` keeps the env-configured guardrail when the caller
@@ -58,11 +64,23 @@ def context_window_limit(model_id: str) -> int:
     return _CONTEXT_WINDOWS.get(model_id, DEFAULT_CONTEXT_WINDOW)
 
 
+def is_auto_model(model_id: str | None) -> bool:
+    """Whether the value asks the runtime to choose a model for the run."""
+    return (model_id or "").strip().lower() in MODEL_ROUTING_ALIASES
+
+
 def resolve_model_id(model_id: str | None) -> str:
-    """Return a supported Bedrock model, falling back for legacy/unknown ids."""
+    """Return a supported Bedrock model, falling back for legacy/unknown ids.
+
+    An ``auto`` request (see :mod:`agentflow.routing`) resolves to the default
+    model here; callers that are about to run should route it first so the
+    chosen model is used instead of the fallback.
+    """
     model = (model_id or "").strip()
     if model in SUPPORTED_MODELS:
         return model
+    if is_auto_model(model):
+        return DEFAULT_MODEL
     if model:
         print(
             json.dumps(
@@ -78,22 +96,40 @@ def resolve_model_id(model_id: str | None) -> str:
     return DEFAULT_MODEL
 
 
+def _cache_env(name: str, alias: str, default: str = "") -> str:
+    """Read a prompt-cache/tier knob, accepting the platform-wide alias.
+
+    The runtime's own names are ``AGENT_PROMPT_CACHE``/``AGENT_PROMPT_CACHE_TTL``/
+    ``AGENT_SERVICE_TIER``; the Lab Lambdas read the same value through
+    ``core.bedrock_chat`` as ``BEDROCK_PROMPT_CACHE``/``BEDROCK_PROMPT_CACHE_TTL``/
+    ``BEDROCK_SERVICE_TIER``. Infrastructure sets the ``BEDROCK_*`` spelling, so
+    accept either one (runtime-specific name wins when both are set).
+    """
+    value = os.environ.get(name)
+    if value in (None, ""):
+        value = os.environ.get(alias)
+    if value in (None, ""):
+        return default
+    return value
+
+
 def cache_config() -> Any | None:
     """Bedrock prompt-caching config, or None when disabled.
 
-    ``AGENT_PROMPT_CACHE=auto`` (the default) lets Strands inject cache points
-    where the model supports them, so the system prompt + tool schemas are billed
-    at the discounted cache-read rate on later turns. Set ``off`` to disable, or
-    ``anthropic`` to force the Anthropic format. ``AGENT_PROMPT_CACHE_TTL`` sets
+    ``AGENT_PROMPT_CACHE=auto`` (the default, alias ``BEDROCK_PROMPT_CACHE``)
+    lets Strands inject cache points where the model supports them, so the system
+    prompt + tool schemas are billed at the discounted cache-read rate on later
+    turns. Set ``off`` to disable, or ``anthropic`` to force the Anthropic
+    format. ``AGENT_PROMPT_CACHE_TTL`` (alias ``BEDROCK_PROMPT_CACHE_TTL``) sets
     the cache TTL (e.g. ``1h``; Bedrock requires non-increasing TTLs).
     """
-    mode = (os.environ.get("AGENT_PROMPT_CACHE", "auto") or "auto").strip().lower()
+    mode = _cache_env("AGENT_PROMPT_CACHE", "BEDROCK_PROMPT_CACHE", "auto").strip().lower()
     if mode in ("0", "false", "no", "off", "none"):
         return None
     try:
         from strands.models.model import CacheConfig, CacheToolsConfig
 
-        ttl = (os.environ.get("AGENT_PROMPT_CACHE_TTL") or "").strip() or None
+        ttl = _cache_env("AGENT_PROMPT_CACHE_TTL", "BEDROCK_PROMPT_CACHE_TTL").strip() or None
         return CacheConfig(
             strategy=mode,
             ttl=ttl,
@@ -105,9 +141,17 @@ def cache_config() -> Any | None:
 
 def service_tier() -> str | None:
     """Bedrock service tier for the call (``flex`` is 50% cheaper, ``priority``
-    has a premium). Unset leaves the model's default (standard) tier."""
-    tier = (os.environ.get("AGENT_SERVICE_TIER") or "").strip().lower()
-    return tier if tier in ("standard", "flex", "priority") else None
+    has a premium). Unset leaves the model's default (standard) tier.
+
+    ``AGENT_SERVICE_TIER``, with ``BEDROCK_SERVICE_TIER`` as the platform alias
+    (the same value ``core.bedrock_chat`` reads for the Labs). The platform calls
+    the default tier ``standard``; the Bedrock API calls it ``default``, so it is
+    translated here — passing ``standard`` through would be rejected.
+    """
+    tier = _cache_env("AGENT_SERVICE_TIER", "BEDROCK_SERVICE_TIER").strip().lower()
+    if tier == "standard":
+        tier = "default"
+    return tier if tier in ("priority", "default", "flex", "reserved") else None
 
 
 def build_model(

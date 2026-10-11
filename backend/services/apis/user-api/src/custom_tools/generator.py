@@ -31,11 +31,16 @@ Hard rules for "code":
 - Define exactly one entrypoint: `def run(args):` taking a single dict and
   returning a JSON-serializable value (dict, list, str, number, bool, None).
 - Read inputs from `args` using `args.get("name")` etc., matching inputSchema.
-- Use only the Python standard library (third-party packages are NOT installed).
+- The sandbox has common third-party libraries preinstalled — prefer them over
+  hand-rolled parsing: `requests` (HTTP), `beautifulsoup4` (HTML), `pandas`,
+  `numpy`, `openpyxl`, `pypdf`, `python-docx`, `pillow`, `markdownify`,
+  `PyYAML`, `jsonschema`, `orjson` and more. Import them normally (e.g.
+  `import requests`, `from bs4 import BeautifulSoup`).
+- Parse HTML with the standard parser: `BeautifulSoup(html, "html.parser")`.
+  Do NOT pass `"lxml"` (it is not available in every environment).
 - The tool runs in a sandbox WITH public internet access (HTTP(S) only), so it
-  may call external APIs directly. Use `urllib.request` together with
-  `urllib.parse` and `json`. Always set an explicit timeout and bound the bytes
-  you read, e.g. `urllib.request.urlopen(req, timeout=15)`.
+  may call external APIs directly. Always set an explicit timeout and bound the
+  bytes you read, e.g. `requests.get(url, timeout=15)`.
 - Honour and, when relevant, state the platform safety limits to the user:
   * at most 25 outbound network connections per run;
   * the code must finish within about 90 seconds (180 seconds while testing);
@@ -46,10 +51,13 @@ Hard rules for "code":
     (`eval`, `exec`, `importlib`) are blocked by policy.
 - The tool CANNOT read or write the user's Storage files; the agent has separate
   Storage tools for that. Fetch/return the data instead of persisting it.
-- Never download files, install packages, or fetch machine-learning models. If a
-  request would need a blocked library or exceed a limit, tell the user plainly
-  and offer a compliant alternative rather than emitting code that will fail.
-- `urllib.parse` and `html.parser` are available for URL and HTML handling.
+- Package installation is not available, and these stay blocked by policy: heavy
+  machine-learning frameworks (torch, tensorflow, transformers, scikit-learn,
+  spacy, nltk, opencv, ...), process spawning (`subprocess`), native code
+  (`ctypes`) and dynamic code (`eval`, `exec`, `importlib`). Use the
+  preinstalled libraries above; if a request needs a blocked library or would
+  exceed a limit, tell the user plainly and offer a compliant alternative rather
+  than emitting code that will fail.
 - Be self-contained: no imports from local modules, no reading files.
 - Keep it deterministic and under ~150 lines. Handle missing inputs and network
   errors gracefully (return an `error` field instead of raising).
@@ -161,8 +169,21 @@ def _chat(system: str, user: str, timeout_seconds: int | None = None) -> str:
             temperature=0.2,
             output_schema=_TOOL_SCHEMA,
         )
-    except Exception as exc:  # noqa: BLE001
-        raise GenerationError(f"Generation failed: {exc}") from exc
+    except Exception:  # noqa: BLE001
+        # Bedrock Structured Outputs is model/schema dependent (the tool schema
+        # embeds free-form JSON Schema objects for the tool's own input/output).
+        # Fall back to a plain call and parse the JSON out of the text instead of
+        # failing the whole generation.
+        try:
+            result = bedrock_chat.chat_result(
+                system,
+                user,
+                model=_model(),
+                max_tokens=_max_tokens(),
+                temperature=0.2,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise GenerationError(f"Generation failed: {exc}") from exc
     # A reasoning model can exhaust the completion budget on hidden reasoning
     # and truncate the JSON. Surface that clearly instead of a parse error.
     if result.get("stopReason") == "max_tokens":

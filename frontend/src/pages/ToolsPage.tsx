@@ -61,6 +61,7 @@ import {
   useCustomTools,
   type CustomServer,
 } from '../lib/customTools'
+import { useMcpServers, type AgentMcpServer } from '../lib/agentSkills'
 import { fadeUp, stagger } from '../lib/motion'
 
 const TOOLS_QUERY_KEY = 'tools'
@@ -70,32 +71,39 @@ const sectionCta =
   'rounded-full border-accent/30 bg-accent-soft/60 text-accent hover:border-accent/60 hover:bg-accent-soft hover:text-accent'
 
 type BuiltInTool = {
+  id: string
   name: string
   description: string
   icon: LucideIcon
   tone: string
 }
 
-const builtInTools: BuiltInTool[] = [
-  {
-    name: 'Web Search Tool',
-    description: 'Search the web for real-time information and citations.',
-    icon: Search,
-    tone: 'text-accent',
-  },
-  {
-    name: 'Code Interpreter Tool',
-    description: 'Run Python in a sandbox for data analysis and file processing.',
-    icon: Code2,
-    tone: 'text-success',
-  },
-  {
-    name: 'HTTP Fetch Tool',
-    description: 'Call a public URL/API and read the saved file from your storage.',
-    icon: Download,
-    tone: 'text-info',
-  },
-]
+/**
+ * Presentation only — membership and descriptions come from the API
+ * (`GET /v1/agent-skills/mcp-servers`), which owns the canonical built-in list
+ * (`DEFAULT_TOOLS` in user-api). A server added on the backend therefore shows
+ * up here automatically; anything not in this map gets the fallback tile.
+ */
+const BUILT_IN_PRESENTATION: Record<string, { icon: LucideIcon; tone: string }> = {
+  'web-search': { icon: Search, tone: 'text-accent' },
+  'code-interpreter': { icon: Code2, tone: 'text-success' },
+  'http-fetch': { icon: Download, tone: 'text-info' },
+  storage: { icon: Server, tone: 'text-warning' },
+  browser: { icon: Globe, tone: 'text-accent' },
+}
+
+function toBuiltInTool(server: AgentMcpServer): BuiltInTool {
+  const presentation = BUILT_IN_PRESENTATION[server.id] ?? {
+    icon: Wrench,
+    tone: 'text-muted',
+  }
+  return {
+    id: server.id,
+    name: server.name,
+    description: server.description ?? '',
+    ...presentation,
+  }
+}
 
 const statusMeta: Record<
   McpConnectionStatus,
@@ -706,6 +714,13 @@ export function ToolsPage() {
   // reflected here without a separate stale copy.
   const customToolsQuery = useCustomTools()
 
+  // The built-in servers come from the API (user-api's `DEFAULT_TOOLS`), so this
+  // page can never list a different set than the platform actually offers.
+  const { servers: mcpServers } = useMcpServers()
+  const builtInTools = mcpServers
+    .filter((server) => server.source === 'builtin')
+    .map(toBuiltInTool)
+
   const [addOpen, setAddOpen] = useState(false)
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
@@ -994,7 +1009,7 @@ export function ToolsPage() {
             />
             <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
               {builtInTools.map((tool) => (
-                <motion.div key={tool.name} variants={fadeUp}>
+                <motion.div key={tool.id} variants={fadeUp}>
                   <BuiltInCard tool={tool} />
                 </motion.div>
               ))}

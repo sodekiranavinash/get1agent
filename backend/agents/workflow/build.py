@@ -22,7 +22,7 @@ from typing import Any
 from agentflow.config import RuntimeConfig
 from agentflow.context import TruncatingModel
 from agentflow.guardrails import load_default_guardrail, resolve_guardrail
-from agentflow.models import build_model, resolve_model_id
+from agentflow.models import is_auto_model, build_model, resolve_model_id
 from agentflow.prompts import build_system_prompt
 from agentflow.provider import resolve_model_provider
 from agentflow.skills import build_skills_plugin
@@ -161,14 +161,51 @@ def _collect(managers: list[Any] | None, manager: Any) -> Any:
     return manager
 
 
+def prepared_specs(
+    user_id: str,
+    workflow_config: dict[str, Any],
+    agent_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Resolve the workflow's agent nodes (saved config + per-node overrides).
+
+    Exposed so the run can decide whether an ``auto`` route is needed *before*
+    building the agents, then hand the same specs back to :func:`build_workflow`
+    so the nodes are only loaded once.
+    """
+    return resolve_agent_nodes(user_id, workflow_config, agent_ids)
+
+
+def workflow_needs_routing(
+    workflow_config: dict[str, Any], specs: list[dict[str, Any]]
+) -> bool:
+    """Whether the host or any member is configured to route automatically.
+
+    A member on the user's own Vault provider has its own model, so ``auto``
+    never applies there (matching the API validation).
+    """
+    if is_auto_model((workflow_config.get("input") or {}).get("model")):
+        return True
+    for spec in specs:
+        config = spec.get("config") or {}
+        if str(config.get("providerSecretId") or "").strip():
+            continue
+        if is_auto_model(config.get("model")):
+            return True
+    return False
+
+
 def _host_config(
     workflow_config: dict[str, Any],
     output_format: str,
     overrides: dict[str, Any] | None = None,
+    auto_model: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     input_config = workflow_config.get("input") or {}
     prompt = str(input_config.get("prompt") or "").strip() or DEFAULT_HOST_PROMPT
-    model_id = resolve_model_id(input_config.get("model"))
+    if auto_model and is_auto_model(input_config.get("model")):
+        model_id = auto_model
+    else:
+        model_id = resolve_model_id(input_config.get("model"))
     base: dict[str, Any] = {
         "prompt": prompt,
         "output": {"format": output_format, "instructions": ""},
@@ -244,16 +281,22 @@ def build_node_agents(
     guardrail_default: dict[str, str] | None = None,
     memory: bool = False,
     managers: list[Any] | None = None,
+    *,
+    specs: list[dict[str, Any]] | None = None,
+    auto_model: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build one Strands Agent per saved-agent node.
 
     ``guard`` is the AgentCore Policy admission check shared by every node.
     ``guardrail_default`` is the workflow's resolved default guardrail, read once
-    by the caller so members never re-read the settings item.
+    by the caller so members never re-read the settings item. ``auto_model`` is
+    the model chosen for this run when a node is set to ``auto``.
     """
     from strands import Agent
 
-    specs = _node_specs(config, user_id, workflow_config, agent_ids)
+    specs = specs if specs is not None else _node_specs(
+        config, user_id, workflow_config, agent_ids
+    )
     mode = workflow_config.get("mode") or "graph"
     extra = _team_block(specs) if mode == "swarm" else _graph_block()
     extra = f"{extra}\n\n{_MEMBER_RESULT_INSTRUCTION}"
@@ -269,6 +312,9 @@ def build_node_agents(
             )
             if not model_id:
                 raise ValueError("Select a model for the chosen provider")
+        elif auto_model and is_auto_model(effective.get("model")):
+            # This node deferred to "Auto": use the model chosen for the run.
+            model_id = auto_model
         else:
             model_id = resolve_model_id(effective.get("model"))
         knowledge = resolve_knowledge_bases(
@@ -376,11 +422,15 @@ def build_workflow(
     allow_new_questions: bool = True,
     memory: bool = False,
     managers: list[Any] | None = None,
+    auto_model: str | None = None,
+    specs: list[dict[str, Any]] | None = None,
 ) -> tuple[Any, str, list[dict[str, Any]]]:
     """Build the orchestrator.
 
     Returns ``(orchestrator, mode, nodes)`` where ``nodes`` is the ordered node
     metadata (hosts first/last around the members) the client renders.
+    ``auto_model`` replaces an ``auto`` host/member model with the model chosen
+    for this run; ``specs`` lets the caller pass already-resolved nodes.
     """
     mode = workflow_config.get("mode") or "graph"
     guardrail_default = load_default_guardrail(user_id)
@@ -395,13 +445,17 @@ def build_workflow(
         guardrail_default,
         memory,
         managers,
+        specs=specs,
+        auto_model=auto_model,
     )
     if not members:
         raise ValueError("This workflow has no runnable agents")
     output = workflow_config.get("output") or {}
     output_format = str(output.get("format") or "markdown")
     output_instructions = str(output.get("instructions") or "").strip()
-    base, host_model = _host_config(workflow_config, output_format, host_overrides)
+    base, host_model = _host_config(
+        workflow_config, output_format, host_overrides, auto_model
+    )
     # The workflow's guardrail applies to the host (coordinator + final answerer);
     # members resolve their own, falling back to this one.
     workflow_guardrail = resolve_guardrail(

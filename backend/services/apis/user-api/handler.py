@@ -187,6 +187,9 @@ VALID_THEMES = {"light", "dark"}
 MAX_AGENTS_PER_USER = 50
 MAX_AGENT_CONFIG_BYTES = 256 * 1024
 MAX_AGENT_PROMPT_LENGTH = 20_000
+# The question a scheduled run asks (stored on config.schedule.question and
+# mirrored into the scheduler registry payload).
+MAX_SCHEDULE_QUESTION_CHARS = 2_000
 MAX_AGENT_NODES = 200
 MAX_AGENT_EDGES = 400
 MAX_AGENT_REFS = 50
@@ -214,6 +217,10 @@ SUPPORTED_AGENT_MODELS = (
     "qwen.qwen3-next-80b-a3b",
     "global.amazon.nova-2-lite-v1:0",
 )
+# "Auto" is not a model: it asks the runtime to choose one for the run. It is a
+# platform-gateway concept, so it is not valid alongside a Vault provider secret.
+AUTO_AGENT_MODEL = "auto"
+PLATFORM_AGENT_MODELS = (*SUPPORTED_AGENT_MODELS, AUTO_AGENT_MODEL)
 AGENT_CONFIG_VERSION = 4
 AGENT_REASONING_LEVELS = ("low", "medium", "high")
 AGENT_OUTPUT_FORMATS = ("markdown", "text", "json")
@@ -1034,20 +1041,44 @@ def _handle_skill_list(claims: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _builtin_server_offered(server_id: str) -> bool:
+    """Whether a built-in MCP server can actually serve a request.
+
+    Only ``browser`` is capability-gated: it needs a provisioned AgentCore
+    browser *and* a non-empty domain allowlist, and without both every call is
+    refused — so it is not advertised to the UI. Validation still accepts the
+    whole ``DEFAULT_TOOLS`` set, so an existing config that references it keeps
+    working once the allowlist is configured.
+    """
+    if server_id != "browser":
+        return True
+    try:
+        from core import browser
+    except Exception:  # noqa: BLE001 - offer nothing we cannot verify
+        return False
+    try:
+        return browser.enabled() and bool(browser.allowed_domains())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _available_mcp_servers(user_id: str) -> list[dict[str, Any]]:
     """MCP servers a skill can be granted.
 
-    Built-in servers are always offered; remote servers are the user's
-    connected, enabled connections. Grants are per server — individual tools are
-    enabled/disabled on the MCP page, so skills never reference tool names.
+    Built-in servers the platform can currently serve are always offered; remote
+    servers are the user's connected, enabled connections. Grants are per server
+    — individual tools are enabled/disabled on the MCP page, so skills never
+    reference tool names.
     """
     servers: list[dict[str, Any]] = [
         {
             "id": tool["name"],
             "name": tool.get("label") or tool["name"],
+            "description": tool.get("description") or "",
             "source": "builtin",
         }
         for tool in DEFAULT_TOOLS
+        if _builtin_server_offered(tool["name"])
     ]
     seen = {server["id"] for server in servers}
 
@@ -2190,7 +2221,7 @@ def _validated_agent_servers(value: Any) -> list[dict[str, Any]]:
 
 def _validated_schedule(value: Any) -> dict[str, Any]:
     if value in (None, {}):
-        return {"enabled": False, "cron": "", "timezone": "UTC"}
+        return {"enabled": False, "cron": "", "timezone": "UTC", "question": ""}
     if not isinstance(value, dict):
         raise ApiError(400, "schedule must be an object")
     enabled = value.get("enabled")
@@ -2198,6 +2229,12 @@ def _validated_schedule(value: Any) -> dict[str, Any]:
         enabled = bool(enabled)
     cron = str(value.get("cron") or "").strip()
     timezone = str(value.get("timezone") or "UTC").strip() or "UTC"
+    # The question each scheduled run asks. The builder's run question is never
+    # persisted, so a schedule carries its own; without it the scheduler falls
+    # back to a generic "Run the scheduled task for <name>.".
+    question = str(value.get("question") or "").strip()
+    if len(question) > MAX_SCHEDULE_QUESTION_CHARS:
+        raise ApiError(400, "schedule question is too long")
     if len(cron) > 128:
         raise ApiError(400, "cron expression is too long")
     if enabled and not cron:
@@ -2208,7 +2245,12 @@ def _validated_schedule(value: Any) -> dict[str, Any]:
         ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, ValueError) as exc:
         raise ApiError(400, "timezone must be a valid IANA timezone name") from exc
-    return {"enabled": enabled, "cron": cron, "timezone": timezone}
+    return {
+        "enabled": enabled,
+        "cron": cron,
+        "timezone": timezone,
+        "question": question,
+    }
 
 
 def _validated_graph(value: Any) -> dict[str, Any]:
@@ -2523,9 +2565,13 @@ def _validated_agent_config(value: Any) -> dict[str, Any]:
     )
     if provider_secret_id:
         model = _validated_free_model(value.get("model"))
+        if model == AUTO_AGENT_MODEL:
+            raise ApiError(
+                400, "Auto model is only available on the platform gateway"
+            )
     else:
         model = _validated_model(
-            value.get("model"), SUPPORTED_AGENT_MODELS, "model", SUPPORTED_AGENT_MODELS[0]
+            value.get("model"), PLATFORM_AGENT_MODELS, "model", SUPPORTED_AGENT_MODELS[0]
         )
 
     config: dict[str, Any] = {
@@ -2652,6 +2698,11 @@ def _sync_schedule(
     """
     schedule = config.get("schedule") or {}
     input_config = config.get("input") or {}
+    # A scheduled run needs a question: the schedule's own, else any question
+    # stored on the input node (legacy), else the scheduler's generic fallback.
+    query = str(schedule.get("question") or "").strip() or str(
+        input_config.get("query") or ""
+    ).strip()
     try:
         schedules_repo.upsert_schedule(
             user_id,
@@ -2661,7 +2712,7 @@ def _sync_schedule(
             expression=str(schedule.get("cron") or ""),
             timezone=str(schedule.get("timezone") or "UTC"),
             enabled=bool(schedule.get("enabled")),
-            payload={"query": str(input_config.get("query") or "")},
+            payload={"query": query},
         )
     except Exception:  # noqa: BLE001 - scheduling must never break a save
         pass
@@ -4061,7 +4112,7 @@ def _validated_workflow_overrides(value: Any) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     if value.get("model") not in (None, ""):
         overrides["model"] = _validated_model(
-            value.get("model"), SUPPORTED_AGENT_MODELS, "override model", SUPPORTED_AGENT_MODELS[0]
+            value.get("model"), PLATFORM_AGENT_MODELS, "override model", SUPPORTED_AGENT_MODELS[0]
         )
     if "prompt" in value and value.get("prompt") is not None:
         prompt = value.get("prompt")
@@ -4094,6 +4145,19 @@ def _validated_workflow_position(value: Any) -> dict[str, int]:
     return {"x": x, "y": y}
 
 
+def _schedule_node_value(data: Any) -> dict[str, Any]:
+    """Read a workflow schedule node's schedule, nested or flat.
+
+    The canvas stores it under ``data.schedule``; the API also accepts the
+    schedule fields directly on ``data`` (older clients and hand-written
+    payloads). Returns the validated schedule either way.
+    """
+    if not isinstance(data, dict):
+        return _validated_schedule(None)
+    nested = data.get("schedule")
+    return _validated_schedule(nested if isinstance(nested, dict) else data)
+
+
 def _validated_workflow_node_data(kind: str, value: Any) -> dict[str, Any]:
     data = value if isinstance(value, dict) else {}
     if kind == "agent":
@@ -4120,12 +4184,15 @@ def _validated_workflow_node_data(kind: str, value: Any) -> dict[str, Any]:
             "query": query,
             "prompt": prompt,
             "model": _validated_model(
-                data.get("model"), SUPPORTED_AGENT_MODELS, "host model", SUPPORTED_AGENT_MODELS[0]
+                data.get("model"), PLATFORM_AGENT_MODELS, "host model", SUPPORTED_AGENT_MODELS[0]
             ),
             "guardrail": _validated_guardrail(data.get("guardrail")),
         }
     if kind == "schedule":
-        return _validated_schedule(data)
+        # The canvas keeps the schedule nested under the node's data
+        # (`{kind, schedule}`); API clients may post the fields flat. Accept both
+        # and always store the nested shape the UI expects to read back.
+        return {"kind": "schedule", "schedule": _schedule_node_value(data)}
     # output
     instructions = str(data.get("instructions") or "")
     if len(instructions) > MAX_AGENT_PROMPT_LENGTH:
@@ -4245,7 +4312,7 @@ def _validated_workflow_config(value: Any) -> dict[str, Any]:
             "format": str(output_data.get("format") or "markdown"),
             "instructions": str(output_data.get("instructions") or ""),
         },
-        "schedule": _validated_schedule(schedule_data),
+        "schedule": _schedule_node_value(schedule_data),
         "guardrail": _validated_guardrail(
             value.get("guardrail") or (input_data.get("guardrail") if isinstance(input_data, dict) else None)
         ),

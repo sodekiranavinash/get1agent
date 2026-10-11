@@ -73,7 +73,8 @@ shared modules it uses, **and all third-party dependencies** to the zip root and
 | Lambda | Key Dependencies |
 |---|---|
 | `user-api` | `python-dateutil`, `tzdata` |
-| `knowledge-mcp`, `code-interpreter`, `http-fetch`, `storage`, `custom-tools`, `mcp-connections`, `browser` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata` |
+| `knowledge-mcp`, `code-interpreter`, `http-fetch`, `storage`, `mcp-connections`, `browser` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata` |
+| `custom-tools` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata`, `requests`, `beautifulsoup4` (the last two mirror the AgentCore sandbox so `CUSTOM_TOOLS_MODE=local` behaves like prod; `lxml` is intentionally omitted — its native wheel isn't portable, so tools parse HTML with `BeautifulSoup(..., "html.parser")`) |
 | `ingestion-extract` | `pymupdf`, `python-docx`, `openpyxl`, `python-dateutil`, `tzdata` |
 | `admin-console`, `scheduler` | `python-dateutil`, `tzdata` |
 | Other ingestion Lambdas | None (lightweight) |
@@ -338,15 +339,19 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   public endpoints). The MCP Builder's `custom-tools` sandbox instead runs on a
   **custom `aws_bedrockagentcore_code_interpreter` in PUBLIC network mode**
   (`get1agent-prod-mcp-tools`), so user-built tools can call web APIs.
-- **Guard**: before any AWS call, the guard runs an AST/literal pass blocking
-  OS/shell, dynamic code and heavy ML. `BLOCKED_MODULES`/`ALLOWED_MODULES`
-  extend/except the list. Every execution is also prefixed with an idempotent
-  `sys.addaudithook` prelude. The microVM remains the real isolation boundary.
-  When a sandbox is granted `allow_network` (`CUSTOM_TOOLS_ALLOW_NETWORK`), only
-  the HTTP(S) stack (`socket`/`ssl`/`urllib`/`requests`/…) is lifted; the
-  runtime hook still counts outbound connections (`CUSTOM_TOOLS_MAX_CONNECTIONS`,
-  25/run) and refuses private/loopback/link-local/reserved/cloud-metadata
-  addresses, and the heavy-ML/process/dynamic-code blocks stay in force.
+- **Guard**: before any AWS call the guard runs a static AST pass that blocks
+  exactly one family — heavy ML frameworks (`torch`, `tensorflow`,
+  `transformers`, `sklearn`, …) — plus any names in `BLOCKED_MODULES`
+  (`ALLOWED_MODULES` exempts). Everything else is permitted: process spawning
+  (`subprocess`), `ctypes`, dynamic code (`eval`/`exec`/`importlib`), arbitrary
+  third-party packages and package installation; the microVM remains the real
+  isolation boundary. Every execution is also prefixed with an idempotent
+  `sys.addaudithook` prelude. Network is the only other gate: when a sandbox is
+  offline the HTTP(S) stack (`socket`/`ssl`/`urllib`/`requests`/…) is withheld;
+  when it is granted `allow_network` (`CUSTOM_TOOLS_ALLOW_NETWORK`) the stack is
+  reachable and the runtime hook counts outbound connections
+  (`CUSTOM_TOOLS_MAX_CONNECTIONS`, 25/run) and refuses private/loopback/
+  link-local/reserved/cloud-metadata addresses.
 - The guard, AgentCore session/exec client and local-subprocess fallback live in
   the shared **`core.sandbox`** package (`packages/core/sandbox/`), used by both
   `code-interpreter` and `custom-tools` (`core.sandbox.run_code`).
@@ -488,20 +493,20 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - **Execution** uses the shared `core.sandbox` (AgentCore in prod; guarded local
   subprocess with `CUSTOM_TOOLS_MODE=local` under Floci). In prod it runs on the
   **custom PUBLIC Code Interpreter** (`CUSTOM_TOOLS_IDENTIFIER`), so user tools
-  can reach the public internet; the sandbox guard still caps outbound
-  connections (`CUSTOM_TOOLS_MAX_CONNECTIONS`, 25/run), refuses private/
-  loopback/metadata destinations, and blocks heavy ML, process spawning and
-  dynamic code. The test route direct-invokes `custom-tools` (IAM-trusted, no
-  API-Gateway 30s cap); the SPA never executes user code.
+  can reach the public internet; the sandbox guard caps outbound connections
+  (`CUSTOM_TOOLS_MAX_CONNECTIONS`, 25/run), refuses private/loopback/metadata
+  destinations, and blocks heavy ML frameworks (process spawning and dynamic
+  code are permitted). The test route direct-invokes `custom-tools` (IAM-trusted,
+  no API-Gateway 30s cap); the SPA never executes user code.
 - **Guardrails & limits** (surfaced in the generator prompt so the model tells
   the user and offers a compliant alternative): public HTTP(S) only; **≤ 25
   outbound connections per run**; **~90 s per real tool call**
   (`CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS`) and **180 s while testing**
   (`CUSTOM_TOOLS_TEST_EXEC_TIMEOUT_SECONDS`); a per-user **rate limit of 60
   network-enabled runs/hour** (`CUSTOM_TOOLS_RUNS_PER_HOUR`, enforced with an
-  atomic `core.ratelimit` counter); heavy ML libraries, `subprocess`, `ctypes`
-  and `eval`/`exec` blocked. The custom-tools Lambda timeout is 300 s to fit the
-  test budget.
+  atomic `core.ratelimit` counter); heavy ML frameworks are blocked by the guard
+  (process spawning and dynamic code are permitted). The custom-tools Lambda
+  timeout is 300 s to fit the test budget.
 - **Admin kill switch + usage.** `networkToolsEnabled` on the platform settings
   item (`PLATFORM#SETTINGS` / `#FLAGS`, `data/repositories/platform.py`) is read
   by `core.network.enabled()` and can be flipped at runtime from the admin
@@ -548,9 +553,11 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - The parse/render/validation logic lives in the user-api app's `src/skills/`
   (no PyYAML). `POST /parse` is what the editor calls when a user uploads a `.md`.
 - **allowed-tools** lists whole **MCP servers**, not individual tools. Built-in
-  servers `code-interpreter`, `web-search`, `http-fetch` and `storage` are
-  offered to everyone;
-  knowledge-base tools are internal and never shown. The user's connected,
+  servers `code-interpreter`, `web-search`, `http-fetch` and `storage` are always
+  offered; **`browser` is capability-gated** — user-api advertises it only when a
+  browser is provisioned *and* `BROWSER_ALLOWED_DOMAINS` is non-empty, so the
+  builders (and skills) never offer a tool that would refuse every call.
+  Knowledge-base tools are internal and never shown. The user's connected,
   enabled remote servers are offered by server id (slug). Individual tools are
   enabled/disabled on the MCP page, so skills never reference tool names.
 - **Skills marketplace & registry** (`src/skills/`):
@@ -579,11 +586,12 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   `POST /v1/agents/{id}/verify`, `POST /v1/agents/{id}/publish`,
   `POST /v1/agents/{id}/unpublish`, `GET /v1/agents/library`,
   `POST /v1/agents/library/{id}/install`.
-- **`verify` = config dry-run.** The `/verify` endpoint still checks the
-  prompt/graph and that every referenced KB/skill/MCP server exists and is
-  usable, then stamps `verifiedAt`. There is no model call yet (no agent
-  runtime). The builder no longer exposes a **Test run** button; publishing is
-  ungated.
+- **`verify` = config dry-run.** The `/verify` endpoint checks the prompt/graph
+  and that every referenced KB/skill/MCP server exists and is usable, then stamps
+  `verifiedAt` (and `status=verified`, or keeps `published`). It makes **no model
+  call**. The builder has no separate Verify action; it calls `/verify` after a
+  successful save (best-effort) so the stored status reflects the saved config,
+  and publishing stays ungated.
 - **Publish to library** flips `visibility=public` and
   projects the agent onto GSI3 under `AGENTLIB#public` (`<publishedAt>#<agentId>`)
   so the library lists globally without a Scan. `install` clones a published
@@ -600,10 +608,10 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   service-auth + control-plane path the evaluations worker uses), and stamps
   `lastRunAt` / advances `nextRunAt`. Cron is parsed timezone-aware in
   `core.schedule` (no third-party dep). See the "Scheduling" section.
-- **Knowledge rerank is stored, not executed** — the knowledge node's dialog has
-  a "Rerank results" toggle that writes `config.knowledgeRerank` (and the node's
-  `data.rerank`); the future agent runtime passes it as `rerank: true` when it
-  calls the knowledge search tool (which already supports it).
+- **Knowledge rerank** — the knowledge node's dialog has a "Rerank results"
+  toggle that writes `config.knowledgeRerank` (and the node's `data.rerank`); the
+  runtime passes it as `rerank: true` when it calls the knowledge search tool
+  (`agentflow/tools.py`), and `user-api` validates/persists the flag.
 - Frontend: `frontend/src/pages/AgentBuilderPage.tsx` is a **React Flow**
   (`@xyflow/react`) canvas with no side panel. The agent sits in the middle with
   **input** on top, **output** on the bottom, **schedule** on the left, and
@@ -617,7 +625,12 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   **starter-questions** list (`config.defaultQuestions`, max 8) that the chat
   screen surfaces as one-tap prompts, plus attached files. Cards
   are **permanent and fixed** — equal size, no palette, no delete, and not
-  draggable or re-connectable; every link is a static dotted curve. A right-hand
+  draggable or re-connectable; every link is a static dotted curve that, during
+  a run, **flows** (marching dots) on the edges actually carrying data and
+  settles to a **solid** line once the step completes. The **input** card stays
+  highlighted while the question is handled, the **knowledge / MCP servers /
+  skills** cards glow when their tools run, and the **schedule** (a trigger, not
+  a data path) never glows or flows. A right-hand
   **Agent** panel with **Response / History / Errors** tabs is the **run log**:
   its **Live** tab starts with a **run composer** where the question is typed per
   run — the Run/Stop action lives there, not in the header — and then shows the
@@ -692,9 +705,13 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 
 ### Scheduling (agents + workflows)
 
-- A schedule is `{enabled, cron, timezone}` on an agent/workflow `config` (the
-  builder's schedule card / node). Saving mirrors an enabled schedule into the
-  registry `data/repositories/schedules.py`
+- A schedule is `{enabled, cron, timezone, question}` on an agent/workflow
+  `config` (the builder's schedule card / node). `question` is **what each run
+  asks** — the run question is never persisted, so a schedule carries its own;
+  user-api validates it (≤2000 chars) and mirrors it into the registry `payload`
+  (`{"query": …}`). Without one the scheduler falls back to
+  `"Run the scheduled task for <name>."`. Saving mirrors an enabled schedule into
+  the registry `data/repositories/schedules.py`
   (`USER#<userId>` / `SCHEDULE#<kind>#<targetId>`; disabled or empty deletes the
   row) and projects it onto the **sparse GSI3** `SCHEDULES#enabled` with sort key
   `<nextRunAt>#<userId>`. The Schedules page (`/scheduled-jobs`) already lists
@@ -754,6 +771,32 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   `deepseek.v3.2`, `qwen.qwen3-next-80b-a3b`, and
   `global.amazon.nova-2-lite-v1:0` (1M-context, multimodal). Every model call is
   admitted through `core.ratelimit_bedrock` (global per-model token bucket).
+- **Automatic model routing (`auto`).** Any agent, workflow host, or workflow
+  node may set its model to **`auto`** instead of a concrete id. The runtime then
+  chooses the model for the run **before executing the question** and uses that
+  model for the whole run (`agentflow/routing.py`, `workflow/run.py`). The choice
+  uses the Strands SDK's model-routing primitives
+  (`strands.models.ClassifierStrategy`): a small/fast Bedrock model
+  (`AGENT_ROUTER_MODEL`, default `zai.glm-4.7-flash`) reads the latest request
+  plus a **capability profile** for every platform model (cost/latency/context/
+  strengths in `routing.MODEL_PROFILES`) and selects the least capable candidate
+  that can still deliver a complete answer — routine requests stay on the cheap
+  models, coding/reasoning escalates to `deepseek.v3.2`, very long/multimodal
+  requests go to `global.amazon.nova-2-lite-v1:0`. The decision is resolved up
+  front (not by handing a live `ModelRouter` to the agent) so the chosen id is
+  streamed (`run.started.auto.selected`), the right context window drives the
+  meter/summarizer, and the correct price is charged. A workflow makes **one**
+  decision per run, applied to the host and every `auto` member. Routing is
+  best-effort and **fails open** to `DEFAULT_MODEL`, and it never applies to a
+  Vault-provider run (provider models are free-form). Knobs:
+  `AGENT_MODEL_ROUTING` (default on), `AGENT_ROUTER_MODEL`,
+  `AGENT_ROUTER_TIMEOUT_SECONDS` (20) and `AGENT_ROUTER_POLICY`. `auto` is
+  accepted by `user-api` only on the platform branch (`PLATFORM_AGENT_MODELS`)
+  and rejected alongside `providerSecretId`. The model pickers (agent builder,
+  workflow host + node override, chat composer) offer **Auto**, and the runtime
+  streams the model it chose (`run.started.auto.selected`) so the resolved model
+  is shown on the persisted turn. No extra infrastructure: the classifier is a
+  normal Bedrock call.
 - The runtime reads the **canonical `config`** (flat `prompt/model/reasoning/
   answerMode/input/output/knowledgeBaseIds/knowledgeRerank/skillIds/servers/memory`
   + `graph` for the UI)
@@ -1377,26 +1420,35 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
   judges and `ingestion` by the embed worker) so the bill is attributable per
   feature. `resolve_model()` applies profile → router → model.
 - **Structured outputs** — `core.bedrock_chat.converse(..., output_schema=…)`
-  constrains the model to a JSON Schema object; used by the eval **judge** and the
-  custom-tools **generator** instead of prompt-only JSON.
+  constrains the model to a JSON Schema object (`outputConfig.textFormat.type =
+  "json_schema"`, schema as a JSON string; the value is read back from the
+  response content, from a `json` block or the `text` JSON). Used by the eval
+  **judge** and the custom-tools **generator**; both fall back to prompt-only
+  JSON parsing when the model or schema is unsupported, so generation/judging
+  never fails outright.
 - **Guardrails as IaC** — `aws_bedrock_guardrail` (+ `_version`) defines the
   content/PII/topic policy in Terraform; `local.guardrail_id` feeds
   `GUARDRAIL_ID`, falling back to `var.guardrail_id` when `enable_guardrail_iaC=false`.
 
 ### AgentCore Registry, Evaluations, Optimization & Browser
 
-- **Registry (A5)** — `aws_bedrockagentcore_registry` (curated: `auto_approval =
-  false`) is the governed catalog for agents, MCP servers, tools and skills.
-  `core/registry.py` publishes (`CreateRegistryRecord`) and searches
-  (`SearchRegistryRecords`). Admin-only (admin-console): `GET
-  /v1/admin/platform/registry`, `POST /v1/admin/platform/registry/publish`, `GET
-  /v1/admin/platform/registry/search`. Env: `AGENTCORE_REGISTRY_ARN`,
-  `AGENTCORE_REGISTRY_ID`.
-- **Evaluations (A6)** — a managed `aws_bedrockagentcore_evaluator` (LLM-as-a-judge
-  on Nova) plus `aws_bedrockagentcore_online_evaluation_config` that samples live
-  agent traces from the `aws/spans` CloudWatch log group
-  (`online_evaluation_sampling_percentage`, default 5%). The app's own Ragas lab
-  (`src/evals/`) remains for datasets.
+- **Registry (A5) — not provisioned.** The managed catalog would be
+  `aws_bedrockagentcore_registry`, but that resource is **deprecated and disabled**
+  in Terraform (it hangs the AWS provider; see the note in
+  `infra/terraform/envs/prod/backend.tf`), so `registry_id`/`registry_arn` are
+  empty. `core/registry.py` publishes/searches when an ARN is supplied, and
+  `admin-console` exposes `GET /v1/admin/platform/registry`,
+  `POST .../publish`, `GET .../search` — all reporting "not configured" until one
+  exists. The **product's** publish-to-library does **not** use it: it flips
+  `visibility=public` and projects onto the DynamoDB GSI3 `AGENTLIB#public`
+  (see Agents). Env: `AGENTCORE_REGISTRY_ARN`, `AGENTCORE_REGISTRY_ID`.
+- **Evaluations (A6)** — managed `aws_bedrockagentcore_evaluator` resources are
+  created, but the **online-evaluation config is not**: it samples live traces from
+  the CloudWatch `aws/spans` group, which is AWS-reserved and cannot be created by
+  Terraform, so it is disabled (`online_evaluation_sampling_percentage` is
+  reserved/unused until that group exists). **The app's own judge lab
+  (`src/evals/`) is the working evaluation path** — datasets, runs, the Bedrock
+  judge and the S3 case artifacts are fully wired.
 - **Optimization (A7)** — `core/optimization.py` surfaces availability and the
   config surfaces it may rewrite (`system_prompt`, `tool_descriptions`);
   admin-only route `GET /v1/admin/platform/optimization`. Insights/Recommendations
@@ -1421,8 +1473,14 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
   credentials. Providers are created only when their credentials are supplied
   (`identity_google_client_id`, `identity_github_client_id`, `identity_slack_client_id`).
 - `core/identity.py` resolves a provider key to its ARN and calls
-  `GetResourceOauth2Token` for a user; the runtime and `admin-console` carry the
-  `bedrock-agentcore:GetResourceOauth2Token` grant.
+  `GetResourceOauth2Token` for a user. Only **`admin-console`** calls it today
+  (the agent runtime carries the IAM grant but has no code path that uses it), so
+  treat Identity as an **admin/platform surface**, not part of a run.
+- **MCP server OAuth tokens are stored by the app**, not by AgentCore Identity:
+  `mcp-connections` keeps them encrypted per user (`data/repositories/
+  mcp_connections.save_tokens`, KMS) and refreshes them itself. Identity is
+  available for on-behalf-of delegation; it is not what backs the MCP connect
+  flow.
 - Routes (admin-only, admin-console): `GET /v1/admin/platform/identity`,
   `POST /v1/admin/platform/identity/token` (fetch a user's token by provider —
   never returns the raw secret to the client).
@@ -1725,10 +1783,20 @@ make floci-down       # stop and remove (named volumes are kept)
 - **Real AWS from local.** `.env` sets no credentials: host processes use your
   normal chain (exported vars, `~/.aws`, SSO). `make floci-up` resolves the same
   chain with `aws configure export-credentials` and passes it to the Floci
-  container; the init hook forwards it into every Lambda's environment and pins
-  `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` to real AWS (Floci has no Bedrock), so the
-  Labs reach real AWS. Credentials are only as fresh as the last `make floci-up`
-  — re-run it after `aws sso login`. (Web Search is the AgentCore Gateway
+  container. Floci does **not** forward those to Lambda containers — it injects
+  emulated execution-role credentials instead, so a function hitting real AWS
+  fails with `UnrecognizedClientException`. The compose stack therefore sets
+  `FLOCI_SERVICES_LAMBDA_AWS_CONFIG_PATH=${HOME}/.aws`, which bind-mounts the
+  host's real `~/.aws` into every Lambda (Floci exposes it via
+  `AWS_SHARED_CREDENTIALS_FILE`). `user-api` additionally pins
+  `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` to real AWS (Floci's `bedrock-runtime` is a
+  **stub** that returns `"Floci stub response for model=…"`), so the Labs reach
+  real Bedrock. Credentials come from `~/.aws` (refresh with `aws sso login`; no
+  snapshot to re-export for the Lambdas). The **agent** container is the
+  exception: it mounts the host's `~/.aws` read-only and reads live credentials,
+  so it does not depend on the export (a missing export used to silently fall
+  back to Floci's placeholder `test` keys and every `ConverseStream` failed with
+  `UnrecognizedClientException`). (Web Search is the AgentCore Gateway
   connector and is **not** available locally: the gateway is not emulated.)
 - **The agent runs in the stack.** The `agent` compose service (built from
   `backend/agents/Dockerfile`, context `backend/`) runs the AgentCore app

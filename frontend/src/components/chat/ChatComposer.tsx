@@ -19,6 +19,7 @@ import {
   AGENT_ANSWER_MODE_OPTIONS,
   AGENT_MODELS,
   AGENT_REASONING_LEVELS,
+  AUTO_AGENT_MODEL_OPTION,
   agentAnswerModeLabel,
   agentModelLabel,
   type AgentAnswerMode,
@@ -339,7 +340,7 @@ export function ChatComposer({
                     Choose a model
                   </p>
                   <div className="scrollbar-thin max-h-80 overflow-y-auto">
-                    {AGENT_MODELS.map((entry) => {
+                    {[AUTO_AGENT_MODEL_OPTION, ...AGENT_MODELS].map((entry) => {
                       const active = entry.id === model
                       return (
                         <button

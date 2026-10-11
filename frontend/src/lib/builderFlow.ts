@@ -27,16 +27,24 @@ export type BuilderFlow = {
   edgeStatus: Record<string, FlowStatus>
 }
 
+/** How far a dot travels per dash cycle, so `active` reads as a flowing line. */
+const FLOW_DASH = '2 7'
+
 /**
  * An edge carries data when its destination is live. A not-yet-started agent
  * still lights up while its source is dispatching into it; resource cards
  * (knowledge/tools/skills) and the output stay dark until they are actually used.
+ *
+ * A schedule is a *trigger*, never part of the run's data path, so its edge is
+ * always idle — it must not glow or flow when the agent executes.
  */
 function edgeStatus(
+  sourceType: string,
   targetType: string,
   source: FlowStatus,
   target: FlowStatus,
 ): FlowStatus {
+  if (sourceType === 'schedule') return 'idle'
   if (source === 'error' || target === 'error') return 'error'
   if (target === 'active') return 'active'
   if (target === 'done') return 'done'
@@ -58,6 +66,7 @@ function combine(
   const edgeStatusMap: Record<string, FlowStatus> = {}
   for (const edge of edges) {
     edgeStatusMap[edge.id] = edgeStatus(
+      typeById[edge.source] ?? '',
       typeById[edge.target] ?? '',
       nodeStatus[edge.source] ?? 'idle',
       nodeStatus[edge.target] ?? 'idle',
@@ -66,7 +75,15 @@ function combine(
   return { nodeStatus, edgeStatus: edgeStatusMap }
 }
 
-/** Styles a React Flow edge from its flow status. */
+/**
+ * Styles a React Flow edge from its flow status.
+ *
+ * `active` keeps the canvas' dotted curve and adds the `builder-edge-flow`
+ * dash animation (see `index.css`), so the dots visibly travel from source to
+ * target while the step runs. `done` drops the dashes for a normal, solid line
+ * — the data made it through. The dot spacing is repeated in the style object
+ * so the dashes survive even where the class rule loses specificity.
+ */
 export function edgeVisual(status: FlowStatus): {
   animated: boolean
   className?: string
@@ -77,19 +94,35 @@ export function edgeVisual(status: FlowStatus): {
       return {
         animated: true,
         className: 'builder-edge-active',
-        style: { stroke: 'var(--app-accent)', strokeWidth: 2 },
+        style: {
+          stroke: 'var(--app-accent)',
+          strokeWidth: 2,
+          strokeDasharray: FLOW_DASH,
+          strokeDashoffset: 0,
+          strokeLinecap: 'round',
+        },
       }
     case 'done':
       return {
         animated: false,
         className: 'builder-edge-done',
-        style: { stroke: 'var(--app-success)', strokeWidth: 2 },
+        style: {
+          stroke: 'var(--app-success)',
+          strokeWidth: 2,
+          strokeDasharray: 'none',
+          strokeLinecap: 'round',
+        },
       }
     case 'error':
       return {
         animated: false,
         className: 'builder-edge-error',
-        style: { stroke: 'var(--app-accent)', strokeWidth: 2 },
+        style: {
+          stroke: 'var(--app-warning)',
+          strokeWidth: 2,
+          strokeDasharray: FLOW_DASH,
+          strokeLinecap: 'round',
+        },
       }
     default:
       return { animated: false }
@@ -109,20 +142,13 @@ export type AgentFlowOptions = {
   nodes: FlowNode[]
   edges: FlowEdge[]
   run: RunFields | null
-  /** The agent has a schedule attached (its trigger card participates). */
-  scheduleEnabled?: boolean
 }
 
 /**
  * Derive the agent builder's flow. The graph has at most one card per kind, so
  * the run state (planning → tools → answer) is mapped by card kind.
  */
-export function computeAgentFlow({
-  nodes,
-  edges,
-  run,
-  scheduleEnabled = false,
-}: AgentFlowOptions): BuilderFlow | null {
+export function computeAgentFlow({ nodes, edges, run }: AgentFlowOptions): BuilderFlow | null {
   if (!run) return null
 
   // The human-in-the-loop question is a synthetic history entry, not a tool.
@@ -145,8 +171,14 @@ export function computeAgentFlow({
   }
 
   const kindStatus: NodeStatusMap = {
-    // The question flows into the agent while it plans, then is done.
-    input: run.planning ? 'active' : errored && tools.length === 0 ? 'error' : 'done',
+    // The question flows into the agent while it is being handled: highlighted
+    // through planning and until the first tool call (or the answer) takes over.
+    input:
+      errored && tools.length === 0
+        ? 'error'
+        : run.planning || (streaming && tools.length === 0 && !run.answer)
+          ? 'active'
+          : 'done',
     // The agent is the executor: active for most of the run.
     agent: errored ? 'error' : done || stopped ? 'done' : 'active',
     // Skills are folded into the prompt up front.
@@ -165,8 +197,8 @@ export function computeAgentFlow({
       : done
         ? 'done'
         : 'idle',
-    // A configured schedule is the run's trigger: active at the start, then set.
-    schedule: scheduleEnabled ? (run.planning ? 'active' : 'done') : 'idle',
+    // A schedule only triggers the run; it never lights up or flows.
+    schedule: 'idle',
   }
 
   const byId: NodeStatusMap = {}
@@ -180,7 +212,6 @@ export type WorkflowFlowOptions = {
   nodes: FlowNode[]
   edges: FlowEdge[]
   run: WorkflowRunFields | null
-  scheduleEnabled?: boolean
 }
 
 function workflowNodeStatus(status: WorkflowNodeRun['status'] | undefined): FlowStatus {
@@ -200,7 +231,6 @@ export function computeWorkflowFlow({
   nodes,
   edges,
   run,
-  scheduleEnabled = false,
 }: WorkflowFlowOptions): BuilderFlow | null {
   if (!run) return null
 
@@ -233,15 +263,13 @@ export function computeWorkflowFlow({
           ? 'error'
           : 'idle'
 
-  const noNodeStarted = run.nodes.every((node) => node.status === 'pending')
-
   const byId: NodeStatusMap = {}
   for (const node of nodes) {
     if (node.type === 'input') byId[node.id] = host
     else if (node.type === 'output') byId[node.id] = output
-    else if (node.type === 'schedule') {
-      byId[node.id] = scheduleEnabled ? (noNodeStarted ? 'active' : 'done') : 'idle'
-    } else if (node.type === 'agent') {
+    // The schedule only triggers the run: it never glows or flows.
+    else if (node.type === 'schedule') byId[node.id] = 'idle'
+    else if (node.type === 'agent') {
       byId[node.id] = workflowNodeStatus(byRunId.get(node.id)?.status)
     } else {
       byId[node.id] = 'idle'

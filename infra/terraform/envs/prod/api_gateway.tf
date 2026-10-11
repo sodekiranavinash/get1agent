@@ -41,6 +41,58 @@ module "api_gateway" {
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
+    # DPDP data-principal routes (consent, access, erasure, grievance). The
+    # ConsentGate mounted on every signed-in page reads GET /v1/user/consent, so
+    # these must be registered or consent is never captured.
+    user_consent_get = {
+      method               = "GET"
+      path                 = "/v1/user/consent"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    user_consent_record = {
+      method               = "POST"
+      path                 = "/v1/user/consent"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    user_consent_withdraw = {
+      method               = "DELETE"
+      path                 = "/v1/user/consent"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    user_data_export = {
+      method               = "GET"
+      path                 = "/v1/user/export"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    user_account_delete = {
+      method               = "DELETE"
+      path                 = "/v1/user/account"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    user_grievances_list = {
+      method               = "GET"
+      path                 = "/v1/user/grievances"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
+    user_grievance_create = {
+      method               = "POST"
+      path                 = "/v1/user/grievances"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
     knowledge_bases_list = {
       method               = "GET"
       path                 = "/v1/knowledge-bases"
@@ -1030,6 +1082,13 @@ module "api_gateway" {
     admin_user_reset = {
       method               = "POST"
       path                 = "/v1/admin/users/{userId}/reset"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_user_unlimited = {
+      method               = "POST"
+      path                 = "/v1/admin/users/{userId}/unlimited"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"

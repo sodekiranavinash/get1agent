@@ -60,11 +60,10 @@ import {
 } from '../lib/runState'
 import type { Conversation } from '../lib/conversations'
 import { useKnowledgeBases } from '../lib/knowledgeBases'
-import { useAgentSkills } from '../lib/agentSkills'
+import { useAgentSkills, useBuiltInMcpServers } from '../lib/agentSkills'
 import { fetchMcpTools } from '../lib/mcp'
 import { useCustomServerOptions } from '../lib/customTools'
 import {
-  BUILTIN_AGENT_SERVERS,
   clearAgentDraft,
   configFromGraph,
   createAgent,
@@ -83,6 +82,7 @@ import {
   useMcpConnectionOptions,
   validateAgentDescription,
   validateAgentName,
+  verifyAgent,
   type AgentDetail,
   type AgentEvent,
   type AgentEventInput,
@@ -222,6 +222,9 @@ export function AgentBuilderPage() {
   const connectionsQuery = useMcpConnectionOptions()
   const customToolsQuery = useCustomServerOptions()
   const agentsQuery = useAgents()
+  // Built-ins the platform can actually serve (see useBuiltInMcpServers); used
+  // to attach the servers a selected skill declares.
+  const builtInServers = useBuiltInMcpServers()
 
   const knowledgeBases = useMemo(() => kbs.data?.knowledgeBases ?? [], [kbs.data])
   const skillList = useMemo(() => skills.data?.skills ?? [], [skills.data])
@@ -274,23 +277,14 @@ export function AgentBuilderPage() {
 
   // Live run flow: which card is executing and which connections are carrying
   // data. Derived from the same run state the right panel renders.
-  const scheduleEnabled = useMemo(
-    () =>
-      nodes.some(
-        (node) => node.type === 'schedule' && (node.data.schedule?.enabled ?? false),
-      ),
-    [nodes],
-  )
-
   const flow = useMemo(
     () =>
       computeAgentFlow({
         nodes: nodes.map((node) => ({ id: node.id, type: node.type ?? '' })),
         edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
         run,
-        scheduleEnabled,
       }),
-    [nodes, edges, run, scheduleEnabled],
+    [nodes, edges, run],
   )
 
   const displayEdges = useMemo(
@@ -501,7 +495,7 @@ export function AgentBuilderPage() {
           if (existing.some((server) => server.id === token || slugify(server.name) === token)) {
             return
           }
-          const builtin = BUILTIN_AGENT_SERVERS.find((server) => server.id === token)
+          const builtin = builtInServers.find((server) => server.id === token)
           if (builtin) {
             additions.push({
               id: builtin.id,
@@ -554,7 +548,7 @@ export function AgentBuilderPage() {
 
       setNodes(nextNodes)
     },
-    [connections, setEdges, setNodes, skillList],
+    [builtInServers, connections, setEdges, setNodes, skillList],
   )
 
   const onConnect: OnConnect = useCallback(
@@ -617,6 +611,11 @@ export function AgentBuilderPage() {
       const saved = agentId
         ? await updateAgent(api, agentId, payload)
         : await createAgent(api, payload)
+      // Run the server's config dry-run after the save so the stored
+      // `verifiedAt`/status reflect the saved configuration (the builder has no
+      // separate Verify action). Best-effort: a failed verification must never
+      // fail the save.
+      await verifyAgent(api, saved.id).catch(() => null)
       clearAgentDraft(agentId)
       clearAgentDraft(null)
       invalidateAgents()

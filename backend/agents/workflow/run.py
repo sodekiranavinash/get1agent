@@ -31,6 +31,8 @@ from workflow.build import (
     HOST_NODE_ID,
     HOST_SYNTH_NODE_ID,
     build_workflow,
+    prepared_specs,
+    workflow_needs_routing,
 )
 from workflow.events import normalize
 from workflow.store import load_workflow
@@ -175,14 +177,6 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
         # same application budget applies.
         quotas.check_budget(user_id)
 
-        yield {
-            "type": "run.started",
-            "runId": run_id,
-            "workflowId": workflow_id,
-            "sessionId": conversation_id,
-            "mode": mode,
-        }
-
         counter: dict[str, int] = {"n": 0}
         # Per-run style overrides from the chat composer apply to the host only.
         host_overrides = {
@@ -197,6 +191,45 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
             if isinstance(requested_agents, list)
             else None
         )
+
+        # "Auto": the host or a member deferred the model, so choose one model for
+        # the whole run *before* building the agents, so every node and the
+        # context meter see the real model. Falls back to the default on failure.
+        specs = prepared_specs(user_id, workflow_config, agent_ids)
+        auto_model: str | None = None
+        if workflow_needs_routing(workflow_config, specs):
+            try:
+                from agentflow.routing import choose_model
+
+                auto_model = await choose_model(
+                    config,
+                    user_input,
+                    str((workflow_config.get("input") or {}).get("prompt") or ""),
+                )
+            except Exception as exc:  # noqa: BLE001 - routing must not fail a run
+                print(
+                    json.dumps(
+                        {
+                            "level": "warning",
+                            "message": "Workflow model routing failed; using the default",
+                            "error": str(exc),
+                        }
+                    ),
+                    flush=True,
+                )
+
+        started_event: dict[str, Any] = {
+            "type": "run.started",
+            "runId": run_id,
+            "workflowId": workflow_id,
+            "sessionId": conversation_id,
+            "mode": mode,
+        }
+        if auto_model:
+            started_event["model"] = auto_model
+            started_event["auto"] = {"selected": auto_model}
+        yield started_event
+
         orchestrator, mode, nodes = build_workflow(
             config,
             user_id,
@@ -213,6 +246,8 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
             allow_new_questions=not bool(resume_responses),
             memory=memory_on,
             managers=managers,
+            auto_model=auto_model,
+            specs=specs,
         )
         if not any(node["role"] == "agent" for node in nodes):
             raise ValueError("This workflow has no runnable agents")

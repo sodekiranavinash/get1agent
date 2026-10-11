@@ -78,6 +78,7 @@ FUNCTIONS = {
     "storage": "get1agent-local-storage",
     "mcp_connections": "get1agent-local-mcp-connections",
     "custom_tools": "get1agent-local-custom-tools",
+    "browser": "get1agent-local-browser",
     "scheduler": "get1agent-local-scheduler",
 }
 
@@ -87,6 +88,18 @@ ROUTES = {
         ("GET", "/v1/user/settings"),
         ("POST", "/v1/user/settings"),
         ("GET", "/v1/user/network"),
+        # DPDP data-principal routes (consent, access, erasure, grievance).
+        ("GET", "/v1/user/consent"),
+        ("POST", "/v1/user/consent"),
+        ("DELETE", "/v1/user/consent"),
+        ("GET", "/v1/user/export"),
+        ("DELETE", "/v1/user/account"),
+        ("GET", "/v1/user/grievances"),
+        ("POST", "/v1/user/grievances"),
+        ("GET", "/v1/notifications"),
+        ("POST", "/v1/notifications/read-all"),
+        ("POST", "/v1/notifications/{id}/read"),
+        ("DELETE", "/v1/notifications/{id}"),
         ("GET", "/v1/knowledge-bases"),
         ("POST", "/v1/knowledge-bases"),
         ("GET", "/v1/knowledge-bases/tags"),
@@ -229,12 +242,19 @@ ROUTES = {
     "custom_tools": [
         ("POST", "/mcp/custom-tools"),
     ],
+    # AgentCore Browser is not emulated locally, so the tool reports
+    # "not configured" (BROWSER_ID is empty); the route still exists so the
+    # runtime reaches a clean answer instead of a gateway 404.
+    "browser": [
+        ("POST", "/mcp/browser"),
+    ],
     "admin_console": [
         ("GET", "/v1/admin/mcp/tools"),
         ("POST", "/v1/admin/mcp/call"),
         ("GET", "/v1/admin/users"),
         ("POST", "/v1/admin/users/{userId}/credits"),
         ("POST", "/v1/admin/users/{userId}/reset"),
+        ("POST", "/v1/admin/users/{userId}/unlimited"),
         ("GET", "/v1/admin/support"),
         ("GET", "/v1/admin/support/{userId}/{ticketId}"),
         ("POST", "/v1/admin/support/{userId}/{ticketId}/reply"),
@@ -804,6 +824,7 @@ def main() -> int:
         f"{ROOT}/backend/services/admin/admin-console/dist/function.zip",
         f"{ROOT}/backend/services/mcp/code-interpreter/dist/function.zip",
         f"{ROOT}/backend/services/mcp/http-fetch/dist/function.zip",
+        f"{ROOT}/backend/services/mcp/browser/dist/function.zip",
         f"{ROOT}/backend/services/mcp/mcp-connections/dist/function.zip",
         f"{ROOT}/backend/services/ingestion/ingestion-dispatcher/dist/function.zip",
         f"{ROOT}/backend/services/ingestion/ingestion-extract/dist/function.zip",
@@ -988,6 +1009,9 @@ def main() -> int:
         "MEMORY_BACKEND": os.environ.get("MEMORY_BACKEND", "dynamo"),
         "AGENT_MEMORY_BACKEND": os.environ.get("AGENT_MEMORY_BACKEND", "dynamo"),
         "AGENTCORE_MEMORY_ID": os.environ.get("AGENTCORE_MEMORY_ID", ""),
+        # Skill repo resolution / registry imports (optional; raises the GitHub
+        # API rate limit and enables private repos).
+        "GITHUB_TOKEN": os.environ.get("GITHUB_TOKEN", ""),
         # Vault: encrypt per-user secrets, and allow testing a local provider
         # (e.g. Ollama at http://localhost:11434) under Floci only.
         "VAULT_KMS_KEY_ARN": vault_kms_key_arn,
@@ -1006,6 +1030,17 @@ def main() -> int:
         "AWS_REGION": REGION,
         "AWS_DEFAULT_REGION": REGION,
     }
+    # The Labs (generation, evals, playground) must reach *real* Bedrock: Floci's
+    # bedrock-runtime is a stub, and the global AWS_ENDPOINT_URL that Floci sets
+    # on every Lambda would otherwise route Bedrock to it. The service-specific
+    # endpoint var takes precedence over the global one.
+    api_env["BEDROCK_REGION"] = os.environ.get("BEDROCK_REGION", "ap-south-1")
+    api_env["BEDROCK_CHAT_MODEL"] = os.environ.get(
+        "BEDROCK_CHAT_MODEL", "zai.glm-4.7-flash"
+    )
+    _bedrock_endpoint = os.environ.get("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "").strip()
+    if _bedrock_endpoint:
+        api_env["AWS_ENDPOINT_URL_BEDROCK_RUNTIME"] = _bedrock_endpoint
     user_api_arn = ensure_function(
         lm,
         FUNCTIONS["user_api"],
@@ -1111,6 +1146,26 @@ def main() -> int:
         timeout=300,
         memory=1024,
     )
+    # AgentCore Browser is not emulated by Floci, so BROWSER_ID stays empty and
+    # every tool call answers "not configured" instead of failing.
+    browser_arn = ensure_function(
+        lm,
+        FUNCTIONS["browser"],
+        f"{ROOT}/backend/services/mcp/browser/dist/function.zip",
+        handler="handler.lambda_handler",
+        layers=[],
+        environment={
+            "DYNAMODB_TABLE": DYNAMODB_TABLE,
+            "DYNAMODB_ENDPOINT_URL": DYNAMODB_ENDPOINT_URL,
+            "BROWSER_ID": os.environ.get("BROWSER_ID", ""),
+            "BROWSER_REGION": REGION,
+            "BROWSER_ALLOWED_DOMAINS": os.environ.get("BROWSER_ALLOWED_DOMAINS", ""),
+            "AWS_REGION": REGION,
+            "AWS_DEFAULT_REGION": REGION,
+        },
+        timeout=300,
+        memory=512,
+    )
     # Trusted web fetch. Runs outside a VPC and reaches public HTTPS directly
     # (with a per-request SSRF guard) and returns the response inline.
     http_fetch_arn = ensure_function(
@@ -1211,6 +1266,7 @@ def main() -> int:
             "http_fetch": http_fetch_arn,
             "storage": storage_arn,
             "custom_tools": custom_tools_arn,
+            "browser": browser_arn,
             "admin_console": admin_console_arn,
             "mcp_connections": mcp_connections_arn,
         },

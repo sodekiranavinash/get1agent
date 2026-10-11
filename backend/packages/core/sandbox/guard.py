@@ -1,87 +1,47 @@
 """Static + runtime policy guard for LLM-generated Python.
 
 The AgentCore Code Interpreter already runs each session in an isolated microVM
-(its own CPU, memory and filesystem). This guard is a defence-in-depth and
-abuse/cost-control layer on top of that isolation. It blocks:
+(its own CPU, memory and filesystem), so this guard is a lightweight
+**abuse/cost-control** layer on top of that isolation. It blocks exactly one
+class of imports:
 
-* OS/shell escape and process spawning (``subprocess``, ``pty``, ``ctypes``,
-  dangerous ``os.*`` calls);
-* network egress and cloud SDKs (so a user cannot download models or data),
-  unless the sandbox is explicitly granted ``allow_network`` — in which case
-  only the HTTP(S) stack is unblocked and every outbound connection is still
-  counted and range-checked against private/reserved addresses;
-* dynamic code execution (``exec``/``eval``/``importlib``);
-* heavy machine-learning frameworks (``torch``, ``tensorflow``, ...).
+* heavy machine-learning frameworks (``torch``, ``tensorflow``, ``transformers``,
+  ``sklearn``, ...) — so a tool cannot pull a multi-GB model or burn the run
+  budget on ML.
+
+Everything else is permitted: process spawning (``subprocess``), native code
+(``ctypes``), dynamic code (``eval``/``exec``/``importlib``), arbitrary
+third-party packages and package installation. The microVM remains the real
+isolation boundary.
+
+Network is governed separately by ``allow_network``:
+
+* when the sandbox is granted internet access, only the HTTP(S) stack is
+  reachable and every outbound connection is counted (``max_connections``) and
+  range-checked against private/loopback/link-local/reserved/metadata
+  addresses;
+* when it is not (the admin kill switch is off, or the calculation-only
+  ``code-interpreter`` tool), the network stack is denied outright.
 
 Two layers enforce the policy:
 
-* ``check`` — a static AST/literal pass run before any code reaches AWS. A
-  blocked snippet never starts a sandbox session.
+* ``check`` — a static AST pass run before any code reaches AWS.
 * ``prelude`` — a small Python prologue prepended to every execution that
   installs a ``sys.addaudithook`` inside the sandbox, so a bypassed static
-  check still fails at import/exec time. Audit hooks cannot be removed once
+  check still fails at import/connect time. Audit hooks cannot be removed once
   installed.
-
-This is intentionally conservative. A determined attacker can still bypass a
-Python-level check; the microVM remains the real isolation boundary.
 """
 
 from __future__ import annotations
 
 import ast
-import re
 from dataclasses import dataclass
 
-# Root modules that are blocked outright at import time. Keep this list focused
-# on abuse/cost control: anything that can spawn processes, reach the network,
-# download models, or execute code dynamically.
-DENY_MODULES: frozenset[str] = frozenset(
+# The only blocked family of modules: heavy machine-learning frameworks. They
+# stay blocked on purpose — not for isolation, but to stop a tool downloading a
+# model or exhausting the run budget on ML.
+ML_MODULES: frozenset[str] = frozenset(
     {
-        # Process / native code
-        "subprocess",
-        "pty",
-        "ctypes",
-        "cffi",
-        "multiprocessing",
-        "resource",
-        # Network + cloud SDKs
-        "socket",
-        "ssl",
-        "http",
-        "urllib",
-        "urllib2",
-        "urllib3",
-        "requests",
-        "httpx",
-        "aiohttp",
-        "ftplib",
-        "smtplib",
-        "poplib",
-        "imaplib",
-        "telnetlib",
-        "xmlrpc",
-        "websocket",
-        "websockets",
-        "paramiko",
-        "boto3",
-        "botocore",
-        "sagemaker",
-        "pymongo",
-        "psycopg2",
-        "pymysql",
-        # Dynamic code
-        "importlib",
-        "runpy",
-        "code",
-        "codeop",
-        "compileall",
-        "pickle",
-        "marshal",
-        "dill",
-        "cloudpickle",
-        "shelve",
-        "imp",
-        # Heavy ML / model downloads
         "torch",
         "torchvision",
         "torchaudio",
@@ -121,17 +81,11 @@ DENY_MODULES: frozenset[str] = frozenset(
     }
 )
 
-# Submodules of otherwise-blocked packages that are safe to import.
-# ``urllib.parse`` is pure string manipulation (no sockets) — the one piece of
-# ``urllib`` a parser legitimately needs (e.g. ``urljoin`` for relative links).
-# Every other ``urllib`` submodule (``request``/``error``/…) stays blocked.
-ALLOW_MODULES: frozenset[str] = frozenset({"urllib.parse"})
+# Public alias for the blocked-module set.
+DENY_MODULES: frozenset[str] = ML_MODULES
 
-# Network modules that are lifted from the deny set when a sandbox is explicitly
-# granted internet access (``allow_network``). Only the HTTP(S) stack is
-# unblocked; other protocols stay denied so the surface stays focused on calling
-# web APIs. Even when allowed, outbound connections are counted and
-# private/loopback/link-local/reserved destinations are refused at runtime.
+# The HTTP(S) stack. Not blocked when network is allowed; withheld (as a group)
+# when the sandbox is offline so an offline sandbox cannot reach out at all.
 NETWORK_MODULES: frozenset[str] = frozenset(
     {
         "socket",
@@ -148,73 +102,11 @@ NETWORK_MODULES: frozenset[str] = frozenset(
     }
 )
 
-# Calls whose bare name is always blocked.
-DENY_CALLS: frozenset[str] = frozenset({"__import__", "exec", "eval", "compile"})
-
-# Dotted call targets that are blocked. A prefix match covers e.g. ``os.execv``.
-DENY_ATTRS: tuple[str, ...] = (
-    "os.system",
-    "os.popen",
-    "os.exec",
-    "os.spawn",
-    "os.fork",
-    "os.forkpty",
-    "os.kill",
-    "os.killpg",
-    "os.setuid",
-    "os.setgid",
-    "os.setreuid",
-    "os.setregid",
-    "os.chroot",
-    "os.putenv",
-    "os.unsetenv",
-    "os.remove",
-    "os.unlink",
-    "os.rmdir",
-    "os.removedirs",
-    "shutil.rmtree",
-    "pickle.loads",
-    "pickle.load",
-    "marshal.loads",
-    "marshal.load",
-    "importlib.import_module",
-    "importlib.reload",
-    "importlib.__import__",
-    "builtins.__import__",
-    "builtins.exec",
-    "builtins.eval",
-    "builtins.compile",
-    "ctypes",
-    "socket",
-    "subprocess",
-    "pty",
-    "multiprocessing",
-)
-
-# Download / install / model-fetch markers scanned in the raw source. Network
-# *imports* (``urllib.request``, ``requests``, ``http``, ``socket``) and the
-# runtime socket audit hook already prevent egress, so a bare URL string literal
-# is NOT blocked — a parser may legitimately carry an example or default URL in
-# a docstring. Only explicit download/install commands and model-fetch markers
-# are blocked here.
-_DOWNLOAD_RE = re.compile(
-    r"("
-    r"pip3?\s+install|python\s+-m\s+pip|conda\s+install|"
-    r"from_pretrained|torch\.hub|load_dataset|huggingface|"
-    r"wget\s|curl\s|git\s+clone"
-    r")",
-    re.IGNORECASE,
-)
-
-# Audit events blocked at runtime inside the sandbox.
-DENY_AUDIT_EVENTS: tuple[str, ...] = (
-    "os.system",
-    "subprocess.Popen",
+# Socket audit events refused when the sandbox is offline (network kill switch).
+_OFFLINE_AUDIT_EVENTS: tuple[str, ...] = (
     "socket.connect",
     "socket.bind",
     "socket.getaddrinfo",
-    "ctypes.dlopen",
-    "ctypes.dlsym",
 )
 
 
@@ -237,30 +129,18 @@ def deny_set(
     *,
     allow_network: bool = False,
 ) -> frozenset[str]:
-    """The effective deny set: built-ins + ``BLOCKED_MODULES`` - ``ALLOWED_MODULES``.
+    """The effective deny set: heavy-ML + ``BLOCKED_MODULES`` - ``ALLOWED_MODULES``.
 
-    ``allow_network`` lifts the HTTP(S) stack (``NETWORK_MODULES``) from the deny
-    set so a tool may call web APIs; every other abuse/cost control (process
-    spawning, native code, dynamic code, heavy ML, cloud SDKs) stays in place.
+    When the sandbox is offline (``allow_network`` false) the HTTP(S) stack is
+    added so nothing can reach the network; every other class of module is
+    permitted.
     """
-    deny = set(DENY_MODULES)
-    if allow_network:
-        deny -= NETWORK_MODULES
+    deny = set(ML_MODULES)
+    if not allow_network:
+        deny |= NETWORK_MODULES
     deny |= _split_modules(blocked_extra)
     deny -= _split_modules(allowed_extra)
     return frozenset(deny)
-
-
-def _dotted(node: ast.AST) -> str | None:
-    parts: list[str] = []
-    current: ast.AST | None = node
-    while isinstance(current, ast.Attribute):
-        parts.append(current.attr)
-        current = current.value
-    if isinstance(current, ast.Name):
-        parts.append(current.id)
-        return ".".join(reversed(parts))
-    return None
 
 
 def _import_names(tree: ast.AST) -> list[tuple[str, int]]:
@@ -308,41 +188,12 @@ def check(
     deny = deny_set(blocked_extra, allowed_extra, allow_network=allow_network)
     for name, lineno in _import_names(tree):
         root = name.split(".")[0]
-        if name in ALLOW_MODULES:
-            continue
         if root in deny:
             return GuardResult(
                 False,
                 f"Import of '{root}' is blocked by policy",
                 f"line {lineno}",
             )
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Name) and func.id in DENY_CALLS:
-                return GuardResult(
-                    False,
-                    f"Call to '{func.id}' is blocked by policy",
-                    f"line {node.lineno}",
-                )
-            dotted = _dotted(func)
-            if dotted:
-                for prefix in DENY_ATTRS:
-                    if dotted == prefix or dotted.startswith(prefix + "."):
-                        return GuardResult(
-                            False,
-                            f"Call to '{dotted}' is blocked by policy",
-                            f"line {node.lineno}",
-                        )
-
-    match = _DOWNLOAD_RE.search(code)
-    if match:
-        return GuardResult(
-            False,
-            "Downloading files, installing packages or fetching models is blocked",
-            f"matched {match.group(0).strip()!r}",
-        )
 
     return GuardResult(True)
 
@@ -360,25 +211,16 @@ def prelude(
     duplicate hook when the same sandbox is reused across calls, and the
     per-execution connection counter is reset at the top of every run.
 
-    When ``allow_network`` is true the socket block is lifted, but outbound
-    connections are still counted (``max_connections`` per execution) and
-    private/loopback/link-local/reserved destinations are refused.
+    Only the heavy-ML imports are refused. When ``allow_network`` is true,
+    outbound connections are counted (``max_connections`` per execution) and
+    private/loopback/link-local/reserved destinations are refused; when it is
+    false, the socket audit events are refused outright.
     """
     deny = sorted(deny_set(blocked_extra, allowed_extra, allow_network=allow_network))
-    allow = sorted(name.lower() for name in ALLOW_MODULES)
-    # Parent packages of an allowed submodule must load too (importing
-    # ``urllib.parse`` first imports ``urllib``), but the submodule itself is
-    # what gets allow-listed, so ``urllib.request`` is still denied.
-    allow_parents = sorted(
-        {name.rsplit(".", 1)[0] for name in allow if "." in name}
-    )
 
     if allow_network:
-        # Socket events are no longer denied outright; they are counted and
-        # range-checked instead. Process/native-code guards stay.
-        events = sorted(
-            {"os.system", "subprocess.Popen", "ctypes.dlopen", "ctypes.dlsym"}
-        )
+        # Nothing but imports is refused; sockets are counted and range-checked.
+        events: tuple[str, ...] = ()
         net_events = sorted({"socket.connect", "socket.sendto", "socket.sendmsg"})
         extra = (
             f"    _g1_net_events = frozenset({net_events!r})\n"
@@ -405,8 +247,6 @@ def prelude(
             "        if _g1_event == 'import':\n"
             "            _g1_name = str(_g1_args[0]).lower() if _g1_args else ''\n"
             "            _g1_root = _g1_name.split('.')[0]\n"
-            "            if _g1_name in _g1_allow or _g1_name in _g1_allow_parents:\n"
-            "                return\n"
             "            if _g1_root in _g1_deny:\n"
             "                raise PermissionError('import of ' + _g1_root + ' is blocked by policy')\n"
             "        elif _g1_event in _g1_net_events:\n"
@@ -418,19 +258,15 @@ def prelude(
             "            _g1_host = _g1_conn_addr(_g1_args)\n"
             "            if _g1_host is not None and _g1_blocked_ip(_g1_host):\n"
             "                raise PermissionError('connections to private, loopback or reserved addresses are blocked by policy')\n"
-            "        elif _g1_event in _g1_events:\n"
-            "            raise PermissionError('operation ' + _g1_event + ' is blocked by policy')\n"
         )
     else:
-        events = sorted(DENY_AUDIT_EVENTS)
+        events = tuple(sorted(_OFFLINE_AUDIT_EVENTS))
         extra = ""
         body = (
             "    def _g1_hook(_g1_event, _g1_args):\n"
             "        if _g1_event == 'import':\n"
             "            _g1_name = str(_g1_args[0]).lower() if _g1_args else ''\n"
             "            _g1_root = _g1_name.split('.')[0]\n"
-            "            if _g1_name in _g1_allow or _g1_name in _g1_allow_parents:\n"
-            "                return\n"
             "            if _g1_root in _g1_deny:\n"
             "                raise PermissionError('import of ' + _g1_root + ' is blocked by policy')\n"
             "        elif _g1_event in _g1_events:\n"
@@ -444,8 +280,6 @@ def prelude(
         "    _g1_sys._get1agent_guard = True\n"
         f"    _g1_deny = frozenset({deny!r})\n"
         f"    _g1_events = frozenset({events!r})\n"
-        f"    _g1_allow = frozenset({allow!r})\n"
-        f"    _g1_allow_parents = frozenset({allow_parents!r})\n"
         + extra
         + body
         + "    _g1_sys.addaudithook(_g1_hook)\n"
