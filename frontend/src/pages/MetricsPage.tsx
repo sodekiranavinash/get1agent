@@ -2,6 +2,7 @@ import { motion } from 'framer-motion'
 import { Activity, Coins, Gauge, Zap } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Card } from '../components/ui/Card'
+import { ErrorState } from '../components/ui/ErrorState'
 import { MiniBars } from '../components/ui/MiniBars'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
@@ -61,11 +62,28 @@ function delta(values: number[]): { change?: string; trend: 'up' | 'down' | 'neu
 
 export function MetricsPage() {
   const api = useApiClient()
-  const { data, isPending } = usePageQuery<MetricsResponse>('lab-metrics', () =>
-    api.get<MetricsResponse>('/v1/lab/metrics?days=7'),
+  const { data, isPending, isError, error, refetch } = usePageQuery<MetricsResponse>(
+    'lab-metrics',
+    () => api.get<MetricsResponse>('/v1/lab/metrics?days=7'),
   )
 
   if (isPending) return <MetricsSkeleton />
+
+  // Without this the page would fall through to the grid below and paint zeros
+  // and dashes as if they were real readings.
+  if (isError) {
+    return (
+      <PageShell>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <ErrorState
+            title="Couldn't load metrics"
+            error={error}
+            onRetry={() => refetch()}
+          />
+        </div>
+      </PageShell>
+    )
+  }
 
   const configured = data?.configured !== false
   const totals = data?.totals

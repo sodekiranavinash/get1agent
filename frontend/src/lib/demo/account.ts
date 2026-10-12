@@ -20,7 +20,6 @@ export const demoAccount = {
     budgetUsd: 25,
     spentUsd: 6.42,
     remainingUsd: 18.58,
-    unlimited: false,
     creditsPerUsd: 100,
     budgetCredits: 2500,
     spentCredits: 642,

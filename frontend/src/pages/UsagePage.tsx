@@ -63,12 +63,11 @@ type StorageUsage = {
 type BudgetInfo = {
   budgetUsd: number
   spentUsd: number
-  remainingUsd: number | null
-  unlimited: boolean
+  remainingUsd: number
   creditsPerUsd: number
   budgetCredits: number
   spentCredits: number
-  remainingCredits: number | null
+  remainingCredits: number
 }
 
 function formatCredits(value: number): string {
@@ -400,31 +399,23 @@ export function UsagePage() {
                       </span>
                       <div>
                         <p className="text-[13px] font-medium text-foreground">
-                          {budget.unlimited
-                            ? 'AI credits — unlimited'
-                            : `AI credits — ${formatCredits(budget.spentCredits)} of ${formatCredits(budget.budgetCredits)} used`}
+                          {`AI credits — ${formatCredits(budget.spentCredits)} of ${formatCredits(budget.budgetCredits)} used`}
                         </p>
                         <p className="text-[11px] text-subtle">
-                          {budget.unlimited
-                            ? 'No application limit.'
-                            : budget.remainingCredits != null && budget.remainingCredits > 0
-                              ? `${formatCredits(budget.remainingCredits)} credits left for platform models (≈ $${budget.remainingUsd?.toFixed(2)}). Your own Vault keys are not counted.`
-                              : 'Credits used up — add your own API key in the Vault to keep running, or ask an admin for more credits.'}
+                          {budget.remainingCredits > 0
+                            ? `${formatCredits(budget.remainingCredits)} credits left for platform models (≈ $${budget.remainingUsd.toFixed(2)}). Your own Vault keys are not counted.`
+                            : 'Credits used up — add your own API key in the Vault to keep running, or ask an admin for more credits.'}
                         </p>
                       </div>
                     </div>
-                    {!budget.unlimited ? (
-                      <span className="shrink-0 text-xs tabular-nums text-muted">
-                        {pct(budget.spentCredits, budget.budgetCredits)}%
-                      </span>
-                    ) : null}
+                    <span className="shrink-0 text-xs tabular-nums text-muted">
+                      {pct(budget.spentCredits, budget.budgetCredits)}%
+                    </span>
                   </div>
-                  {!budget.unlimited ? (
-                    <Progress
-                      value={pct(budget.spentCredits, budget.budgetCredits)}
-                      className="mx-4 mb-3"
-                    />
-                  ) : null}
+                  <Progress
+                    value={pct(budget.spentCredits, budget.budgetCredits)}
+                    className="mx-4 mb-3"
+                  />
                 </Card>
               </motion.div>
             ) : null}
@@ -577,7 +568,7 @@ export function UsagePage() {
                       {models.map((model) => (
                         <div key={model.model}>
                           <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
-                            <span className="truncate font-medium text-foreground">
+                            <span className="min-w-0 truncate font-medium text-foreground">
                               {model.model}
                             </span>
                             <span className="shrink-0 text-muted">
@@ -706,7 +697,7 @@ export function UsagePage() {
                       key={model}
                       className="flex items-center justify-between gap-3 px-4 py-2.5"
                     >
-                      <span className="truncate font-mono text-[12px] text-foreground">
+                      <span className="min-w-0 truncate font-mono text-[12px] text-foreground">
                         {model}
                       </span>
                       <span className="shrink-0 text-xs tabular-nums text-muted">

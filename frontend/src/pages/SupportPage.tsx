@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { LifeBuoy, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { useApiClient } from '../lib/api'
+import { ErrorState } from '../components/ui/ErrorState'
 import { useDemoMode } from '../auth/useDemoMode'
 import { usePageQuery } from '../hooks/usePageQuery'
 import {
@@ -34,7 +35,7 @@ export function SupportPage() {
   const [sending, setSending] = useState(false)
   const [active, setActive] = useState<SupportTicket | null>(null)
 
-  const { data: tickets, isPending, refetch } = usePageQuery(
+  const { data: tickets, isPending, isError, error, refetch } = usePageQuery(
     'support-tickets',
     () => fetchSupportTickets(api),
     { enabled: canWrite },
@@ -144,6 +145,14 @@ export function SupportPage() {
               <div className="space-y-2 p-4">
                 <Skeleton className="h-12 w-full" />
                 <Skeleton className="h-12 w-full" />
+              </div>
+            ) : isError ? (
+              <div className="p-4">
+                <ErrorState
+                  title="Couldn't load your conversations"
+                  error={error}
+                  onRetry={() => refetch()}
+                />
               </div>
             ) : (tickets?.length ?? 0) === 0 ? (
               <p className="px-5 py-8 text-center text-[12px] text-subtle">

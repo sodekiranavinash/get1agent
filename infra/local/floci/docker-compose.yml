@@ -43,6 +43,14 @@ services:
       # uploaded documents and the retrieval index (see `floci_data` below).
       FLOCI_STORAGE_MODE: ${FLOCI_STORAGE_MODE:-persistent}
       FLOCI_INIT_HOOKS_TIMEOUT_SECONDS: "${FLOCI_INIT_HOOKS_TIMEOUT_SECONDS:-300}"
+      # How long Floci keeps an idle Lambda container warm. Floci's default is
+      # 300s, which means any page untouched for 5 minutes pays a full cold
+      # start on its next request (~3-4s per container: `docker create` plus the
+      # Python/boto3 import). The admin MCP page invokes 5 containers, so a cold
+      # load costs ~14s vs ~0.7s warm. An hour keeps the stack warm across a
+      # normal dev session. Set 0 (or FLOCI_SERVICES_LAMBDA_EPHEMERAL=true) to
+      # always cold-start.
+      FLOCI_SERVICES_LAMBDA_CONTAINER_IDLE_TIMEOUT_SECONDS: "${FLOCI_SERVICES_LAMBDA_CONTAINER_IDLE_TIMEOUT_SECONDS:-3600}"
       FLOCI_DEFAULT_ACCOUNT_ID: ${FLOCI_DEFAULT_ACCOUNT_ID:-000000000000}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
       # Real AWS credentials, resolved from your host chain and exported by

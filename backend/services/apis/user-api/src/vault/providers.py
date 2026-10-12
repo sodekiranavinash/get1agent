@@ -13,6 +13,11 @@ from typing import Any
 
 DEFAULT_AUTH_STYLE = "bearer"
 
+# A preset may carry ``modelLabels`` (api id -> display name) so the pickers can
+# show "DeepSeek V4.1 Flash" while still sending the provider's real model id.
+# Providers rename and retire models often, so keep the ids current against the
+# provider's own model list page.
+#
 # ``kind`` values: "provider" (has a base URL + chat models) or "generic".
 KIND_PROVIDER = "provider"
 KIND_GENERIC = "generic"
@@ -86,10 +91,17 @@ PRESET_PROVIDERS: list[dict[str, Any]] = [
     {
         "id": "deepseek",
         "label": "DeepSeek",
-        "description": "DeepSeek chat and reasoning models.",
+        "description": "DeepSeek's own API (V4.1 Flash and V4 Pro).",
         "baseUrl": "https://api.deepseek.com/v1",
-        "defaultModel": "deepseek-chat",
-        "models": ["deepseek-chat", "deepseek-reasoner"],
+        "defaultModel": "deepseek-flash",
+        # Current ids per https://api-docs.deepseek.com/quick_start/pricing.
+        # The retired `deepseek-chat` / `deepseek-reasoner` aliases are no longer
+        # served, and `deepseek-v4-pro` is the successor to the old reasoner.
+        "models": ["deepseek-flash", "deepseek-v4-pro"],
+        "modelLabels": {
+            "deepseek-flash": "DeepSeek V4.1 Flash",
+            "deepseek-v4-pro": "DeepSeek V4 Pro",
+        },
         "requiresKey": True,
         "docsUrl": "https://platform.deepseek.com/api_keys",
     },
@@ -195,6 +207,7 @@ def provider_public_list() -> list[dict[str, Any]]:
             "baseUrl": provider["baseUrl"],
             "defaultModel": provider["defaultModel"],
             "models": list(provider.get("models") or []),
+            "modelLabels": dict(provider.get("modelLabels") or {}),
             "auth": provider.get("auth", DEFAULT_AUTH_STYLE),
             "requiresKey": provider.get("requiresKey", True),
             "docsUrl": provider.get("docsUrl", ""),

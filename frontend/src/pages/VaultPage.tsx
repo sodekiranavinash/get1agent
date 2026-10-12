@@ -6,7 +6,6 @@ import {
   Eye,
   EyeOff,
   FlaskConical,
-  KeyRound,
   Loader2,
   Pencil,
   Plus,
@@ -262,21 +261,13 @@ export function VaultPage() {
                 <div className="rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors hover:border-border-strong">
                   <div className="flex items-start gap-3">
                     <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-raised text-accent">
-                      {secret.kind === 'provider' ? (
-                        <Server className="size-3.5" strokeWidth={1.75} />
-                      ) : (
-                        <KeyRound className="size-3.5" strokeWidth={1.75} />
-                      )}
+                      <Server className="size-3.5" strokeWidth={1.75} />
                     </span>
 
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-[13px] font-medium text-foreground">{secret.label}</p>
-                        {secret.kind === 'provider' ? (
-                          <Badge variant="accent">{providerLabel(providers, secret.provider)}</Badge>
-                        ) : (
-                          <Badge variant="default">Generic</Badge>
-                        )}
+                        <Badge variant="accent">{providerLabel(providers, secret.provider)}</Badge>
                         {status ? (
                           <Badge variant={status.ok ? 'success' : 'warning'} dot>
                             {status.ok ? 'Verified' : 'Test failed'}
@@ -358,23 +349,21 @@ export function VaultPage() {
                     </div>
 
                     <div className="flex shrink-0 items-center gap-0.5">
-                      {secret.kind === 'provider' ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={testingId === secret.id}
-                          icon={
-                            testingId === secret.id ? (
-                              <Loader2 className="size-3.5 animate-spin" />
-                            ) : (
-                              <FlaskConical className="size-3.5" />
-                            )
-                          }
-                          onClick={() => runTest(secret)}
-                        >
-                          Test
-                        </Button>
-                      ) : null}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={testingId === secret.id}
+                        icon={
+                          testingId === secret.id ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <FlaskConical className="size-3.5" />
+                          )
+                        }
+                        onClick={() => runTest(secret)}
+                      >
+                        Test
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"

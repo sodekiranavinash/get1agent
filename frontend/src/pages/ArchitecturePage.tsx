@@ -9,6 +9,7 @@ import {
   Route,
   Search,
   ShieldCheck,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react'
 import { AuroraBackground } from '../components/landing/AuroraBackground'
@@ -20,6 +21,7 @@ import { PipelinesTab } from '../components/architecture/views/PipelinesTab'
 import {
   ARCHITECTURE,
   ARCHITECTURE_LEGEND,
+  AVI_FLOWS,
   DATA_LEGEND,
   DATA_STORAGE,
   DEPLOYMENT,
@@ -39,6 +41,7 @@ type TabId =
   | 'flows'
   | 'runtime'
   | 'knowledge'
+  | 'avi'
   | 'data'
   | 'identity'
   | 'observability'
@@ -48,6 +51,7 @@ const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: 'architecture', label: 'Architecture', icon: Boxes },
   { id: 'flows', label: 'Request flows', icon: Route },
   { id: 'runtime', label: 'Agent runtime', icon: Bot },
+  { id: 'avi', label: 'Avi', icon: Sparkles },
   { id: 'knowledge', label: 'Knowledge', icon: Search },
   { id: 'data', label: 'Data', icon: Database },
   { id: 'identity', label: 'Identity', icon: KeyRound },
@@ -96,6 +100,14 @@ function TabContent({ tab }: { tab: TabId }) {
           title="Agent run lifecycle"
           blurb="What happens inside one run: session and memory, planning, policy-checked tool calls through the gateway, an optional human pause, the streamed answer, and the persisted trace."
           flows={[AGENT_LIFECYCLE]}
+        />
+      )
+    case 'avi':
+      return (
+        <PipelinesTab
+          title="Avi — the in-product assistant"
+          blurb="Avi is a separate subsystem, not part of the agent runtime: a bottom-right dialog on every page, two ingress paths (a stateless guest Lambda and an isolated MicroVM for signed-in users), a dedicated intent classifier, its own LangChain Deep Agents loop, and a reserved platform knowledge scope ingested through the standard pipeline. Grounded only in the repository — no crawling."
+          flows={AVI_FLOWS}
         />
       )
     case 'knowledge':

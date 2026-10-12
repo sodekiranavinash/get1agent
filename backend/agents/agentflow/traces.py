@@ -105,6 +105,73 @@ def _cost_micro_usd(model: str, usage: dict[str, Any]) -> int:
         return 0
 
 
+def _observation_cost(model: Any, usage: Any) -> int:
+    """Per-observation cost in micro-USD (0 when the span carries no usage)."""
+    if not isinstance(usage, dict) or not model:
+        return 0
+    return _cost_micro_usd(str(model), usage)
+
+
+def _extract_retrieval(output: Any) -> dict[str, Any] | None:
+    """Pull the retrieval detail out of a knowledge tool's result payload.
+
+    The knowledge MCP returns ``chunks[]`` (with vector/lexical/RRF/rerank
+    scores) plus a ``meta`` block of per-leg timings. Surfacing it as structured
+    metadata is what lets the viewer render a real retriever span instead of
+    raw JSON.
+    """
+    if not isinstance(output, dict):
+        return None
+    chunks = output.get("chunks")
+    if not isinstance(chunks, list):
+        chunks = output.get("results") if isinstance(output.get("results"), list) else None
+    meta = output.get("meta") if isinstance(output.get("meta"), dict) else None
+    sources = output.get("sources") if isinstance(output.get("sources"), list) else None
+    if chunks is None and meta is None and sources is None:
+        return None
+    detail: dict[str, Any] = {}
+    if chunks is not None:
+        detail["chunks"] = [
+            {
+                key: chunk.get(key)
+                for key in (
+                    "chunkId",
+                    "documentId",
+                    "knowledgeBaseId",
+                    "fileName",
+                    "page",
+                    "vectorScore",
+                    "lexicalScore",
+                    "rrfScore",
+                    "rerankScore",
+                    "score",
+                )
+                if isinstance(chunk, dict) and chunk.get(key) is not None
+            }
+            for chunk in chunks[:50]
+            if isinstance(chunk, dict)
+        ]
+        detail["chunkCount"] = len(chunks)
+    if meta is not None:
+        detail["meta"] = {
+            key: meta.get(key)
+            for key in (
+                "embedMs",
+                "searchMs",
+                "rerankMs",
+                "reranked",
+                "rerankMode",
+                "candidateCount",
+                "returned",
+                "topK",
+            )
+            if meta.get(key) is not None
+        }
+    if sources is not None:
+        detail["sourceCount"] = len(sources)
+    return detail or None
+
+
 def _planner_model() -> str:
     return (os.environ.get("AGENT_PLANNER_MODEL") or "").strip()
 
@@ -127,6 +194,7 @@ def build_trace(
     events: list[dict[str, Any]],
     usage: dict[str, Any] | None,
     tags: list[str],
+    system_prompt_text: str | None = None,
 ) -> dict[str, Any]:
     """Project a run's recorded frames into a trace + observation tree."""
     trace_id = str(trace_id)
@@ -148,6 +216,8 @@ def build_trace(
     has_plan = False
     first_text_at: int | None = None
     last_tool_end: int | None = None
+    error_detail: dict[str, Any] = {}
+    system_prompt = str(system_prompt_text or "")
     cursor = start_ms
 
     def add(observation: dict[str, Any]) -> None:
@@ -223,8 +293,14 @@ def build_trace(
                 tool["level"] = (
                     "ERROR" if str(event.get("status") or "") == "error" else "DEFAULT"
                 )
+                if event.get("statusMessage"):
+                    tool["statusMessage"] = _clip(event.get("statusMessage"), 2000)
                 if event.get("sources"):
                     tool["metadata"]["sources"] = _clip(event.get("sources"))
+                # This is a retriever call: keep its scores/timings structured.
+                retrieval = _extract_retrieval(event.get("data"))
+                if retrieval:
+                    tool["metadata"]["retrieval"] = _clip(retrieval)
             if tool.get("endTime") is not None:
                 last_tool_end = max(last_tool_end or 0, int(tool["endTime"]))
         elif kind == "skills":
@@ -307,6 +383,31 @@ def build_trace(
                 first_text_at = at
         elif kind == "run.error":
             error_message = str(event.get("message") or event.get("error") or "run failed")
+            error_meta = {
+                "kind": str(event.get("errorKind") or ""),
+                "detail": str(event.get("detail") or ""),
+                "stack": str(event.get("stack") or ""),
+            }
+            error_meta = {key: value for key, value in error_meta.items() if value}
+            error_detail = error_meta
+            if error_meta:
+                add(
+                    {
+                        "id": _observation_id(trace_id, "event", "error"),
+                        "parentObservationId": root_id,
+                        "type": "EVENT",
+                        "name": "error",
+                        "startTime": at,
+                        "endTime": at,
+                        "durationMs": 0,
+                        "level": "ERROR",
+                        "statusMessage": error_message,
+                        "input": None,
+                        "output": None,
+                        "usage": None,
+                        "metadata": error_meta,
+                    }
+                )
 
     # Finish any tool that never produced a result (errored/aborted runs).
     for tool in pending_tools.values():
@@ -344,6 +445,7 @@ def build_trace(
             "input": _clip(question),
             "output": _clip(answer),
             "usage": usage or None,
+            "costMicroUsd": _observation_cost(model, usage) if usage else 0,
             "metadata": {"provider": provider} if provider else {},
         }
     )
@@ -365,6 +467,7 @@ def build_trace(
             "input": None,
             "output": None,
             "usage": usage or None,
+            "costMicroUsd": _observation_cost(model, usage) if usage else 0,
             "metadata": {
                 "kind": "run",
                 "agentId": agent_id,
@@ -372,11 +475,25 @@ def build_trace(
                 "conversationId": conversation_id,
                 "provider": provider,
                 "tags": [str(tag) for tag in (tags or [])],
+                "systemPrompt": _clip(system_prompt) if system_prompt else None,
+                "systemPromptTokens": None,
+                **({"errorDetail": error_detail} if error_detail else {}),
             },
         },
     )
 
     normalized_status = _normalize_status(status)
+    type_counts: dict[str, int] = {}
+    error_count = 0
+    for observation in observations:
+        obs_type = str(observation.get("type") or "SPAN")
+        type_counts[obs_type] = type_counts.get(obs_type, 0) + 1
+        if observation.get("level") == "ERROR":
+            error_count += 1
+    stage_latency_ms = 0
+    for observation in observations:
+        if observation.get("id") != root_id:
+            stage_latency_ms += int(observation.get("durationMs") or 0)
     return {
         "id": trace_id,
         "traceId": trace_id,
@@ -401,6 +518,13 @@ def build_trace(
         "usage": usage,
         "costMicroUsd": _cost_micro_usd(model, usage),
         "observationCount": len(observations),
+        "summary": {
+            "observationCount": len(observations),
+            "errorCount": error_count,
+            "typeCounts": type_counts,
+            "totalStageLatencyMs": stage_latency_ms,
+            "hasSystemPrompt": bool(system_prompt),
+        },
         "createdAt": started_at,
         "observations": observations,
     }
@@ -425,3 +549,321 @@ def persist_trace(config: RuntimeConfig, user_id: str, trace: dict[str, Any]) ->
 
 def local_now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+
+# --- workflow (multi-agent) traces -------------------------------------------
+#
+# Workflow runs record a different frame shape than single-agent runs
+# (`node.started` / `node.stream` / `node.completed` / `node.handoff`), so they
+# need their own projection. Without this, workflow runs never reached the trace
+# store at all and were missing from the Traces page.
+
+
+def build_workflow_trace(
+    *,
+    trace_id: str,
+    run_id: str,
+    user_id: str,
+    workflow_id: str,
+    workflow_name: str,
+    model: str,
+    provider: str | None,
+    conversation_id: str | None,
+    mode: str,
+    question: str,
+    answer: str,
+    status: str,
+    started_at: str,
+    ended_at: str,
+    events: list[dict[str, Any]],
+    usage: dict[str, Any] | None,
+    nodes: list[dict[str, Any]] | None = None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Project a workflow run's node frames into a trace + observation tree.
+
+    Shape: ``run (SPAN)`` → one ``SPAN`` per agent node (its tool calls nested
+    underneath) → the synthesizer/answer ``GENERATION``.
+    """
+    trace_id = str(trace_id or run_id)
+    start_ms = _parse_ms(started_at)
+    end_ms = _parse_ms(ended_at)
+    latency_ms = (
+        max(0, end_ms - start_ms)
+        if start_ms is not None and end_ms is not None
+        else None
+    )
+
+    label_by_node: dict[str, str] = {}
+    for node in nodes or []:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or node.get("nodeId") or "")
+        if node_id:
+            label_by_node[node_id] = str(
+                node.get("name") or node.get("agentName") or node_id
+            )
+
+    observations: list[dict[str, Any]] = []
+    root_id = _observation_id(trace_id, "run", "root")
+    answer_id = _observation_id(trace_id, "gen", "answer")
+    node_spans: dict[str, dict[str, Any]] = {}
+    pending_tools: dict[str, dict[str, Any]] = {}
+    tool_order: list[str] = []
+    error_message: str | None = None
+    error_detail: dict[str, Any] = {}
+    cursor = start_ms
+
+    def add(observation: dict[str, Any]) -> None:
+        if len(observations) < MAX_OBSERVATIONS:
+            observations.append(observation)
+
+    def node_span(node_id: str) -> dict[str, Any]:
+        span = node_spans.get(node_id)
+        if span is None:
+            span = {
+                "id": _observation_id(trace_id, "node", node_id or "host"),
+                "parentObservationId": root_id,
+                "type": "SPAN",
+                "name": label_by_node.get(node_id) or node_id or "agent",
+                "startTime": None,
+                "endTime": None,
+                "durationMs": None,
+                "level": "DEFAULT",
+                "input": None,
+                "output": None,
+                "usage": None,
+                "metadata": {"kind": "node", "nodeId": node_id},
+            }
+            node_spans[node_id] = span
+            add(span)
+        return span
+
+    def apply_tool_frame(span: dict[str, Any], frame: dict[str, Any], at: int | None) -> None:
+        """Fold one agent tool frame into a TOOL observation under ``span``."""
+        tool_use_id = str(frame.get("toolUseId") or f"tool-{len(tool_order)}")
+        tool = pending_tools.get(tool_use_id)
+        if tool is None:
+            tool = {
+                "id": _observation_id(trace_id, "tool", tool_use_id),
+                "parentObservationId": span["id"],
+                "type": "TOOL",
+                "name": str(frame.get("name") or "tool"),
+                "startTime": at,
+                "endTime": None,
+                "durationMs": None,
+                "level": "DEFAULT",
+                "input": None,
+                "output": None,
+                "usage": None,
+                "metadata": {},
+            }
+            pending_tools[tool_use_id] = tool
+            tool_order.append(tool_use_id)
+        if frame.get("name"):
+            tool["name"] = str(frame["name"])
+        if frame.get("type") in ("tool.start", "tool.input") and frame.get("input") is not None:
+            tool["input"] = _clip(frame.get("input"))
+        if frame.get("type") == "tool.result":
+            tool["endTime"] = at
+            tool["output"] = _clip(frame.get("data"))
+            if at is not None and tool.get("startTime") is not None:
+                tool["durationMs"] = max(0, at - int(tool["startTime"]))
+            tool["level"] = (
+                "ERROR" if str(frame.get("status") or "") == "error" else "DEFAULT"
+            )
+            if frame.get("sources"):
+                tool["metadata"]["sources"] = _clip(frame.get("sources"))
+            retrieval = _extract_retrieval(frame.get("data"))
+            if retrieval:
+                tool["metadata"]["retrieval"] = _clip(retrieval)
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("type")
+        at = _event_at(event, cursor)
+        if at is not None:
+            cursor = at
+
+        if kind == "node.started":
+            span = node_span(str(event.get("nodeId") or ""))
+            span["name"] = str(event.get("agentName") or event.get("nodeName") or span["name"])
+            if span.get("startTime") is None:
+                span["startTime"] = at
+        elif kind == "node.completed":
+            span = node_span(str(event.get("nodeId") or ""))
+            span["endTime"] = at
+            if span.get("startTime") is not None and at is not None:
+                span["durationMs"] = max(0, at - int(span["startTime"]))
+            span["usage"] = event.get("usage") or None
+            if str(event.get("status") or "") == "error":
+                span["level"] = "ERROR"
+        elif kind == "node.stream":
+            node_id = str(event.get("nodeId") or "")
+            frame = event.get("event") if isinstance(event.get("event"), dict) else {}
+            ftype = frame.get("type")
+            if ftype in ("tool.start", "tool.input", "tool.stream", "tool.result"):
+                apply_tool_frame(node_span(node_id), frame, at)
+            elif ftype == "text":
+                span = node_span(node_id)
+                if not span.get("output"):
+                    span["output"] = _clip(frame.get("data"))
+        elif kind == "node.handoff":
+            add(
+                {
+                    "id": _observation_id(trace_id, "event", f"handoff-{len(observations)}"),
+                    "parentObservationId": root_id,
+                    "type": "EVENT",
+                    "name": "handoff",
+                    "startTime": at,
+                    "endTime": at,
+                    "durationMs": 0,
+                    "level": "DEFAULT",
+                    "input": [str(item) for item in event.get("from") or []],
+                    "output": [str(item) for item in event.get("to") or []],
+                    "usage": None,
+                    "metadata": {"kind": "handoff", "message": _clip(event.get("message"), 4000)},
+                }
+            )
+        elif kind == "question":
+            add(
+                {
+                    "id": _observation_id(trace_id, "event", "question"),
+                    "parentObservationId": root_id,
+                    "type": "EVENT",
+                    "name": "user_question",
+                    "startTime": at,
+                    "endTime": at,
+                    "durationMs": 0,
+                    "level": "DEFAULT",
+                    "input": _clip(event.get("question")),
+                    "output": _clip(event.get("answer")),
+                    "usage": None,
+                    "metadata": {"options": event.get("options") or []},
+                }
+            )
+        elif kind == "run.error":
+            error_message = str(event.get("message") or "workflow run failed")
+            for key in ("errorKind", "detail", "stack"):
+                if event.get(key):
+                    error_detail[key] = str(event.get(key))
+
+    # Close any node span that never reported completion.
+    for span in node_spans.values():
+        if span.get("startTime") is None:
+            span["startTime"] = start_ms
+        if span.get("endTime") is None:
+            span["endTime"] = end_ms
+            if span.get("startTime") is not None and end_ms is not None:
+                span["durationMs"] = max(0, end_ms - int(span["startTime"]))
+
+    # Any tool that never returned (errored/aborted run) is an errored span.
+    for tool in pending_tools.values():
+        if tool["endTime"] is None:
+            tool["endTime"] = end_ms
+            if tool["startTime"] is not None and end_ms is not None:
+                tool["durationMs"] = max(0, end_ms - int(tool["startTime"]))
+            tool["level"] = "ERROR"
+    for tool_use_id in tool_order:
+        add(pending_tools[tool_use_id])
+
+    usage = usage or {}
+    add(
+        {
+            "id": answer_id,
+            "parentObservationId": root_id,
+            "type": "GENERATION",
+            "name": "final answer",
+            "model": model or None,
+            "startTime": end_ms,
+            "endTime": end_ms,
+            "durationMs": 0,
+            "level": "ERROR" if error_message else "DEFAULT",
+            "statusMessage": error_message,
+            "input": _clip(question),
+            "output": _clip(answer),
+            "usage": usage or None,
+            "costMicroUsd": _observation_cost(model, usage) if usage else 0,
+            "metadata": {"provider": provider, "mode": mode},
+        }
+    )
+
+    observations.insert(
+        0,
+        {
+            "id": root_id,
+            "parentObservationId": None,
+            "type": "SPAN",
+            "name": workflow_name or workflow_id or "workflow",
+            "model": model or None,
+            "startTime": start_ms,
+            "endTime": end_ms,
+            "durationMs": latency_ms,
+            "level": "ERROR" if error_message else "DEFAULT",
+            "statusMessage": error_message,
+            "input": _clip(question),
+            "output": _clip(answer),
+            "usage": usage or None,
+            "costMicroUsd": _observation_cost(model, usage) if usage else 0,
+            "metadata": {
+                "kind": "run",
+                "workflowId": workflow_id,
+                "runId": run_id,
+                "conversationId": conversation_id,
+                "provider": provider,
+                "mode": mode,
+                "tags": [str(tag) for tag in (tags or [])],
+                **({"errorDetail": error_detail} if error_detail else {}),
+            },
+        },
+    )
+
+    type_counts: dict[str, int] = {}
+    error_count = 0
+    for observation in observations:
+        obs_type = str(observation.get("type") or "SPAN")
+        type_counts[obs_type] = type_counts.get(obs_type, 0) + 1
+        if observation.get("level") == "ERROR":
+            error_count += 1
+
+    return {
+        "id": trace_id,
+        "traceId": trace_id,
+        "name": f"workflow:{workflow_name or workflow_id or 'run'}",
+        "userId": user_id,
+        "sessionId": conversation_id,
+        "conversationId": conversation_id,
+        "runId": run_id,
+        "agentId": workflow_id,
+        "agentName": workflow_name,
+        "model": model,
+        "provider": provider,
+        "tags": [str(tag) for tag in (tags or [])],
+        "status": _normalize_status(status),
+        "level": "ERROR" if error_message else "DEFAULT",
+        "statusMessage": error_message,
+        "targetType": "workflow",
+        "mode": mode,
+        "startedAt": started_at,
+        "endedAt": ended_at,
+        "latencyMs": latency_ms,
+        "input": question,
+        "output": answer,
+        "usage": usage,
+        "costMicroUsd": _cost_micro_usd(model, usage),
+        "observationCount": len(observations),
+        "summary": {
+            "observationCount": len(observations),
+            "errorCount": error_count,
+            "typeCounts": type_counts,
+            "totalStageLatencyMs": sum(
+                int(o.get("durationMs") or 0)
+                for o in observations
+                if o.get("id") != root_id
+            ),
+            "hasSystemPrompt": False,
+        },
+        "createdAt": started_at,
+        "observations": observations,
+    }

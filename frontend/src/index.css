@@ -331,6 +331,86 @@ body {
   }
 }
 
+/* Avi's working state: three lines of blocks that fill the full width, one line at
+ * a time, then vanish **together** and start again.
+ *
+ * There is deliberately no placeholder track. An unlit block is invisible, so the
+ * shape is *built* by the animation rather than revealed inside a grey outline —
+ * the row keeps its height either way, so nothing moves when they appear.
+ *
+ * The order is driven from `ThinkingSkeleton`, not by `animation-delay`: a CSS
+ * delay staggers the *off* as well as the *on*, so the blocks drained one by one
+ * and the sweep never read as filling. Only the appear/disappear is CSS.
+ *
+ * The tints are theme tokens, so each theme shows the palette it was designed
+ * around — `--app-accent` is a deep #ea580c on light and #ff6d5a on dark — rather
+ * than one translucent tint that suits only one of them. */
+.avi-pill {
+  opacity: 0;
+  transform: scaleX(0.75);
+  transform-origin: left center;
+  transition:
+    opacity 170ms ease-out,
+    transform 170ms ease-out;
+}
+
+.avi-pill[data-lit='true'] {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.avi-pill[data-tint='0'] {
+  background: var(--app-accent);
+}
+
+.avi-pill[data-tint='1'] {
+  background: var(--app-info);
+}
+
+.avi-pill[data-tint='2'] {
+  background: var(--app-teal);
+}
+
+.avi-pill[data-tint='3'] {
+  background: var(--app-violet);
+}
+
+.avi-pill[data-tint='4'] {
+  background: var(--app-rose);
+}
+
+/* The step log above it: the current step fades in, and the step it replaces
+ * fades out and collapses, so the widget says what Avi is doing now without
+ * growing a list. No `forwards` fill, so the exit transition can take over. */
+@keyframes avi-event-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.avi-event {
+  animation: avi-event-in 0.28s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avi-pill {
+    transition: none;
+  }
+
+  .avi-pill[data-lit='true'] {
+    transform: none;
+  }
+
+  .avi-event {
+    animation: none;
+  }
+}
+
 .scrollbar-thin {
   scrollbar-width: thin;
   scrollbar-color: var(--app-border-strong) transparent;

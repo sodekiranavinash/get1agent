@@ -313,11 +313,15 @@ def _put_score(payload: dict[str, Any]) -> dict[str, Any]:
     name = str(payload.get("name") or "")
     if not trace_id or not name:
         raise StoreError("A score needs traceId and name")
+    # `userId` makes the shared LAB#SCORES partition filterable per user; items
+    # written before this field existed are skipped by `_scores_for_user`.
+    user_id = str(payload.get("userId") or "")
     _put(
         _SCORES,
         f"{_safe(trace_id)}#{_safe(name)}",
         traceId=trace_id,
         name=name,
+        userId=user_id,
         value=payload.get("value"),
         stringValue=payload.get("stringValue"),
         comment=payload.get("comment"),
@@ -379,6 +383,14 @@ def _trace_summary(item: dict[str, Any]) -> dict[str, Any]:
         "usage": item.get("usage") or {},
         "costMicroUsd": int(item.get("costMicroUsd") or 0),
         "observationCount": int(item.get("observationCount") or 0),
+        # Rolled up at write time so the list can flag failed runs and show the
+        # stage mix without an S3 read.
+        "errorCount": int(item.get("errorCount") or 0),
+        "stageCounts": item.get("stageCounts") or {},
+        "endedAt": item.get("endedAt"),
+        "runId": item.get("runId"),
+        "provider": item.get("provider"),
+        "statusMessage": item.get("statusMessage"),
     }
 
 
@@ -494,9 +506,16 @@ def trace_detail(user_id: str, trace_id: str) -> dict[str, Any]:
 # --- metrics (from usage + conversations + scores) ----------------------------
 
 
-def _metrics(user_id: str, days: int) -> dict[str, Any]:
-    from core import usage as usage_mod
+def _metrics(user_id: str, days: int, scores: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Aggregated usage for one user over ``days``.
+
+    Runs and messages come from the user's conversation metadata (one GSI2
+    query); spend and tokens come from the user's quota item. Scores are read
+    from the shared ``LAB#SCORES`` partition and filtered to this user, so the
+    caller may pass them in to avoid re-reading for a second view.
+    """
     from data.repositories import conversations as conv_repo
+    from data.repositories import quotas as quotas_repo
 
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=days)
@@ -510,47 +529,53 @@ def _metrics(user_id: str, days: int) -> dict[str, Any]:
         if str(c.get("updatedAt") or c.get("createdAt") or "") >= start.isoformat()
     ]
 
-    # Daily counts.
-    by_day: dict[str, int] = {}
+    # Daily series from real conversation activity: runs and messages per day.
+    by_day: dict[str, dict[str, int]] = {}
+    total_messages = 0
+    total_runs = 0
     for conversation in recent:
-        stamp = str(conversation.get("updatedAt") or conversation.get("createdAt") or "")[:10]
-        by_day[stamp] = by_day.get(stamp, 0) + 1
-    series = sorted(
-        (
-            {"time_dimension": day, "count_count": count, "p95_latency": 0.0, "sum_totalCost": 0.0}
-            for day, count in by_day.items()
-        ),
-        key=lambda row: row["time_dimension"],
-    )
-
-    try:
-        budget = usage_mod.get_budget(user_id)  # type: ignore[attr-defined]
-    except Exception:  # noqa: BLE001
-        budget = {}
-    cost = round(float(budget.get("spentMicroUsd") or 0) / 1_000_000, 6)
-    tokens = int(budget.get("platformTokensIn") or 0) + int(budget.get("platformTokensOut") or 0)
-
-    # Scores: average per name.
-    score_rows: dict[str, list[float]] = {}
-    for item in _query(_SCORES):
-        if item.get("traceId") is None:
+        stamp = str(
+            conversation.get("updatedAt") or conversation.get("createdAt") or ""
+        )[:10]
+        if not stamp:
             continue
-        value = item.get("value")
-        if isinstance(value, (int, float)):
-            score_rows.setdefault(str(item.get("name") or ""), []).append(float(value))
-    scores = [
+        bucket = by_day.setdefault(stamp, {"runs": 0, "messages": 0})
+        bucket["runs"] += 1
+        bucket["messages"] += int(conversation.get("messageCount") or 0)
+        total_runs += 1
+        total_messages += int(conversation.get("messageCount") or 0)
+    series = [
         {
-            "name": name,
-            "avg_value": round(sum(values) / len(values), 4),
-            "count_count": len(values),
+            "time_dimension": day,
+            "count_count": bucket["runs"],
+            "sum_totalCost": 0.0,
+            "p95_latency": 0.0,
         }
-        for name, values in score_rows.items()
-        if values
+        for day, bucket in sorted(by_day.items())
     ]
+
+    # Spend / tokens straight off the quota item (no AttributeError fallback).
+    cost = 0.0
+    tokens = 0
+    try:
+        budget = quotas_repo.get_budget(user_id)
+        cost = round(budget.spent_micro_usd / 1_000_000, 6)
+    except Exception:  # noqa: BLE001 - metrics must never break the page
+        cost = 0.0
+    try:
+        quota_item = quotas_repo.get_quota(user_id)
+        tokens = int(quota_item.platform_tokens_in) + int(quota_item.platform_tokens_out)
+    except Exception:  # noqa: BLE001
+        tokens = 0
+
+    if scores is None:
+        scores = _scores_for_user(user_id)
 
     return {
         "totals": {
             "count_count": len(recent),
+            "message_count": total_messages,
+            "run_count": total_runs,
             "avg_latency": 0.0,
             "p95_latency": 0.0,
             "sum_totalCost": cost,
@@ -560,6 +585,39 @@ def _metrics(user_id: str, days: int) -> dict[str, Any]:
         "scores": scores,
         "models": [],
     }
+
+
+def _scores_for_user(user_id: str) -> list[dict[str, Any]]:
+    """Average each score name over this user's traces.
+
+    The ``LAB#SCORES`` partition is shared, so items written before ``userId``
+    was recorded are skipped rather than attributed to the wrong user.
+    """
+    score_rows: dict[str, list[float]] = {}
+    try:
+        items = _query(_SCORES)
+    except Exception:  # noqa: BLE001
+        return []
+    for item in items:
+        if item.get("traceId") is None:
+            continue
+        if str(item.get("userId") or "") != user_id:
+            continue
+        value = item.get("value")
+        if isinstance(value, (int, float)):
+            score_rows.setdefault(str(item.get("name") or ""), []).append(float(value))
+    return sorted(
+        (
+            {
+                "name": name,
+                "avg_value": round(sum(values) / len(values), 4),
+                "count_count": len(values),
+            }
+            for name, values in score_rows.items()
+            if values
+        ),
+        key=lambda row: row["name"],
+    )
 
 
 # --- lab_request: the REST subset the /v1/lab handlers call -------------------
@@ -709,6 +767,9 @@ def lab_request(method: str, path: str, payload: dict[str, Any] | None = None) -
 
     # metrics
     if clean == "/v2/metrics" and method == "GET":
-        return _metrics(_user_from_metrics_query(path), int(_query_param(path, "days") or 7))
+        # `userId` is passed as a plain query param; older callers encoded it in
+        # the Langfuse-style `query=` JSON blob, so fall back to that.
+        user_id = _query_param(path, "userId") or _user_from_metrics_query(path)
+        return _metrics(user_id, int(_query_param(path, "days") or 7))
 
     raise StoreError(f"Unsupported lab path: {method} {path}")

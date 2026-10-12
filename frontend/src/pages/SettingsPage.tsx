@@ -343,7 +343,7 @@ export function SettingsPage() {
             <div className="block">
               <span className="mb-1.5 block text-xs font-medium text-muted">Email</span>
               <div className="flex h-9 items-center justify-between gap-3 rounded-md border border-border bg-raised px-3">
-                <span className="truncate text-[13px] text-foreground">{form.email}</span>
+                <span className="min-w-0 truncate text-[13px] text-foreground">{form.email}</span>
                 <span className="shrink-0 text-[10px] font-medium tracking-wide text-subtle uppercase">
                   SSO
                 </span>

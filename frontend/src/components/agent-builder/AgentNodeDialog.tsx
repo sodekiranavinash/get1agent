@@ -66,7 +66,7 @@ import {
   MiniSelect,
 } from './LineField'
 import { MarkdownField } from './MarkdownField'
-import { useVaultProviderSecrets } from '../../lib/vault'
+import { useVaultProviderSecrets , vaultModelLabel } from '../../lib/vault'
 import { useGuardrails } from '../../lib/guardrails'
 
 function FieldGroup({ title, children }: { title?: string; children: ReactNode }) {
@@ -756,7 +756,12 @@ export function AgentNodeDialog({
       : activeProvider?.defaultModel
         ? [activeProvider.defaultModel]
         : []
-  ).map((value) => ({ value, label: value }))
+  ).map((value) => ({
+    value,
+    // Show the provider's display name (e.g. "DeepSeek V4.1 Flash") while
+    // still sending the real model id.
+    label: vaultModelLabel(value, activeProvider?.modelLabels),
+  }))
   const patch = (next: Partial<AgentNodeData>) => onUpdateNode(node.id, next)
   const kindMeta = AGENT_KIND_META[data.kind] ?? AGENT_KIND_META.agent
   const KindIcon = kindMeta.icon

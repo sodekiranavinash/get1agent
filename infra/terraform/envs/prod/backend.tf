@@ -21,8 +21,20 @@ locals {
   ingestion_watchdog_zip   = abspath("${path.module}/../../../../backend/services/ingestion/ingestion-watchdog/dist/function.zip")
   agent_run_zip            = abspath("${path.module}/../../../../backend/services/agent-run/dist/function.zip")
   agent_run_microvm_zip    = abspath("${path.module}/../../../../backend/services/agent-run/dist/microvm.zip")
-  scheduler_zip            = abspath("${path.module}/../../../../backend/services/scheduler/dist/function.zip")
-  browser_zip              = abspath("${path.module}/../../../../backend/services/mcp/browser/dist/function.zip")
+  # Avi (the in-product assistant): the stateless guest Lambda and the MicroVM
+  # artifact (Dockerfile + Node proxy) that Lambda builds into an image.
+  avi_guest_zip   = abspath("${path.module}/../../../../backend/avi/dist/function.zip")
+  avi_session_zip = abspath("${path.module}/../../../../backend/services/avi/control-plane/dist/function.zip")
+  avi_microvm_zip = abspath("${path.module}/../../../../backend/services/avi/microvm/dist/microvm.zip")
+
+  # The browser origins Avi's WebSocket and guest Function URL accept. Kept in
+  # step with the API Gateway CORS list in api_gateway.tf.
+  avi_allowed_origins = [
+    "https://www.get1agent.com",
+    "http://localhost:5173",
+  ]
+  scheduler_zip = abspath("${path.module}/../../../../backend/services/scheduler/dist/function.zip")
+  browser_zip   = abspath("${path.module}/../../../../backend/services/mcp/browser/dist/function.zip")
 
   # Amazon Titan embedding models (in-region) the ingestion + retrieval Lambdas
   # may invoke. Image embeddings are produced only when EMBED_IMAGES=true.
@@ -1065,6 +1077,9 @@ module "admin_console" {
   timeout     = 300
 
   dynamodb_table_arns = [module.database[0].table_arn]
+  # Admin → Avi reads a conversation transcript and a trace tree from S3 (the
+  # index items and config live in DynamoDB).
+  s3_bucket_arns = [module.knowledge_storage[0].bucket_arn]
 
   # Platform status: AgentCore Identity (tokens), Browser and Registry.
   bedrock_agentcore_arns = [
@@ -1092,6 +1107,9 @@ module "admin_console" {
     MCP_GATEWAY_URL = length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_url : ""
     MCP_TRANSPORT   = "gateway"
     BEDROCK_REGION  = var.aws_region
+    # Avi transcripts and trace trees (`/v1/admin/avi/{traces,conversations}/…`).
+    S3_BUCKET = module.knowledge_storage[0].bucket_name
+    S3_REGION = var.aws_region
     # Platform status routes (/v1/admin/platform/*): Identity, Registry,
     # Browser, Optimization and the Bedrock cost/latency levers.
     AGENT_WORKLOAD_IDENTITY_ARN     = local.workload_identity_arn
@@ -1116,6 +1134,7 @@ module "admin_console" {
 
   depends_on = [
     module.database,
+    module.knowledge_storage,
     module.knowledge_mcp,
     module.code_interpreter,
     module.http_fetch,
@@ -1613,6 +1632,116 @@ module "scheduler" {
   }
 
   depends_on = [module.database]
+}
+
+# --- Avi (the in-product assistant) ------------------------------------------
+#
+# Three pieces, deliberately separate from the agent runtime:
+#
+#   * `avi_guest`   — the stateless guest ingress. A Function URL in
+#                     RESPONSE_STREAM mode, because API Gateway HTTP APIs cannot
+#                     stream and cap an integration at 30s. It has no MicroVM and
+#                     no session, and it stores nothing.
+#   * `avi_session` — the control plane. Resolves the verified Auth0 sub to a
+#                     userId, signs the session token the agent verifies, and
+#                     launches the MicroVM. It never sees a question.
+#   * `module.avi_runtime` — the MicroVM image that runs the agent container.
+#
+# Avi is off until its agent image exists, because the MicroVM build pulls it.
+
+module "avi_guest" {
+  count  = var.enable_backend_lambdas && var.enable_avi ? 1 : 0
+  source = "../../modules/lambda_function"
+
+  name             = "get1agent-prod-avi-guest"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.avi_guest_zip
+  source_code_hash = try(filebase64sha256(local.avi_guest_zip), "")
+  handler          = "handler.lambda_handler"
+  runtime          = "python3.13"
+  layer_arns       = []
+
+  # Streaming needs headroom: the classifier plus a streamed answer, cold.
+  memory_size = 1024
+  timeout     = 120
+
+  # A guest answer is never persisted, so this function reaches the corpus (S3,
+  # vectors) and the models — not the user data it would have no right to see.
+  dynamodb_table_arns   = [module.database[0].table_arn]
+  s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
+  s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
+  bedrock_model_arns    = local.bedrock_llm_model_arns
+
+  create_function_url       = true
+  function_url_invoke_mode  = "RESPONSE_STREAM"
+  function_url_auth_type    = "NONE"
+  function_url_cors_origins = local.avi_allowed_origins
+
+  environment = {
+    DYNAMODB_TABLE    = module.database[0].table_name
+    S3_BUCKET         = module.knowledge_storage[0].bucket_name
+    BEDROCK_REGION    = "ap-south-1"
+    AVI_SCOPE         = "platform"
+    AVI_KB_ID         = "kb_platform_docs_0001"
+    AVI_GUEST_SALT    = var.avi_guest_salt
+    AVI_GUEST_ENABLED = "true"
+    VECTOR_STORE      = "s3vectors"
+    EMBED_MODE        = "bedrock"
+    CACHE_BACKEND     = "dynamodb"
+  }
+
+  depends_on = [module.database, module.knowledge_storage, module.vectors]
+}
+
+module "avi_session" {
+  count  = var.enable_backend_lambdas && var.enable_avi && var.avi_microvm_zip != "" ? 1 : 0
+  source = "../../modules/lambda_function"
+
+  name             = "get1agent-prod-avi-session"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.avi_session_zip
+  source_code_hash = try(filebase64sha256(local.avi_session_zip), "")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  layer_arns       = []
+
+  memory_size = 256
+  timeout     = 30
+
+  dynamodb_table_arns = [module.database[0].table_arn]
+
+  environment = {
+    DYNAMODB_TABLE                = module.database[0].table_name
+    AVI_MICROVM_IMAGE_ARN         = try(module.avi_runtime[0].microvm_image_arn, "")
+    AVI_SESSION_SECRET            = var.avi_session_secret
+    AVI_GUEST_SALT                = var.avi_guest_salt
+    AVI_GUEST_BADGES_PER_HOUR     = "30"
+    AVI_MICROVM_TOKEN_TTL_MINUTES = "25"
+  }
+
+  depends_on = [module.database, module.avi_runtime]
+}
+
+module "avi_runtime" {
+  count  = var.enable_backend_lambdas && var.enable_avi && var.avi_microvm_zip != "" ? 1 : 0
+  source = "../../modules/avi_runtime"
+
+  name = "get1agent-prod"
+
+  agent_image_uri = var.avi_agent_image_uri
+  microvm_zip     = local.avi_microvm_zip
+  artifact_bucket = module.knowledge_storage[0].bucket_name
+  # Content-addressed so a rebuilt artifact produces a new image version in place.
+  microvm_artifact_key = "microvms/avi-${substr(filesha256(local.avi_microvm_zip), 0, 16)}.zip"
+
+  table_arn  = module.database[0].table_arn
+  bucket_arn = module.knowledge_storage[0].bucket_arn
+
+  scope_user_id   = "platform"
+  kb_id           = "kb_platform_docs_0001"
+  session_secret  = var.avi_session_secret
+  guest_salt      = var.avi_guest_salt
+  allowed_origins = local.avi_allowed_origins
 }
 
 resource "aws_cloudwatch_event_rule" "scheduler" {

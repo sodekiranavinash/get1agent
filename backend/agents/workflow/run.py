@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+import traceback
 import uuid
 from typing import Any, AsyncIterator
 
@@ -23,6 +24,7 @@ from agentflow.hitl import (
 )
 from agentflow.identity import resolve_user_id
 from agentflow.observability import flush, run_trace, trace_identity
+from agentflow.traces import build_workflow_trace, persist_trace
 from data.client import now_iso
 from data.repositories import quotas
 from data.repositories import workflows as workflows_repo
@@ -36,6 +38,17 @@ from workflow.build import (
 )
 from workflow.events import normalize
 from workflow.store import load_workflow
+
+
+def _stamp(frame: dict[str, Any]) -> dict[str, Any]:
+    """Stamp a recorded frame with epoch ms for the trace waterfall.
+
+    ``_at`` is internal only: it is stripped from the frames the client sees,
+    exactly as ``agentflow.run._record`` does for single-agent runs.
+    """
+    if not isinstance(frame, dict) or "_at" in frame:
+        return frame
+    return {**frame, "_at": int(time.time() * 1000)}
 
 
 def _conversation_id(payload: dict[str, Any], context: Any) -> str:
@@ -140,6 +153,7 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
     text_by_node: dict[str, str] = {}
     order: list[str] = []
     node_meta: dict[str, dict[str, Any]] = {}
+    resolved_nodes: list[dict[str, Any]] = []
     result_usage: dict[str, Any] = {}
     spend_model = ""
     sinks: list[str] = []
@@ -256,6 +270,7 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
                 "agentName": node["agentName"],
                 "model": node["model"],
             }
+        resolved_nodes = [node for node in nodes if isinstance(node, dict)]
         sinks = _sink_nodes(workflow_config)
         spend_model = next(
             (str(node["model"]) for node in nodes if node.get("role") == "host"), ""
@@ -282,6 +297,13 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
             },
         )
         observation = trace.__enter__()
+        # Resolve the trace id now so the persisted tree, the conversation turn
+        # and the chat's trace link all reference the same id even if the run
+        # errors before reaching the end.
+        try:
+            trace_id, trace_url = trace_identity(observation)
+        except Exception:  # noqa: BLE001 - tracing must never break a run
+            pass
 
         # Recover a workflow left paused at a host question when a new message
         # arrives instead of an answer.
@@ -302,7 +324,7 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
                         seen_questions.add(question_id)
                     awaiting_input = True
                     status = "awaiting_input"
-                    recorded.append(frame)
+                    recorded.append(_stamp(frame))
                     yield frame
                     continue
                 if ftype in ("node.started", "node.completed"):
@@ -325,7 +347,7 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
                     node_id = str(frame.get("nodeId") or "")
                     if node_id not in order:
                         order.append(node_id)
-                recorded.append(frame)
+                recorded.append(_stamp(frame))
                 yield frame
 
             if isinstance(raw, dict) and raw.get("type") == "multiagent_result":
@@ -347,7 +369,7 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
                     frame = {"type": "question", **question}
                     awaiting_input = True
                     status = "awaiting_input"
-                    recorded.append(frame)
+                    recorded.append(_stamp(frame))
                     yield frame
 
         answer = _final_answer(mode, answer_node_id, sinks, text_by_node, order)
@@ -358,7 +380,7 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
                 pass
         if trace_id or trace_url:
             trace_event = {"type": "trace", "traceId": trace_id, "traceUrl": trace_url}
-            recorded.append(trace_event)
+            recorded.append(_stamp(trace_event))
             yield trace_event
 
         # A paused run has no final answer yet; the resumed run completes it.
@@ -368,7 +390,7 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
                 "answer": answer,
                 "usage": result_usage,
             }
-            recorded.append(completed)
+            recorded.append(_stamp(completed))
             yield completed
 
         if observation is not None:
@@ -376,8 +398,16 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
 
     except Exception as exc:  # noqa: BLE001 - surface any failure to the client
         status = "error"
-        failure = {"type": "run.error", "message": str(exc)}
-        recorded.append(failure)
+        failure = {
+            "type": "run.error",
+            "message": str(exc),
+            "errorKind": type(exc).__name__,
+            "detail": repr(exc),
+            "stack": "".join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )[:8000],
+        }
+        recorded.append(_stamp(failure))
         if observation is not None:
             try:
                 observation.update(level="ERROR", status_message=str(exc))
@@ -395,6 +425,39 @@ async def run_workflow_stream(payload: Any, context: Any) -> AsyncIterator[dict[
                 trace.__exit__(None, None, None)
             except Exception:  # noqa: BLE001
                 pass
+        # Multi-agent runs used to reach no trace store at all, so workflows
+        # never appeared on the Traces page. Persist the same tree shape the
+        # single-agent runtime writes.
+        try:
+            if config is not None and user_id and workflow_id:
+                persist_trace(
+                    config,
+                    user_id,
+                    build_workflow_trace(
+                        trace_id=trace_id or run_id,
+                        run_id=run_id,
+                        user_id=user_id,
+                        workflow_id=workflow_id,
+                        workflow_name=workflow_name,
+                        model=spend_model,
+                        provider=None,
+                        conversation_id=conversation_id,
+                        mode=mode,
+                        question=original_input,
+                        answer=_final_answer(
+                            mode, answer_node_id, sinks, text_by_node, order
+                        ),
+                        status=status,
+                        started_at=started_at,
+                        ended_at=now_iso(),
+                        events=recorded,
+                        usage=result_usage,
+                        nodes=resolved_nodes,
+                        tags=["workflow", mode],
+                    ),
+                )
+        except Exception:  # noqa: BLE001 - tracing never changes the outcome
+            pass
         try:
             if (
                 config is not None

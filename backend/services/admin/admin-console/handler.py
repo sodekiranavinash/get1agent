@@ -354,10 +354,9 @@ def _user_view(profile: dict[str, Any], budget: quotas.Budget) -> dict[str, Any]
         "isAdmin": bool(profile.get("isAdmin")),
         "budgetCredits": round(core_usage.usd_to_credits(budget.budget_micro_usd), 2),
         "spentCredits": round(core_usage.usd_to_credits(budget.spent_micro_usd), 2),
-        "remainingCredits": None
-        if budget.unlimited
-        else round(core_usage.usd_to_credits(budget.remaining_micro_usd), 2),
-        "unlimited": budget.unlimited,
+        "remainingCredits": round(
+            core_usage.usd_to_credits(budget.remaining_micro_usd), 2
+        ),
     }
 
 
@@ -401,7 +400,7 @@ def _handle_list_users(event: dict[str, Any]) -> dict[str, Any]:
     budgets = quotas.get_budgets([str(item.get("userId") or "") for item in items])
     users = [
         _user_view(item, budgets.get(str(item.get("userId") or "")) or quotas.Budget(
-            core_usage.default_budget_micro_usd(), 0, False
+            core_usage.default_budget_micro_usd(), 0
         ))
         for item in items
     ]
@@ -427,6 +426,12 @@ def _user_id_from_path(path: str) -> str | None:
 
 
 def _handle_set_credits(event: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    """Grant credits.
+
+    ``mode="add"`` (the default) tops the existing grant up — that is the
+    "user hit the limit, give them more" action. ``mode="set"`` replaces the
+    grant outright, and may never drop it below what the user has already spent.
+    """
     user_id = _user_id_from_path(_path(event))
     if not user_id:
         return _json(400, {"error": "userId is required"})
@@ -437,19 +442,97 @@ def _handle_set_credits(event: dict[str, Any], body: dict[str, Any]) -> dict[str
         return _json(400, {"error": "credits must be a number"})
     if credits < 0:
         return _json(400, {"error": "credits must be zero or more"})
-    quotas.set_budget_credits(user_id, credits)
-    return _json(200, {"ok": True, **_user_view({"userId": user_id}, quotas.get_budget(user_id))})
+    mode = str(body.get("mode") or "add").strip().lower()
+    if mode not in ("add", "set"):
+        return _json(400, {"error": 'mode must be "add" or "set"'})
+
+    if mode == "add":
+        if credits <= 0:
+            return _json(400, {"error": "credits must be greater than zero to add"})
+        quotas.add_budget_credits(user_id, credits)
+    else:
+        budget = quotas.get_budget(user_id)
+        if core_usage.credits_to_micro_usd(credits) < budget.spent_micro_usd:
+            return _json(
+                400,
+                {
+                    "error": "The new limit is below what this user has already "
+                    "spent. Add credits instead, or reset their spend first."
+                },
+            )
+        quotas.set_budget_credits(user_id, credits)
+    budget = quotas.get_budget(user_id)
+    return _json(200, {"ok": True, **_user_view({"userId": user_id}, budget)})
 
 
-def _handle_set_unlimited(event: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+def _handle_user_limits(event: dict[str, Any], body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Read or update one user's resource caps.
+
+    This is the admin console's control surface for a user who is abusing the
+    platform: tighten their knowledge-base / file / storage limits (or clear the
+    override so they fall back to the platform default). The same attributes are
+    what `quotas.get_quota` enforces, so the change takes effect immediately.
+    """
     user_id = _user_id_from_path(_path(event))
     if not user_id:
         return _json(400, {"error": "userId is required"})
-    unlimited = body.get("unlimited")
-    if not isinstance(unlimited, bool):
-        return _json(400, {"error": "unlimited must be a boolean"})
-    quotas.set_unlimited(user_id, unlimited)
-    return _json(200, {"ok": True, **_user_view({"userId": user_id}, quotas.get_budget(user_id))})
+    if body is None:
+        return _json(200, {"userId": user_id, **_user_limits(user_id)})
+
+    def _optional_int(key: str, minimum: int = 0, maximum: int | None = None):
+        if key not in body:
+            return None, False
+        raw = body.get(key)
+        if raw in (None, ""):
+            return None, True
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} must be a number")
+        if value < minimum:
+            raise ValueError(f"{key} must be at least {minimum}")
+        if maximum is not None and value > maximum:
+            raise ValueError(f"{key} must be at most {maximum}")
+        return value, True
+
+    try:
+        kb, _ = _optional_int("maxKnowledgeBases", 1, 1000)
+        files_per_kb, _ = _optional_int("maxFilesPerKb", 1, 10000)
+        files_total, _ = _optional_int("maxFilesPerUser", 1, 100000)
+        file_bytes, _ = _optional_int("maxFileBytes", 1024, 5 * 1024 * 1024 * 1024)
+        storage_bytes, _ = _optional_int(
+            "maxStorageBytes", 1024, 1024 * 1024 * 1024 * 1024
+        )
+    except ValueError as exc:
+        return _json(400, {"error": str(exc)})
+
+    if not any(
+        key in body
+        for key in (
+            "maxKnowledgeBases",
+            "maxFilesPerKb",
+            "maxFilesPerUser",
+            "maxFileBytes",
+            "maxStorageBytes",
+        )
+    ):
+        return _json(400, {"error": "No limits provided"})
+
+    quotas.set_resource_limits(
+        user_id,
+        max_knowledge_bases=kb,
+        max_files_per_kb=files_per_kb,
+        max_files_per_user=files_total,
+        max_file_bytes=file_bytes,
+        max_storage_bytes=storage_bytes,
+    )
+    return _json(200, {"ok": True, "userId": user_id, **_user_limits(user_id)})
+
+
+def _user_limits(user_id: str) -> dict[str, Any]:
+    limits = quotas.get_effective_limits(user_id)
+    budget = quotas.get_budget(user_id)
+    return {"limits": limits, "budget": _user_view({"userId": user_id}, budget)}
 
 
 def _handle_reset_credits(event: dict[str, Any]) -> dict[str, Any]:
@@ -903,14 +986,26 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
             return inbox
         if segments[:3] == ["v1", "admin", "platform"]:
             return _route_platform(event, claims, method, segments, _body(event))
+        # Avi (the in-product assistant): config, and the owner-scoped reads the
+        # admin page needs. Its routes live in their own module so Avi's surface
+        # stays separate from the platform's.
+        if segments[:3] == ["v1", "admin", "avi"]:
+            from src import avi as avi_admin
+
+            return avi_admin.route(
+                claims, method, segments, _body(event), _query(event)
+            )
         if method == "GET" and path.endswith("/admin/users"):
             return _handle_list_users(event)
         if method == "POST" and path.endswith("/credits"):
             return _handle_set_credits(event, _body(event))
         if method == "POST" and path.endswith("/reset"):
             return _handle_reset_credits(event)
-        if method == "POST" and path.endswith("/unlimited"):
-            return _handle_set_unlimited(event, _body(event))
+        if path.endswith("/limits"):
+            if method == "GET":
+                return _handle_user_limits(event)
+            if method == "POST":
+                return _handle_user_limits(event, _body(event))
     except Exception as exc:  # noqa: BLE001
         print(f"admin-console admin error: {exc!r}", file=sys.stderr)
         traceback.print_exc()

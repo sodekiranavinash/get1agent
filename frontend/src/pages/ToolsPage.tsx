@@ -194,7 +194,7 @@ function SubHeading({ title, hint }: { title: string; hint?: string }) {
       <p className="text-[11px] font-semibold tracking-wide text-subtle uppercase">
         {title}
       </p>
-      {hint ? <p className="truncate text-[11px] text-subtle">{hint}</p> : null}
+      {hint ? <p className="min-w-0 truncate text-[11px] text-subtle">{hint}</p> : null}
     </div>
   )
 }
@@ -426,7 +426,7 @@ function ConnectionCard({
                 />
               ) : null}
               <span
-                className="truncate"
+                className="min-w-0 truncate"
                 title={
                   connection.accountName
                     ? `${connection.accountName} (@${connection.accountLogin})`

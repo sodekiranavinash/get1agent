@@ -21,3 +21,8 @@ output "role_name" {
 output "log_group_name" {
   value = aws_cloudwatch_log_group.lambda.name
 }
+
+output "function_url" {
+  value       = try(aws_lambda_function_url.this[0].function_url, "")
+  description = "Public Function URL (empty unless create_function_url is set)"
+}

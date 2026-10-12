@@ -86,6 +86,33 @@ Resources, Marketplace, Labs, Manage, Help.
   share** page (`/trace/:token`) and the public **Architecture** page
   (`/architecture`).
 
+## Avi (the in-product assistant)
+
+Avi is the assistant behind the launcher in the **bottom-right of every page**. It
+is a **dialog, not a page** — it opens over whatever the user is looking at and
+never navigates them away.
+
+- Components: `frontend/src/components/avi/` — `AviLauncher` (the button),
+  `AviDialog` (lazy-loaded, so a visitor who never opens Avi never downloads it),
+  `AviMessage`, and `useAvi` (transcript + streaming state).
+- Client: `frontend/src/lib/avi.ts` — the **only** file that knows whether the
+  caller is a guest or signed in. Both present a signed token to the same MicroVM
+  proxy; local dev streams from `VITE_AVI_URL` instead
+  (`VITE_AVI_MICROVM=false`).
+- Answers render through the **same** `ChatAnswer` and `lib/runState.ts` the chat
+  screen uses, because Avi emits the same SSE frames plus one `avi.intent` frame.
+  Nothing here is an Avi-specific renderer.
+- Mounted in **four shells**: `layouts/MainLayout.tsx` (every signed-in page),
+  `layouts/PublicLayout.tsx`, `pages/LoginPage.tsx` (the landing page) and
+  `pages/ArchitecturePage.tsx`. `AdaptiveLayout` swaps between the two layouts, so
+  no page can be missed; `/trace/:token` is deliberately excluded.
+- Starter questions are **generated** into `content/aviStarters.ts` from
+  `backend/avi/avi/examples.py`, so the nudge chips and the starters cannot drift.
+- Admin controls: `admin/pages/AdminAviPage.tsx` + `admin/lib/adminAvi.ts`, at
+  `/admin/avi`.
+- Architecture: `docs/design/avi-architecture.md`; diagrams at
+  `/architecture?tab=avi` (its own tab).
+
 ## Navigation labels
 
 Dashboard · Chat · Storage · Agent builder · Workflow builder · Schedules ·

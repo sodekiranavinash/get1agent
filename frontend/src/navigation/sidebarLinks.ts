@@ -2,21 +2,17 @@ import type { LucideIcon } from 'lucide-react'
 import {
   BarChart3,
   BookOpen,
-  BookText,
   Bot,
   Brain,
   CalendarClock,
   ClipboardCheck,
-  CreditCard,
   FileStack,
   FlaskConical,
   Gauge,
   GitBranch,
   HardDrive,
-  KeyRound,
   ShieldCheck,
   LayoutDashboard,
-  LifeBuoy,
   MessageSquare,
   Plug,
   Sparkles,
@@ -50,8 +46,6 @@ export const sidebarSections: Record<string, string> = {
   resources: 'Resources',
   marketplace: 'Marketplace',
   labs: 'Labs',
-  manage: 'Manage',
-  help: 'Help',
 }
 
 export const sidebarLinks: SidebarLink[] = [
@@ -144,23 +138,6 @@ export const sidebarLinks: SidebarLink[] = [
     icon: GitBranch,
     section: 'marketplace',
   },
-
-  { to: '/vault', label: 'Vault', icon: KeyRound, section: 'manage' },
-  { to: '/usage', label: 'Usage', icon: CreditCard, section: 'manage' },
-
-  {
-    to: '/docs',
-    label: 'Docs',
-    tooltip: 'Documentation',
-    icon: BookText,
-    section: 'help',
-  },
-  {
-    to: '/support',
-    label: 'Support',
-    icon: LifeBuoy,
-    section: 'help',
-  },
 ]
 
 export const sectionOrder: string[] = [
@@ -169,6 +146,4 @@ export const sectionOrder: string[] = [
   'resources',
   'marketplace',
   'labs',
-  'manage',
-  'help',
 ]

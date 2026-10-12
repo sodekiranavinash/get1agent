@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Spinner } from '../ui/Spinner'
+import { SimpleSelect } from '../ui/SimpleSelect'
 import { ApiError, useApiClient } from '../../lib/api'
 import type { KnowledgeBase } from '../../lib/knowledgeBases'
 import type { EvalDataset, EvalRun, EvalRunMode, EvalTask } from '../../lib/evals'
@@ -254,48 +255,50 @@ export function NewRunDialog({
       <div className="space-y-4">
         <label className="block space-y-1">
           <span className="text-[11px] font-semibold text-muted">Dataset</span>
-          <select
-            className={INPUT_CLASS}
+          <SimpleSelect
             value={datasetId}
-            onChange={(event) => setDatasetId(event.target.value)}
-          >
-            <option value="">Select a dataset…</option>
-            {datasets.map((entry) => (
-              <option key={entry.datasetId} value={entry.datasetId}>
-                {entry.name}
-                {typeof entry.caseCount === 'number' ? ` · ${entry.caseCount} cases` : ''}
-              </option>
-            ))}
-          </select>
+            onValueChange={setDatasetId}
+            placeholder="Select a dataset…"
+            options={[
+              { value: '', label: 'Select a dataset…' },
+              ...datasets.map((entry) => ({
+                value: entry.datasetId,
+                label:
+                  typeof entry.caseCount === 'number'
+                    ? `${entry.name} · ${entry.caseCount} cases`
+                    : entry.name,
+              })),
+            ]}
+          />
         </label>
 
         <label className="block space-y-1">
           <span className="text-[11px] font-semibold text-muted">Task</span>
-          <select
-            className={INPUT_CLASS}
+          <SimpleSelect
             value={task}
-            onChange={(event) => setTask(event.target.value as EvalTask)}
-          >
-            <option value="rag">Knowledge base (retrieval + answer)</option>
-            <option value="agent">Agent run (outcome + trajectory)</option>
-          </select>
+            onValueChange={(value) => setTask(value as EvalTask)}
+            options={[
+              { value: 'rag', label: 'Knowledge base (retrieval + answer)' },
+              { value: 'agent', label: 'Agent run (outcome + trajectory)' },
+            ]}
+          />
         </label>
 
         {task === 'agent' ? (
           <label className="block space-y-1">
             <span className="text-[11px] font-semibold text-muted">Agent</span>
-            <select
-              className={INPUT_CLASS}
+            <SimpleSelect
               value={agentId}
-              onChange={(event) => setAgentId(event.target.value)}
-            >
-              <option value="">Select an agent…</option>
-              {agents.map((agent) => (
-                <option key={agent.agentId} value={agent.agentId}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={setAgentId}
+              placeholder="Select an agent…"
+              options={[
+                { value: '', label: 'Select an agent…' },
+                ...agents.map((agent) => ({
+                  value: agent.agentId,
+                  label: agent.name,
+                })),
+              ]}
+            />
             {agents.length === 0 ? (
               <span className="text-[12px] text-warning">No agents yet.</span>
             ) : null}
@@ -332,14 +335,14 @@ export function NewRunDialog({
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
                 <span className="text-[11px] font-semibold text-muted">Mode</span>
-                <select
-                  className={INPUT_CLASS}
+                <SimpleSelect
                   value={mode}
-                  onChange={(event) => setMode(event.target.value as EvalRunMode)}
-                >
-                  <option value="rag">RAG (answer + judge)</option>
-                  <option value="retrieval">Retrieval only</option>
-                </select>
+                  onValueChange={(value) => setMode(value as EvalRunMode)}
+                  options={[
+                    { value: 'rag', label: 'RAG (answer + judge)' },
+                    { value: 'retrieval', label: 'Retrieval only' },
+                  ]}
+                />
               </label>
               <label className="flex items-end gap-2 pb-2">
                 <input

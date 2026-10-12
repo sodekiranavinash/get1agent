@@ -1,0 +1,313 @@
+{
+  "docAnchors": [
+    "agent-builder",
+    "agent-skills",
+    "agents-library",
+    "chat",
+    "concepts",
+    "dashboard",
+    "evaluations",
+    "faq",
+    "getting-started",
+    "guardrails",
+    "knowledge-bases",
+    "mcp-builder",
+    "mcp-tools",
+    "metrics",
+    "platform",
+    "playground",
+    "schedules",
+    "security",
+    "settings",
+    "storage",
+    "support",
+    "traces",
+    "troubleshooting",
+    "usage",
+    "vault",
+    "workflow-builder",
+    "workflows-store"
+  ],
+  "dynamicPrefixes": [
+    "/chat/conversation",
+    "/trace",
+    "/traces"
+  ],
+  "features": [
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "",
+      "path": "",
+      "title": ""
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Build an agent on a canvas: prompt, model, reasoning, answer mode, knowledge, tools, skills and a schedule.",
+      "path": "/agent-builder",
+      "title": "Agent builder"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Reusable instructions in the strands format, with allowed tools, importable from a registry or a repo.",
+      "path": "/agent-skills",
+      "title": "Agent skills"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "The public agent library: install someone else's published agent as your own copy.",
+      "path": "/agent-store",
+      "title": "Agents"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Interactive architecture diagrams, including the Avi tab.",
+      "path": "/architecture",
+      "title": "Architecture"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "What shipped, newest first.",
+      "path": "/changelog",
+      "title": "Changelog"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Ask an agent or a workflow a question and watch it plan, call tools and answer with cited sources.",
+      "path": "/chat",
+      "title": "Chat"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Workspace KPIs \u2014 agents, workflows, 30-day tokens, AI credits, recent runs and quick actions.",
+      "path": "/dashboard",
+      "title": "Dashboard"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "The full in-app documentation, grouped by area.",
+      "path": "/docs",
+      "title": "Docs"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Datasets, judges and scored runs over your agents.",
+      "path": "/evaluations",
+      "title": "Evaluations"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Bedrock guardrails that filter prompts and answers.",
+      "path": "/guardrails",
+      "title": "Guardrails"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Create a knowledge base, upload documents, and watch them extract, embed and index until ready.",
+      "path": "/knowledge-bases",
+      "title": "Knowledge"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Build your own Python tool by chatting, then test it against a generated argument form.",
+      "path": "/mcp-builder",
+      "title": "MCP Builder"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "",
+      "path": "/mcp/callback",
+      "title": "Callback"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "What your agents remember about you, and the switch to forget it.",
+      "path": "/memory",
+      "title": "Memory"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Aggregate usage and quality metrics.",
+      "path": "/metrics",
+      "title": "Metrics"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "The prompt playground for trying a model without saving an agent.",
+      "path": "/playground",
+      "title": "Playground"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "",
+      "path": "/privacy",
+      "title": "Privacy"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "",
+      "path": "/privacy/rights",
+      "title": "Rights"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Scheduled runs for your agents and workflows, with their next run time.",
+      "path": "/scheduled-jobs",
+      "title": "Schedules"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "",
+      "path": "/security",
+      "title": "Security"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "",
+      "path": "/select-view",
+      "title": "Select View"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Workspace settings: theme, defaults and preferences.",
+      "path": "/settings",
+      "title": "Settings"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Platform status and the AWS services behind it.",
+      "path": "/status",
+      "title": "Status"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Standalone files you can attach to an agent for a single run. Never ingested or indexed.",
+      "path": "/storage",
+      "title": "Storage"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "",
+      "path": "/sub-processors",
+      "title": "Sub Processors"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Message the admins, or open a security report.",
+      "path": "/support",
+      "title": "Support"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "",
+      "path": "/terms",
+      "title": "Terms"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Every MCP server available to your agents, with per-tool enable toggles.",
+      "path": "/tools",
+      "title": "MCP Tools"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Every run's trace: spans, tool calls, tokens and cost.",
+      "path": "/traces",
+      "title": "Traces"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Your AI credits, token usage, and the limits that apply to your account.",
+      "path": "/usage",
+      "title": "Usage"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Encrypted secrets; select one as the model to bill runs to your own provider key.",
+      "path": "/vault",
+      "title": "Vault"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Wire several agents into a deterministic graph or a dynamic swarm, with a host agent coordinating.",
+      "path": "/workflow-builder",
+      "title": "Workflow builder"
+    },
+    {
+      "audience": "user",
+      "group": "Pages",
+      "note": "Every workflow you have built.",
+      "path": "/workflow-store",
+      "title": "Workflows"
+    }
+  ],
+  "paths": [
+    "",
+    "/agent-builder",
+    "/agent-skills",
+    "/agent-store",
+    "/architecture",
+    "/changelog",
+    "/chat",
+    "/dashboard",
+    "/docs",
+    "/evaluations",
+    "/guardrails",
+    "/knowledge-bases",
+    "/mcp-builder",
+    "/mcp/callback",
+    "/memory",
+    "/metrics",
+    "/playground",
+    "/privacy",
+    "/privacy/rights",
+    "/scheduled-jobs",
+    "/security",
+    "/select-view",
+    "/settings",
+    "/status",
+    "/storage",
+    "/sub-processors",
+    "/support",
+    "/terms",
+    "/tools",
+    "/traces",
+    "/usage",
+    "/vault",
+    "/workflow-builder",
+    "/workflow-store"
+  ],
+  "schemaVersion": 1
+}

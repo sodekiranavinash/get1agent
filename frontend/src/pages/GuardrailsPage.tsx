@@ -10,6 +10,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
+import { SimpleSelect } from '../components/ui/SimpleSelect'
 import { Button } from '../components/ui/Button'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Dialog } from '../components/ui/Dialog'
@@ -144,18 +145,18 @@ export function GuardrailsPage() {
               <span className="text-[11px] font-medium tracking-wide text-subtle uppercase">
                 Default guardrail
               </span>
-              <select
+              <SimpleSelect
                 value={defaultChoice}
-                onChange={(event) => setDefaultChoice(event.target.value)}
-                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-[12.5px] text-foreground outline-none focus:border-accent"
-              >
-                <option value="">None (no workspace screening)</option>
-                {guardrails.map((guardrail) => (
-                  <option key={guardrail.id} value={guardrail.guardrailId}>
-                    {guardrail.name}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setDefaultChoice}
+                className="mt-1"
+                options={[
+                  { value: '', label: 'None (no workspace screening)' },
+                  ...guardrails.map((guardrail) => ({
+                    value: guardrail.guardrailId,
+                    label: guardrail.name,
+                  })),
+                ]}
+              />
             </label>
             <Button
               onClick={onSaveDefault}
@@ -413,7 +414,7 @@ function GuardrailTestDialog({
         onChange={(event) => setText(event.target.value)}
         rows={5}
         placeholder="Paste text to check…"
-        className="mt-3 w-full rounded-md border border-border bg-background px-3 py-2 text-[12px] text-foreground outline-none focus:border-accent"
+        className="mt-3 w-full rounded-md border border-border bg-canvas px-3 py-2 text-[12px] text-foreground outline-none focus:border-accent"
       />
 
       {error ? (
@@ -423,7 +424,7 @@ function GuardrailTestDialog({
       ) : null}
 
       {result ? (
-        <div className="mt-3 rounded-md border border-border bg-background p-3">
+        <div className="mt-3 rounded-md border border-border bg-canvas p-3">
           <div className="flex items-center gap-2 text-[12px] font-medium">
             {result.intervened ? (
               <>

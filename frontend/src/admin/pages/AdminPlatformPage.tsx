@@ -14,6 +14,7 @@ import { PageShell } from '../../components/ui/PageShell'
 import { Spinner } from '../../components/ui/Spinner'
 import { useApiClient } from '../../lib/api'
 import { usePageQuery } from '../../hooks/usePageQuery'
+import { SimpleSelect } from '../../components/ui/SimpleSelect'
 import {
   checkBrowserUrl,
   closeBrowserSession,
@@ -178,7 +179,7 @@ export function AdminPlatformPage() {
                   const key = providerKey(arn)
                   return (
                     <div key={arn} className="flex items-center justify-between gap-2">
-                      <span className="truncate text-[12px] capitalize text-foreground" title={arn}>
+                      <span className="min-w-0 truncate text-[12px] capitalize text-foreground" title={arn}>
                         {providerLabel(arn)}
                       </span>
                       <button
@@ -199,7 +200,7 @@ export function AdminPlatformPage() {
                 })}
               </div>
               {tokenResult && (
-                <p className="mt-2 rounded-md border border-border bg-background px-3 py-2 text-[11px] text-muted">
+                <p className="mt-2 rounded-md border border-border bg-canvas px-3 py-2 text-[11px] text-muted">
                   {tokenResult.obtained
                     ? `Token obtained for ${tokenResult.provider}${
                         tokenResult.expiresAt ? ` · expires ${tokenResult.expiresAt}` : ''
@@ -232,24 +233,28 @@ export function AdminPlatformPage() {
                   value={publishName}
                   onChange={(e) => setPublishName(e.target.value)}
                   placeholder="Record name"
-                  className="rounded-md border border-border bg-background px-3 py-2 text-[12px]"
+                  className="rounded-md border border-border bg-canvas px-3 py-2 text-[12px]"
                 />
-                <select
+                <SimpleSelect
                   value={publishType}
-                  onChange={(e) => setPublishType(e.target.value as typeof publishType)}
-                  className="rounded-md border border-border bg-background px-2 py-2 text-[12px]"
-                >
-                  <option value="AGENT">Agent</option>
-                  <option value="MCP_SERVER">MCP server</option>
-                  <option value="TOOL">Tool</option>
-                  <option value="SKILL">Skill</option>
-                </select>
+                  onValueChange={(value) =>
+                    setPublishType(value as typeof publishType)
+                  }
+                  className="w-auto"
+                  size="sm"
+                  options={[
+                    { value: 'AGENT', label: 'Agent' },
+                    { value: 'MCP_SERVER', label: 'MCP server' },
+                    { value: 'TOOL', label: 'Tool' },
+                    { value: 'SKILL', label: 'Skill' },
+                  ]}
+                />
               </div>
               <input
                 value={publishDesc}
                 onChange={(e) => setPublishDesc(e.target.value)}
                 placeholder="Short description"
-                className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-[12px]"
+                className="mt-2 w-full rounded-md border border-border bg-canvas px-3 py-2 text-[12px]"
               />
               <button
                 type="button"
@@ -266,7 +271,7 @@ export function AdminPlatformPage() {
                     await refetch()
                   })
                 }
-                className="mt-2 inline-flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-background disabled:opacity-60"
+                className="mt-2 inline-flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
               >
                 {busy === 'publish' ? <Spinner /> : <Boxes className="h-3.5 w-3.5" strokeWidth={2} />}
                 Publish
@@ -277,7 +282,7 @@ export function AdminPlatformPage() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search the catalog…"
-                  className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-[12px]"
+                  className="flex-1 rounded-md border border-border bg-canvas px-3 py-2 text-[12px]"
                 />
                 <button
                   type="button"
@@ -328,7 +333,7 @@ export function AdminPlatformPage() {
                 />
               </dl>
               {allowedDomains.length === 0 && (
-                <p className="mt-2 rounded-md border border-border bg-background px-3 py-2 text-[11px] text-muted">
+                <p className="mt-2 rounded-md border border-border bg-canvas px-3 py-2 text-[11px] text-muted">
                   The browser fails closed: with no allowlist every domain is denied.
                   Set <code className="text-foreground">browser_allowed_domains</code> in
                   Terraform (or <code className="text-foreground">BROWSER_ALLOWED_DOMAINS</code>)
@@ -341,7 +346,7 @@ export function AdminPlatformPage() {
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://…"
-                  className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-[12px]"
+                  className="flex-1 rounded-md border border-border bg-canvas px-3 py-2 text-[12px]"
                 />
                 <button
                   type="button"
@@ -363,7 +368,7 @@ export function AdminPlatformPage() {
                       setSession(await openBrowserSession(api, url.trim()))
                     })
                   }
-                  className="rounded-md bg-accent px-3 py-2 text-[12px] font-medium text-background disabled:opacity-60"
+                  className="rounded-md bg-accent px-3 py-2 text-[12px] font-medium text-white disabled:opacity-60"
                 >
                   Open
                 </button>
@@ -376,7 +381,7 @@ export function AdminPlatformPage() {
               )}
 
               {session && (
-                <div className="mt-3 rounded-md border border-border bg-background p-3 text-[12px]">
+                <div className="mt-3 rounded-md border border-border bg-canvas p-3 text-[12px]">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-[11px] text-muted">{session.sessionId}</span>
                     <div className="flex items-center gap-2">
@@ -540,7 +545,7 @@ export function AdminPlatformPage() {
               className={`mt-3 inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-[12px] font-medium disabled:opacity-60 ${
                 data.network.data.enabled
                   ? 'border border-border text-rose'
-                  : 'bg-accent text-background'
+                  : 'bg-accent text-white'
               }`}
             >
               {busy === 'network' ? <Spinner /> : null}
@@ -567,7 +572,7 @@ export function AdminPlatformPage() {
 /** Inline stand-in for a section whose service read failed. */
 function Unavailable({ message }: { message: string }) {
   return (
-    <p className="mt-3 rounded-md border border-border bg-background px-3 py-2 text-[11px] text-muted">
+    <p className="mt-3 rounded-md border border-border bg-canvas px-3 py-2 text-[11px] text-muted">
       Unavailable — {message}
     </p>
   )
@@ -596,7 +601,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <dt className="text-subtle">{label}</dt>
-      <dd className="truncate text-right text-foreground" title={value}>
+      <dd className="min-w-0 truncate text-right text-foreground" title={value}>
         {value}
       </dd>
     </div>

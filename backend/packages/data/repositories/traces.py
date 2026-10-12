@@ -103,6 +103,11 @@ def _index_item(user_id: str, trace: dict[str, Any]) -> dict[str, Any]:
     item["usage"] = trace.get("usage") or {}
     item["costMicroUsd"] = int(trace.get("costMicroUsd") or 0)
     item["observationCount"] = int(trace.get("observationCount") or 0)
+    # Small rollup so the list view can show stage/error counts and tag the
+    # richer rows without an S3 read.
+    summary = trace.get("summary") if isinstance(trace.get("summary"), dict) else {}
+    item["errorCount"] = int(summary.get("errorCount") or 0)
+    item["stageCounts"] = summary.get("typeCounts") or {}
     item["sessionId"] = trace.get("sessionId")
     item["conversationId"] = trace.get("conversationId")
     item["runId"] = trace.get("runId")

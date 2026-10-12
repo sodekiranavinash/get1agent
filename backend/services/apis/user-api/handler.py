@@ -320,8 +320,8 @@ def _require_budget(claims: dict[str, Any]) -> str:
     """Gate a route that spends the platform LLM key; returns the internal userId.
 
     Admins are not special-cased — they start on the same default grant and an
-    admin raises it (or sets the ``unlimited`` override) explicitly. Raises
-    ``402`` when the user's application budget is exhausted.
+    admin raises the limit explicitly. Raises ``402`` when the user's
+    application budget is exhausted.
     """
     profile = get_or_create_user(claims)
     sub = profile["userId"]
@@ -3128,6 +3128,18 @@ def _collect_vault_fields(
     return fields
 
 
+def _vault_model_labels(provider_id: Any) -> dict[str, str]:
+    """Preset display names for a provider's model ids (empty for `custom`)."""
+    try:
+        preset = get_vault_provider(str(provider_id or ""))
+    except Exception:  # noqa: BLE001 - labels are cosmetic
+        return {}
+    if not preset:
+        return {}
+    labels = preset.get("modelLabels") or {}
+    return {str(key): str(value) for key, value in labels.items()}
+
+
 def _serialize_vault_secret(item: dict[str, Any]) -> dict[str, Any]:
     """Public shape — deliberately excludes ``payloadEnc`` and every plaintext."""
     return {
@@ -3140,6 +3152,10 @@ def _serialize_vault_secret(item: dict[str, Any]) -> dict[str, Any]:
         "baseUrl": item.get("baseUrl") or "",
         "defaultModel": item.get("defaultModel") or "",
         "models": item.get("models") or [],
+        # Display names for the model ids, from the provider preset. Providers
+        # name models opaquely (`deepseek-flash`), so the pickers show the label
+        # and still send the id.
+        "modelLabels": _vault_model_labels(item.get("provider")),
         "fields": item.get("fields") or [],
         "preview": item.get("preview") or "",
         "usage": {
@@ -3261,7 +3277,15 @@ def _handle_vault_create(claims: dict[str, Any], body: dict[str, Any]) -> dict[s
         raise ApiError(409, f"You can store at most {MAX_VAULT_SECRETS} secrets")
 
     name = _validate_vault_name(body.get("name"))
-    kind = "provider" if str(body.get("kind") or "").strip() == "provider" else "generic"
+    # The Vault stores AI-provider API keys only: every secret is a `provider`
+    # (base URL + model list + key). Generic/runtime-config secrets are rejected.
+    requested_kind = str(body.get("kind") or "provider").strip().lower()
+    if requested_kind != "provider":
+        raise ApiError(
+            400,
+            "The Vault stores AI provider API keys only. Use kind \"provider\".",
+        )
+    kind = "provider"
     provider_id, base_url, model, models = _vault_provider_config(kind, body)
     fields = _collect_vault_fields(body, kind)
     secret_id = str(uuid.uuid4())
@@ -3300,12 +3324,15 @@ def _handle_vault_update(
         raise ApiError(404, "Secret not found")
 
     name = _validate_vault_name(body.get("name") or existing.get("name"))
-    requested_kind = str(body.get("kind") or "").strip()
-    kind = (
-        requested_kind
-        if requested_kind in ("provider", "generic")
-        else str(existing.get("kind") or "generic")
-    )
+    # Provider-only, like create (see `_handle_vault_create`). A legacy generic
+    # secret is coerced to provider on the next edit.
+    requested_kind = str(body.get("kind") or "provider").strip().lower()
+    if requested_kind != "provider":
+        raise ApiError(
+            400,
+            "The Vault stores AI provider API keys only. Use kind \"provider\".",
+        )
+    kind = "provider"
     provider_id, base_url, model, models = _vault_provider_config(kind, body, existing)
     existing_fields = vault_repo.open_payload(sub, existing)
     fields = _collect_vault_fields(body, kind, existing=existing_fields)
@@ -3582,17 +3609,14 @@ def _handle_settings_get(claims: dict[str, Any]) -> dict[str, Any]:
     payload["budget"] = {
         "budgetUsd": core_usage.usd(budget.budget_micro_usd),
         "spentUsd": core_usage.usd(budget.spent_micro_usd),
-        "remainingUsd": None
-        if budget.unlimited
-        else core_usage.usd(budget.remaining_micro_usd),
-        "unlimited": budget.unlimited,
+        "remainingUsd": core_usage.usd(budget.remaining_micro_usd),
         # The same amounts expressed as AI credits (the UI's unit).
         "creditsPerUsd": core_usage.CREDITS_PER_USD,
         "budgetCredits": round(core_usage.usd_to_credits(budget.budget_micro_usd), 2),
         "spentCredits": round(core_usage.usd_to_credits(budget.spent_micro_usd), 2),
-        "remainingCredits": None
-        if budget.unlimited
-        else round(core_usage.usd_to_credits(budget.remaining_micro_usd), 2),
+        "remainingCredits": round(
+            core_usage.usd_to_credits(budget.remaining_micro_usd), 2
+        ),
     }
     payload["pricing"] = core_usage.pricing_table()
     return _json(200, payload)
@@ -5884,7 +5908,7 @@ def _handle_lab_queue_items(claims: dict[str, Any], queue_id: str) -> dict[str, 
 def _handle_lab_queue_item_score(
     claims: dict[str, Any], queue_id: str, item_id: str, body: dict[str, Any]
 ) -> dict[str, Any]:
-    get_or_create_user(claims)
+    sub = get_or_create_user(claims)["userId"]
     _lab_owned_queue_id(claims, queue_id)
     item = _lab_request(
         "GET", f"/annotation-queues/{quote(queue_id)}/items/{quote(item_id)}"
@@ -5901,7 +5925,12 @@ def _handle_lab_queue_item_score(
             name = str(score.get("name") or "").strip()
             if not name:
                 continue
-            payload: dict[str, Any] = {"traceId": trace_id, "name": name}
+            # `userId` keeps the shared LAB#SCORES partition filterable per user.
+            payload: dict[str, Any] = {
+                "traceId": trace_id,
+                "name": name,
+                "userId": sub,
+            }
             if score.get("comment"):
                 payload["comment"] = str(score["comment"])[:2000]
             if score.get("configId"):
@@ -5925,16 +5954,18 @@ def _handle_lab_queue_item_score(
 
 
 def _handle_lab_metrics(claims: dict[str, Any], query: dict[str, str]) -> dict[str, Any]:
+    """Aggregated usage for the dashboard / Metrics / Usage screens.
+
+    Reads the Lab store directly (one call) instead of going through the
+    Langfuse-style HTTP shim: the store returns pre-aggregated
+    ``{totals, series, scores, models}`` rows, and the old query-per-metric
+    translation silently produced zeros because it expected the raw
+    ``{"data": [...]}`` shape.
+    """
     sub = get_or_create_user(claims)["userId"]
     if not _lab_configured():
         return _json(200, {"configured": False})
     days = _lab_int(query.get("days"), 7, 1, 90)
-    root_filter = {
-        "column": "isRootObservation",
-        "operator": "=",
-        "value": True,
-        "type": "boolean",
-    }
 
     def _num(value: Any) -> float:
         try:
@@ -5942,136 +5973,25 @@ def _handle_lab_metrics(claims: dict[str, Any], query: dict[str, str]) -> dict[s
         except (TypeError, ValueError):
             return 0.0
 
-    def run(view, metrics, *, dimensions=None, time_dimension=None, order_by=None,
-            filters=None, row_limit=100):
-        now = datetime.now(timezone.utc)
-        start = now - timedelta(days=days)
-        payload: dict[str, Any] = {
-            "view": view,
-            "metrics": metrics,
-            "dimensions": dimensions or [],
-            "filters": [
-                {"column": "userId", "operator": "=", "value": sub, "type": "string"},
-                *(filters or []),
-            ],
-            "fromTimestamp": start.isoformat(),
-            "toTimestamp": now.isoformat(),
-            "config": {"row_limit": row_limit},
-        }
-        if time_dimension:
-            payload["timeDimension"] = {"granularity": time_dimension}
-        if order_by:
-            payload["orderBy"] = order_by
-        path = "/v2/metrics?query=" + quote(json_dumps(payload), safe="")
-        return _lab_request("GET", path)
-
     try:
-        totals = run(
-            "observations",
-            [
-                {"measure": "count", "aggregation": "count"},
-                {"measure": "latency", "aggregation": "avg"},
-                {"measure": "latency", "aggregation": "p95"},
-                {"measure": "totalCost", "aggregation": "sum"},
-            ],
-            filters=[root_filter],
-            row_limit=1,
-        )
-        series = run(
-            "observations",
-            [
-                {"measure": "count", "aggregation": "count"},
-                {"measure": "latency", "aggregation": "p95"},
-                {"measure": "totalCost", "aggregation": "sum"},
-            ],
-            time_dimension="day",
-            order_by=[{"field": "time_dimension", "direction": "asc"}],
-            filters=[root_filter],
-            row_limit=100,
-        )
+        payload = _lab_request("GET", f"/v2/metrics?userId={quote(sub)}&days={days}")
     except ApiError as exc:
         return _json(200, {"configured": True, "error": str(exc)[:300]})
 
-    # Scores and tokens are best-effort (measure/field names vary by version).
-    scores: list[dict[str, Any]] = []
-    try:
-        score_rows = run(
-            "scores-numeric",
-            [
-                {"measure": "value", "aggregation": "avg"},
-                {"measure": "count", "aggregation": "count"},
-            ],
-            dimensions=[{"field": "name"}],
-            order_by=[{"field": "avg_value", "direction": "desc"}],
-            row_limit=25,
-        )
-        scores = [
-            {
-                "name": str(row.get("name") or ""),
-                "avg": _num(row.get("avg_value")),
-                "count": _num(row.get("count_count")),
-            }
-            for row in (score_rows.get("data") or [])
-            if row.get("name")
-        ]
-    except ApiError:
-        scores = []
-
-    tokens = None
-    try:
-        token_rows = run(
-            "observations",
-            [{"measure": "totalTokens", "aggregation": "sum"}],
-            filters=[root_filter],
-            row_limit=1,
-        )
-        tokens = _num((token_rows.get("data") or [{}])[0].get("sum_totalTokens"))
-    except ApiError:
-        tokens = None
-
-    # Per-model breakdown (best-effort: the model dimension name varies by
-    # version, so try the documented one then fall back).
-    models: list[dict[str, Any]] = []
-    for dimension in ("providedModelName", "model"):
-        try:
-            model_rows = run(
-                "observations",
-                [
-                    {"measure": "count", "aggregation": "count"},
-                    {"measure": "totalCost", "aggregation": "sum"},
-                    {"measure": "totalTokens", "aggregation": "sum"},
-                ],
-                dimensions=[{"field": dimension}],
-                order_by=[{"field": "sum_totalCost", "direction": "desc"}],
-                filters=[root_filter],
-                row_limit=12,
-            )
-        except ApiError:
-            continue
-        models = [
-            {
-                "model": str(row.get(dimension) or "unknown"),
-                "count": _num(row.get("count_count")),
-                "cost": _num(row.get("sum_totalCost")),
-                "tokens": _num(row.get("sum_totalTokens")),
-            }
-            for row in (model_rows.get("data") or [])
-            if row.get(dimension)
-        ]
-        break
-
-    total_row = (totals.get("data") or [{}])[0]
+    totals = payload.get("totals") or {}
     return _json(
         200,
         {
             "configured": True,
             "days": days,
             "totals": {
-                "traces": _num(total_row.get("count_count")),
-                "avgLatency": _num(total_row.get("avg_latency")),
-                "p95Latency": _num(total_row.get("p95_latency")),
-                "cost": _num(total_row.get("sum_totalCost")),
-                "tokens": tokens,
+                "traces": _num(totals.get("count_count")),
+                "runs": _num(totals.get("run_count")),
+                "messages": _num(totals.get("message_count")),
+                "avgLatency": _num(totals.get("avg_latency")),
+                "p95Latency": _num(totals.get("p95_latency")),
+                "cost": _num(totals.get("sum_totalCost")),
+                "tokens": _num(totals.get("sum_totalTokens")),
             },
             "series": [
                 {
@@ -6080,10 +6000,18 @@ def _handle_lab_metrics(claims: dict[str, Any], query: dict[str, str]) -> dict[s
                     "p95Latency": _num(row.get("p95_latency")),
                     "cost": _num(row.get("sum_totalCost")),
                 }
-                for row in (series.get("data") or [])
+                for row in (payload.get("series") or [])
             ],
-            "scores": scores,
-            "models": models,
+            "scores": [
+                {
+                    "name": str(row.get("name") or ""),
+                    "avg": _num(row.get("avg_value")),
+                    "count": _num(row.get("count_count")),
+                }
+                for row in (payload.get("scores") or [])
+                if row.get("name")
+            ],
+            "models": payload.get("models") or [],
         },
     )
 
@@ -6955,7 +6883,39 @@ def _route(
         return _route_memory(claims, method, segments[2:], body, query)
     if segments[:2] == ["v1", "user"]:
         return _route_user(claims, method, segments[2:], body)
+    if segments[:2] == ["v1", "avi"]:
+        return _route_avi(claims, method, segments[2:], body)
     raise ApiError(404, "Not found")
+
+
+def _route_avi(
+    claims: dict[str, Any],
+    method: str,
+    rest: list[str],
+    body: dict[str, Any],
+):
+    """Avi's browser-facing write routes.
+
+    An Avi **turn** is served by the control-plane Lambda and the MicroVM, not by
+    this API. Feedback is the exception: the agent service exposes
+    ``POST /feedback``, but reaching it would require the MicroVM ingress token the
+    browser cannot mint, so the thumb is posted to the ordinary JWT-protected API
+    and written with the same repository the agent service uses.
+    """
+    if rest == ["feedback"]:
+        if method != "POST":
+            raise ApiError(405, f"Method not allowed: {method}")
+        return _handle_avi_feedback(claims, body)
+    raise ApiError(404, "Not found")
+
+
+def _handle_avi_feedback(claims: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    """Record one Avi thumb for the signed-in caller (owner-scoped)."""
+    from data.repositories import avi as avi_repo
+
+    profile = get_or_create_user(claims)
+    item = avi_repo.record_feedback(profile["userId"], body)
+    return _json(200, {"stored": True, "runId": item.get("runId")})
 
 
 def _route_user(

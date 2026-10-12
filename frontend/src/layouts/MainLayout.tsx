@@ -41,7 +41,7 @@ function MainLayoutContent({ children }: { children?: ReactNode }) {
       </aside>
 
       <main
-        className={`flex h-full flex-col overflow-hidden transition-[padding] duration-200 ease-out ${
+        className={`flex h-full min-w-0 flex-col overflow-hidden transition-[padding] duration-200 ease-out ${
           effectiveCollapsed ? 'pl-[60px]' : 'pl-[240px]'
         }`}
       >

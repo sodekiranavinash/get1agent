@@ -11,6 +11,7 @@ import {
 import { toast } from 'sonner'
 import { Button } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
+import { SimpleSelect } from '../ui/SimpleSelect'
 import { useApiClient } from '../../lib/api'
 import {
   createVaultSecret,
@@ -67,7 +68,6 @@ export function SecretDialog({ open, onOpenChange, secret, providers, onSaved }:
   const api = useApiClient()
   const editing = secret !== null
 
-  const [kind, setKind] = useState<'provider' | 'generic'>('provider')
   const [providerId, setProviderId] = useState('openai')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -102,7 +102,6 @@ export function SecretDialog({ open, onOpenChange, secret, providers, onSaved }:
     setTestResult(null)
     setSecretValue('')
     if (secret) {
-      setKind(secret.kind)
       setProviderId(secret.provider || 'custom')
       setName(secret.name)
       setDescription(secret.description)
@@ -111,16 +110,14 @@ export function SecretDialog({ open, onOpenChange, secret, providers, onSaved }:
       setModels(secret.models ?? [])
       setAvailableModels(secret.models ?? [])
       setModelDraft('')
-      const primary = secret.kind === 'provider' ? 'apiKey' : 'value'
       setExtra(
         secret.fields
-          .filter((field) => field !== primary)
+          .filter((field) => field !== 'apiKey')
           .map((field) => ({ key: field, value: '', removed: false })),
       )
     } else {
       const available = providersRef.current
       const first = available.find((provider) => provider.id === 'openai') ?? available[0]
-      setKind('provider')
       setProviderId(first?.id ?? 'openai')
       setName('')
       setDescription('')
@@ -227,8 +224,8 @@ export function SecretDialog({ open, onOpenChange, secret, providers, onSaved }:
     setTesting(true)
     if (testResult) setTestResult(null)
     try {
-      const effectiveBase = kind === 'provider' ? baseUrl || preset?.baseUrl || '' : ''
-      if (kind !== 'provider' || !effectiveBase) {
+      const effectiveBase = baseUrl || preset?.baseUrl || ''
+      if (!effectiveBase) {
         setFormError('A base URL is required to test a provider')
         return
       }
@@ -266,11 +263,13 @@ export function SecretDialog({ open, onOpenChange, secret, providers, onSaved }:
       const payload = {
         name: trimmedName,
         description: description.trim(),
-        kind,
-        provider: kind === 'provider' ? providerId : undefined,
-        baseUrl: kind === 'provider' ? baseUrl.trim() : undefined,
-        defaultModel: kind === 'provider' ? (model.trim() || models[0] || '') : undefined,
-        models: kind === 'provider' ? models : undefined,
+        // The Vault stores AI-provider API keys only (see VaultPage); the
+        // backend rejects any other kind.
+        kind: 'provider' as const,
+        provider: providerId,
+        baseUrl: baseUrl.trim(),
+        defaultModel: model.trim() || models[0] || '',
+        models,
         secret: secretValue.trim() || undefined,
         extraFields: buildExtraFields(),
       }
@@ -294,7 +293,7 @@ export function SecretDialog({ open, onOpenChange, secret, providers, onSaved }:
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title={editing ? `Edit ${secret?.name ?? 'secret'}` : 'Add a secret'}
+      title={editing ? `Edit ${secret?.name ?? 'secret'}` : 'Add an AI provider key'}
       description="Encrypted with a dedicated key. Even the workspace owner cannot read it from the database."
       icon={<ShieldCheck className="size-4 text-accent" />}
       size="lg"
@@ -308,23 +307,21 @@ export function SecretDialog({ open, onOpenChange, secret, providers, onSaved }:
       }
       footer={
         <>
-          {kind === 'provider' ? (
-            <Button
-              className="mr-auto"
-              variant="outline"
-              onClick={runTest}
-              disabled={testing || submitting}
-              icon={
-                testing ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <FlaskConical className="size-3.5" />
-                )
-              }
-            >
-              {testing ? 'Testing…' : 'Test connection'}
-            </Button>
-          ) : null}
+          <Button
+            className="mr-auto"
+            variant="outline"
+            onClick={runTest}
+            disabled={testing || submitting}
+            icon={
+              testing ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <FlaskConical className="size-3.5" />
+              )
+            }
+          >
+            {testing ? 'Testing…' : 'Test connection'}
+          </Button>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
@@ -335,40 +332,16 @@ export function SecretDialog({ open, onOpenChange, secret, providers, onSaved }:
       }
     >
       <div className="space-y-4">
-        {!editing ? (
-          <div className="flex rounded-md border border-border p-0.5">
-            {(['provider', 'generic'] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setKind(option)}
-                className={`flex-1 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
-                  kind === option
-                    ? 'bg-accent-soft text-accent'
-                    : 'text-muted hover:text-foreground'
-                }`}
-              >
-                {option === 'provider' ? 'Provider key (OpenAI-compatible)' : 'Generic secret'}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
-        {kind === 'provider' ? (
-          <>
-            <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Provider">
-                <select
-                  className={inputClass}
+                <SimpleSelect
                   value={providerId}
-                  onChange={(event) => pickProvider(event.target.value)}
-                >
-                  {providers.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.label}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={pickProvider}
+                  options={providers.map((provider) => ({
+                    value: provider.id,
+                    label: provider.label,
+                  }))}
+                />
               </Field>
               <Field label="Base URL">
                 <input
@@ -474,33 +447,15 @@ export function SecretDialog({ open, onOpenChange, secret, providers, onSaved }:
               {models.length > 1 ? (
                 <label className="mt-2 block">
                   <span className="text-[11px] text-subtle">Default model</span>
-                  <select
-                    className={inputClass}
+                  <SimpleSelect
                     value={models.includes(model) ? model : models[0]}
-                    onChange={(event) => setModel(event.target.value)}
-                  >
-                    {models.map((entry) => (
-                      <option key={entry} value={entry}>
-                        {entry}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setModel}
+                    options={models.map((entry) => ({ value: entry, label: entry }))}
+                  />
                 </label>
               ) : null}
             </div>
-          </>
-        ) : (
-          <>
-            <Field label="Secret value" hint={editing ? 'Leave blank to keep current' : undefined}>
-              <input
-                type="password"
-                autoComplete="off"
-                className={`${inputClass} font-mono`}
-                value={secretValue}
-                onChange={(event) => setSecretValue(event.target.value)}
-                placeholder="token, connection string, …"
-              />
-            </Field>
+
             <div>
               <div className="mb-1.5 flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wide text-muted">
@@ -565,8 +520,6 @@ export function SecretDialog({ open, onOpenChange, secret, providers, onSaved }:
                 </div>
               )}
             </div>
-          </>
-        )}
 
         <Field label="Reference name" hint="shown as the label · used as {{vault:name}}">
           <input

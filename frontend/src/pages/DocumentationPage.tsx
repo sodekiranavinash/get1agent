@@ -13,6 +13,8 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
+
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
 import {
@@ -172,6 +174,31 @@ export function DocumentationPage() {
   const sections = useMemo(() => DOCS.flatMap((group) => group.sections), [])
   const sectionIds = useMemo(() => sections.map((section) => section.id), [sections])
   const active = useActiveSection(sectionIds)
+  const { hash } = useLocation()
+
+  // Arriving at `/docs#faq` from somewhere else must actually land on the FAQ.
+  // React Router restores no scroll on navigation, so without this an incoming
+  // deep link — every Avi citation that points at documentation — opened the top
+  // of the page and looked broken. Polled across frames rather than delayed on a
+  // timer: `/docs` is a lazy route, so on a cold load the section genuinely does
+  // not exist yet. `scrollIntoView` honours the section's `scroll-margin-top` and
+  // walks up to whichever ancestor scrolls (the two shells differ).
+  useEffect(() => {
+    const id = decodeURIComponent(hash.replace(/^#/, ''))
+    if (!id) return
+    let frame = 0
+    let attempts = 0
+    const tryScroll = () => {
+      const node = document.getElementById(id)
+      if (node) {
+        node.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
+      }
+      if (attempts++ < 60) frame = window.requestAnimationFrame(tryScroll)
+    }
+    frame = window.requestAnimationFrame(tryScroll)
+    return () => window.cancelAnimationFrame(frame)
+  }, [hash])
 
   return (
     <PageShell>
@@ -184,7 +211,9 @@ export function DocumentationPage() {
 
       <div className="grid gap-8 lg:grid-cols-[248px_minmax(0,1fr)]">
         <aside className="hidden lg:block">
-          <nav className="scrollbar-thin sticky top-6 max-h-[calc(100vh-3rem)] self-start overflow-y-auto pr-2">
+          {/* The offset is shell-provided: in the public shell the fixed landing
+              nav (5rem at `lg`) would otherwise cover the top of this list. */}
+          <nav className="scrollbar-thin sticky top-[var(--page-sticky-top,1.5rem)] max-h-[calc(100vh-3rem)] self-start overflow-y-auto pr-2">
             <p className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-subtle">
               <BookText className="size-3.5" />
               On this page

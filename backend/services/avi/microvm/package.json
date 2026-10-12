@@ -1,0 +1,10 @@
+{
+  "name": "get1agent-avi-microvm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Avi MicroVM streaming proxy: forwards SSE frames from the agent container to the browser.",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

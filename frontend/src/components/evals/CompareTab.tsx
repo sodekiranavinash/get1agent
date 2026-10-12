@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Card } from '../ui/Card'
 import { formatPercent, metricLabel, orderedMetrics, type EvalRun } from '../../lib/evals'
+import { SimpleSelect } from '../ui/SimpleSelect'
 
 type CompareTabProps = {
   runs: EvalRun[]
@@ -107,18 +108,18 @@ function RunPicker({
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[11px] font-semibold text-muted">{label}</span>
-      <select
+      <SimpleSelect
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-9 w-full rounded-md border border-border-strong bg-canvas px-2.5 text-[13px] text-foreground outline-none focus:border-accent/50 focus:ring-2 focus:ring-accent/25"
-      >
-        <option value="">Select a run…</option>
-        {runs.map((run) => (
-          <option key={run.runId} value={run.runId}>
-            {run.datasetName} · {run.config?.mode ?? 'rag'} · {formatDate(run.createdAt)}
-          </option>
-        ))}
-      </select>
+        onValueChange={onChange}
+        placeholder="Select a run…"
+        options={[
+          { value: '', label: 'Select a run…' },
+          ...runs.map((run) => ({
+            value: run.runId,
+            label: `${run.datasetName} · ${run.config?.mode ?? 'rag'} · ${formatDate(run.createdAt)}`,
+          })),
+        ]}
+      />
     </label>
   )
 }

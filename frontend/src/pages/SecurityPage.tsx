@@ -14,6 +14,7 @@ import {
 } from '../lib/support'
 import { InfoSections } from '../components/layout/InfoSections'
 import { Badge } from '../components/ui/Badge'
+import { SimpleSelect } from '../components/ui/SimpleSelect'
 import { Button } from '../components/ui/Button'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
@@ -145,17 +146,15 @@ export function SecurityPage() {
               <span className="mb-1 block text-[11px] font-medium text-subtle">
                 Which page or area?
               </span>
-              <select
-                className="field"
+              <SimpleSelect
                 value={page}
-                onChange={(event) => setPage(event.target.value)}
-              >
-                {SECURITY_PAGES.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setPage}
+                className="w-full"
+                options={SECURITY_PAGES.map((option) => ({
+                  value: option,
+                  label: option,
+                }))}
+              />
             </label>
             <label className="block">
               <span className="mb-1 block text-[11px] font-medium text-subtle">

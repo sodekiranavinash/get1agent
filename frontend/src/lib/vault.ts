@@ -8,7 +8,11 @@ export const VAULT_PROVIDERS_KEY = 'vault-providers'
 // Keep in sync with backend/services/apis/user-api/handler.py.
 export const MAX_VAULT_SECRETS = 100
 
+// The Vault stores AI-provider API keys only. Older "generic" secrets may still
+// exist in DynamoDB, so the read type tolerates the legacy value.
 export type VaultSecretKind = 'provider' | 'generic'
+/** What the create/update API accepts: provider keys only. */
+export type VaultSecretInputKind = 'provider'
 
 export type VaultTestInfo = {
   status: '' | 'ok' | 'error'
@@ -29,6 +33,8 @@ export type VaultSecret = {
   defaultModel: string
   /** Every model this provider can serve (defaultModel is the first). */
   models: string[]
+  /** Display names for `models`, resolved from the provider preset. */
+  modelLabels?: Record<string, string>
   fields: string[]
   preview: string
   usage: {
@@ -67,8 +73,14 @@ export type VaultProvider = {
   description: string
   baseUrl: string
   defaultModel: string
-  /** Suggested models this preset offers. */
+  /** Suggested models this preset offers (the provider's real model ids). */
   models: string[]
+  /**
+   * Display names for those ids, e.g. `deepseek-flash` → "DeepSeek V4.1 Flash".
+   * Providers name models opaquely (`deepseek-chat`), so the pickers show the
+   * label and still send the id.
+   */
+  modelLabels?: Record<string, string>
   auth: string
   requiresKey: boolean
   docsUrl: string
@@ -92,13 +104,14 @@ export type VaultSecretInput = {
   name: string
   label?: string
   description?: string
-  kind: VaultSecretKind
+  /** Always `provider` — the Vault no longer accepts generic secrets. */
+  kind: VaultSecretInputKind
   provider?: string
   baseUrl?: string
   defaultModel?: string
   /** All models this provider serves (defaultModel must be included). */
   models?: string[]
-  /** The primary secret value (apiKey for provider, value for generic). */
+  /** The provider API key (`apiKey` is the stored field name). */
   secret?: string
   extraFields?: Record<string, string>
 }
@@ -238,4 +251,13 @@ export function slugifySecretName(value: string): string {
 
 export function providerLabel(providers: VaultProvider[], id: string): string {
   return providers.find((provider) => provider.id === id)?.label ?? id ?? 'Secret'
+}
+
+
+/** A provider model's display name, falling back to the raw id. */
+export function vaultModelLabel(
+  model: string,
+  labels?: Record<string, string>,
+): string {
+  return labels?.[model] || model
 }

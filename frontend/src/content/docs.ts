@@ -19,6 +19,14 @@ export type DocSection = {
   title: string
   summary: string
   blocks: DocBlock[]
+  /**
+   * Who the section is written for. Sections that document an **admin-console**
+   * page are tagged `'admin'`, which excludes them from Avi's knowledge corpus
+   * (`tools/avi-knowledge/generator.py`) — the assistant is opened by ordinary
+   * users and guests, so it must never answer with, or link to, a page they
+   * cannot open. Defaults to `'user'`.
+   */
+  audience?: 'user' | 'admin'
 }
 
 export type DocGroup = {
@@ -446,7 +454,7 @@ export const DOCS: DocGroup[] = [
             kind: 'callout',
             tone: 'info',
             title: 'Limits',
-            text: '30 knowledge bases per user, 50 files per knowledge base, and 100 MB of knowledge storage per user. The create button disables at the cap.',
+            text: '10 knowledge bases per user, 25 files per knowledge base, and 100 MB of knowledge storage per user. The create button disables at the cap.',
           },
           {
             kind: 'callout',
@@ -827,7 +835,7 @@ export const DOCS: DocGroup[] = [
           {
             kind: 'bullets',
             items: [
-              'AI credits card: how many credits of your grant you have spent, how many remain and the equivalent dollar amount, or “unlimited”. Runs on your own Vault provider keys are not counted.',
+              'AI credits card: how many credits of your grant you have spent, how many remain and the equivalent dollar amount. Runs on your own Vault provider keys are not counted.',
               'KPI row (30 days): Runs, Tokens, Cost and p95 latency, with trend sparklines.',
               'Provider keys: your Vault secrets with previews, default models, test status and usage; Manage opens the Vault.',
               'Usage by model: cost and token share per model for the last 30 days.',
@@ -881,6 +889,9 @@ export const DOCS: DocGroup[] = [
       {
         id: 'platform',
         title: 'Platform status',
+        // Documents an admin-console page, so Avi must not learn it: see the
+        // `audience` note on `DocSection`.
+        audience: 'admin',
         summary:
           'The AWS-native services behind the workspace: managed identity, governed catalog, browser, optimisation and the Bedrock levers. An admin-console page.',
         blocks: [
@@ -966,7 +977,7 @@ export const DOCS: DocGroup[] = [
               'Why did an answer cite a source I did not expect? Answers are grounded in retrieved passages; open the Source carousel to see the exact document and page behind each citation.',
               'How do I use my own API key? Add it to the Vault, then select it as the model in the builder or Chat composer.',
               'Where is a run’s trace? Every answer has a View trace link; the full trace also lives on the Traces page.',
-              'How many things can I create? Common limits: 30 knowledge bases, 50 agents, 50 workflows, 50 skills and 100 Vault secrets per user.',
+              'How many things can I create? Common limits: 10 knowledge bases, 50 agents, 50 workflows, 50 skills and 100 Vault secrets per user.',
             ],
           },
         ],

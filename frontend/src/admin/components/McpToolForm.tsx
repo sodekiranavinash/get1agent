@@ -5,6 +5,7 @@ import { Switch } from '../../components/ui/Switch'
 import type { McpProperty, McpTool } from '../lib/mcpAdmin'
 import { toolIcon, toolLabel } from '../lib/mcpToolMeta'
 import type { FieldState, ToolForm } from '../lib/toolForm'
+import { SimpleSelect } from '../../components/ui/SimpleSelect'
 
 const inputStyles =
   'w-full rounded-md border border-border-strong bg-canvas/50 px-3 py-2.5 text-sm text-foreground placeholder:text-subtle transition-colors focus:border-accent/40 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-accent/25'
@@ -82,20 +83,14 @@ function FieldControl({
 
   if (prop.enum?.length) {
     return (
-      <select
+      <SimpleSelect
         value={String(state.value)}
-        onChange={(event) =>
-          onChange({ value: event.target.value, touched: true })
-        }
-        className={`${inputStyles} appearance-none`}
-      >
-        <option value="">Default</option>
-        {prop.enum.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+        onValueChange={(value) => onChange({ value, touched: true })}
+        options={[
+          { value: '', label: 'Default' },
+          ...prop.enum.map((option) => ({ value: option, label: option })),
+        ]}
+      />
     )
   }
 

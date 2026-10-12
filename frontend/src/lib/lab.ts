@@ -20,6 +20,8 @@ export type LabTrace = {
   usage?: Record<string, number | null>
   costMicroUsd?: number
   observationCount?: number
+  errorCount?: number
+  stageCounts?: Record<string, number>
 }
 
 export type LabDataset = {
@@ -52,11 +54,23 @@ export type LabQueueItem = {
   status: string
 }
 
+export type TraceSummary = {
+  observationCount?: number
+  errorCount?: number
+  typeCounts?: Record<string, number>
+  totalStageLatencyMs?: number
+  hasSystemPrompt?: boolean
+}
+
 export type LabTraceDetail = LabTrace & {
   startedAt?: string | null
   endedAt?: string | null
   provider?: string | null
   statusMessage?: string | null
+  runId?: string | null
+  targetType?: string | null
+  mode?: string | null
+  summary?: TraceSummary
   observations?: TraceObservation[]
   /** Present when the trace predates the store and only X-Ray had a tree. */
   xray?: { traceId: string; durationMs: number | null; spans: unknown[] } | null
@@ -85,7 +99,30 @@ export type TraceObservation = {
   input?: unknown
   output?: unknown
   usage?: Record<string, number | null> | null
+  /** Per-span cost in micro-USD (run-level on root/answer spans). */
+  costMicroUsd?: number | null
   metadata?: Record<string, unknown>
+}
+
+/** Structured retrieval detail lifted from a knowledge tool result. */
+export type TraceRetrievalChunk = {
+  chunkId?: string
+  documentId?: string
+  knowledgeBaseId?: string
+  fileName?: string
+  page?: number
+  vectorScore?: number
+  lexicalScore?: number
+  rrfScore?: number
+  rerankScore?: number
+  score?: number
+}
+
+export type TraceRetrieval = {
+  chunks?: TraceRetrievalChunk[]
+  chunkCount?: number
+  sourceCount?: number
+  meta?: Record<string, number | boolean | string | null>
 }
 
 export const LAB_TRACES_QUERY_KEY = 'lab-traces'

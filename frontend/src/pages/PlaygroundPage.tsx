@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '../components/ui/Badge'
+import { SimpleSelect } from '../components/ui/SimpleSelect'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -312,30 +313,29 @@ export function PlaygroundPage() {
                 <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
                   <span className="text-[12px] font-semibold text-foreground">Prompt</span>
                   <div className="ml-auto flex flex-wrap items-center gap-2">
-                    <select
-                      className={`${INPUT_CLASS} h-8 w-auto py-0`}
+                    <SimpleSelect
+                      aria-label="Model"
+                      size="sm"
+                      className="w-auto min-w-[190px]"
                       value={model}
-                      onChange={(event) => setModel(event.target.value)}
-                    >
-                      {PLAYGROUND_MODELS.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className={`${INPUT_CLASS} h-8 w-auto py-0`}
+                      onValueChange={setModel}
+                      options={PLAYGROUND_MODELS.map((name) => ({ value: name, label: name }))}
+                    />
+                    <SimpleSelect
+                      aria-label="Compare with a second model"
+                      size="sm"
+                      className="w-auto min-w-[150px]"
                       value={modelB}
-                      title="Compare with a second model"
-                      onChange={(event) => setModelB(event.target.value)}
-                    >
-                      <option value="">vs —</option>
-                      {PLAYGROUND_MODELS.filter((name) => name !== model).map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
+                      onValueChange={setModelB}
+                      options={[
+                        { value: '', label: 'vs —' },
+                        ...PLAYGROUND_MODELS.filter((name) => name !== model).map((name) => ({
+                          value: name,
+                          label: name,
+                        })),
+                      ]}
+                    />
+
                     <label className="flex items-center gap-1 text-[11px] text-subtle">
                       temp
                       <input
@@ -391,19 +391,22 @@ export function PlaygroundPage() {
                       className="rounded-lg border border-border bg-canvas/40 focus-within:border-accent/40"
                     >
                       <div className="flex items-center gap-2 border-b border-border/70 px-2.5 py-1.5">
-                        <select
-                          className={`rounded-md border px-2 py-0.5 text-[11px] font-medium outline-none ${ROLE_STYLES[message.role]}`}
+                        <SimpleSelect
+                          aria-label="Message role"
+                          size="sm"
+                          className={`w-auto ${ROLE_STYLES[message.role]}`}
                           value={message.role}
-                          onChange={(event) =>
+                          onValueChange={(value) =>
                             updateMessage(index, {
-                              role: event.target.value as PlaygroundMessage['role'],
+                              role: value as PlaygroundMessage['role'],
                             })
                           }
-                        >
-                          <option value="system">system</option>
-                          <option value="user">user</option>
-                          <option value="assistant">assistant</option>
-                        </select>
+                          options={[
+                            { value: 'system', label: 'system' },
+                            { value: 'user', label: 'user' },
+                            { value: 'assistant', label: 'assistant' },
+                          ]}
+                        />
                         <button
                           type="button"
                           className="ml-auto text-subtle transition-colors hover:text-warning"

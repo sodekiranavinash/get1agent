@@ -9,6 +9,7 @@ import {
   Plug,
   Server,
   ShieldAlert,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react'
 import type { SidebarLink } from '../../navigation/sidebarLinks'
@@ -37,6 +38,9 @@ export const ADMIN_SECURITY_PATH = '/admin/security-reports'
 
 /** Admin route for platform status (AgentCore services + Bedrock levers). */
 export const ADMIN_PLATFORM_PATH = '/admin/platform'
+
+/** Admin route for the in-product assistant (Avi) controls. */
+export const ADMIN_AVI_PATH = '/admin/avi'
 
 /** `get1agent-prod-knowledge-mcp` -> `knowledge-mcp` (stable route segment). */
 export function mcpServerSlug(server: string): string {
@@ -152,6 +156,13 @@ export function buildAdminLinks(tools?: McpTool[]): SidebarLink[] {
       label: 'Platform',
       tooltip: 'Platform status',
       icon: Layers,
+      section: 'admin',
+    },
+    {
+      to: ADMIN_AVI_PATH,
+      label: 'Avi',
+      tooltip: 'Assistant controls, feedback and traces',
+      icon: Sparkles,
       section: 'admin',
     },
   ]

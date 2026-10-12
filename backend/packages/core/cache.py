@@ -25,6 +25,10 @@ from typing import Any
 
 _DDB_BATCH = 100
 
+# DynamoDB items cap at 400 KB; stay well clear so the item's other attributes
+# and the serialized overhead never push a cached payload over the limit.
+_MAX_PAYLOAD_BYTES = int(os.environ.get("CACHE_MAX_PAYLOAD_BYTES", "300000"))
+
 
 def backend() -> str:
     return (os.environ.get("CACHE_BACKEND") or "dynamodb").strip().lower()
@@ -133,9 +137,20 @@ def _ddb_get_many(keys: list[str]) -> list[Any]:
     return out
 
 
+def _too_large(encoded: str) -> bool:
+    """True when a payload cannot fit a DynamoDB item.
+
+    A cached search response carries the full parent text of up to 50 hits, so
+    it can exceed the 400 KB item limit. Writing it would raise and (because
+    every cache operation swallows errors) silently turn into a permanent miss;
+    skipping the write up front keeps that explicit and cheap.
+    """
+    return len(encoded.encode("utf-8")) > _MAX_PAYLOAD_BYTES
+
+
 def _ddb_set(key: str, value: Any, ttl_seconds: int) -> None:
     encoded = _encode(value)
-    if encoded is None:
+    if encoded is None or _too_large(encoded):
         return
     pk, sk = _pk_sk(key)
     item: dict[str, Any] = {"pk": pk, "sk": sk, "payload": encoded}
@@ -152,7 +167,7 @@ def _ddb_set_many(pairs: list[tuple[str, Any]], ttl_seconds: int) -> None:
     with table.batch_writer() as writer:
         for key, value in pairs:
             encoded = _encode(value)
-            if encoded is None:
+            if encoded is None or _too_large(encoded):
                 continue
             pk, sk = _pk_sk(key)
             item: dict[str, Any] = {"pk": pk, "sk": sk, "payload": encoded}

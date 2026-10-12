@@ -65,3 +65,38 @@ resource "aws_lambda_event_source_mapping" "sqs" {
   function_response_types            = ["ReportBatchItemFailures"]
   maximum_batching_window_in_seconds = 0
 }
+
+# --- optional streaming Function URL -----------------------------------------
+# See the variables: this exists for response streaming, not as a general-purpose
+# ingress. Avi's guest path is the only caller.
+
+resource "aws_lambda_function_url" "this" {
+  count = var.create_function_url ? 1 : 0
+
+  function_name      = aws_lambda_function.this.function_name
+  authorization_type = var.function_url_auth_type
+  invoke_mode        = var.function_url_invoke_mode
+
+  dynamic "cors" {
+    for_each = length(var.function_url_cors_origins) > 0 ? [1] : []
+    content {
+      allow_credentials = false
+      allow_origins     = var.function_url_cors_origins
+      allow_methods     = ["POST"]
+      allow_headers     = ["content-type"]
+      max_age           = 3600
+    }
+  }
+
+  depends_on = [aws_lambda_function.this]
+}
+
+resource "aws_lambda_permission" "function_url_public" {
+  count = var.create_function_url && var.function_url_auth_type == "NONE" ? 1 : 0
+
+  statement_id           = "AllowPublicFunctionUrl"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.this.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
+}

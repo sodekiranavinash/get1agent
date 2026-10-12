@@ -154,8 +154,8 @@ function CookiePreferencesForm({
                   <p className="text-[12px] leading-relaxed text-muted">
                     {category.description}
                   </p>
-                  <div className="mt-3 overflow-hidden rounded-md border border-border">
-                    <table className="w-full border-collapse text-left text-[11px]">
+                  <div className="mt-3 overflow-x-auto rounded-md border border-border">
+                    <table className="w-full min-w-[480px] border-collapse text-left text-[11px]">
                       <thead className="bg-canvas/60 text-subtle">
                         <tr>
                           <th className="px-2.5 py-1.5 font-medium">Cookie</th>

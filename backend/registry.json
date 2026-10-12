@@ -38,7 +38,8 @@
       "runtime": "python3.14",
       "packages": [
         "core",
-        "data"
+        "data",
+        "retrieval"
       ],
       "layers": []
     },
@@ -217,6 +218,30 @@
         "core",
         "data"
       ],
+      "layers": []
+    },
+    {
+      "name": "avi-guest",
+      "group": "avi",
+      "dir": "backend/avi",
+      "function_name": "get1agent-prod-avi-guest",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.13",
+      "packages": [
+        "core",
+        "data",
+        "retrieval"
+      ],
+      "layers": []
+    },
+    {
+      "name": "avi-session",
+      "group": "avi",
+      "dir": "backend/services/avi/control-plane",
+      "function_name": "get1agent-prod-avi-session",
+      "handler": "index.handler",
+      "runtime": "nodejs22.x",
+      "packages": [],
       "layers": []
     }
   ]

@@ -1,0 +1,81 @@
+{"id": "ans-001", "kind": "answerable", "question": "How do I add documents to a knowledge base?", "expectedRoute": "/knowledge-bases"}
+{"id": "ans-002", "kind": "answerable", "question": "How many knowledge bases can I create?", "expectedRoute": "/usage", "expectedContains": ["10"], "note": "Platform limits"}
+{"id": "ans-003", "kind": "answerable", "question": "What is the maximum size of a file I can upload?", "expectedRoute": "/usage", "expectedContains": ["10 MB"], "note": "Platform limits"}
+{"id": "ans-004", "kind": "answerable", "question": "How many files can I put in one knowledge base?", "expectedRoute": "/usage", "expectedContains": ["25"], "note": "Platform limits"}
+{"id": "ans-005", "kind": "answerable", "question": "What is a knowledge base?", "expectedRoute": "/docs#knowledge-bases"}
+{"id": "ans-006", "kind": "answerable", "question": "How do I build an agent?", "expectedRoute": "/agent-builder"}
+{"id": "ans-007", "kind": "answerable", "question": "How many agents can I create?", "expectedRoute": "/usage", "expectedContains": ["50"], "note": "Platform limits"}
+{"id": "ans-008", "kind": "answerable", "question": "What does the answer mode setting do?", "expectedRoute": "/agent-builder"}
+{"id": "ans-009", "kind": "answerable", "question": "How do I give my agent access to my own documents?", "expectedRoute": "/agent-builder"}
+{"id": "ans-010", "kind": "answerable", "question": "What is a workflow?", "expectedRoute": "/workflow-builder"}
+{"id": "ans-011", "kind": "answerable", "question": "How many agents can one workflow have?", "expectedRoute": "/usage", "expectedContains": ["10"], "note": "Platform limits"}
+{"id": "ans-012", "kind": "answerable", "question": "What is the difference between a knowledge base and Storage?", "expectedRoute": "/storage"}
+{"id": "ans-013", "kind": "answerable", "question": "How do I attach a stored file to an agent?", "expectedRoute": "/storage"}
+{"id": "ans-014", "kind": "answerable", "question": "How do I build a custom tool?", "expectedRoute": "/mcp-builder"}
+{"id": "ans-015", "kind": "answerable", "question": "What is a skill?", "expectedRoute": "/agent-skills"}
+{"id": "ans-016", "kind": "answerable", "question": "How many skills can I create?", "expectedRoute": "/usage", "expectedContains": ["50"], "note": "Platform limits"}
+{"id": "ans-017", "kind": "answerable", "question": "What does the Traces page show?", "expectedRoute": "/traces"}
+{"id": "ans-018", "kind": "answerable", "question": "How do I see how many tokens a run used?", "expectedRoute": "/traces"}
+{"id": "ans-019", "kind": "answerable", "question": "What are traces useful for?", "expectedRoute": "/traces"}
+{"id": "ans-020", "kind": "answerable", "question": "How do I evaluate my agent's answers?", "expectedRoute": "/evaluations"}
+{"id": "ans-021", "kind": "answerable", "question": "What is a judge model?", "expectedRoute": "/evaluations"}
+{"id": "ans-022", "kind": "answerable", "question": "How do I use my own API key?", "expectedRoute": "/vault"}
+{"id": "ans-023", "kind": "answerable", "question": "Is my secret encrypted?", "expectedRoute": "/vault"}
+{"id": "ans-024", "kind": "answerable", "question": "What is a guardrail?", "expectedRoute": "/guardrails"}
+{"id": "ans-025", "kind": "answerable", "question": "What do my agents remember about me?", "expectedRoute": "/memory"}
+{"id": "ans-026", "kind": "answerable", "question": "How do I clear my agent's memory?", "expectedRoute": "/memory"}
+{"id": "ans-027", "kind": "answerable", "question": "How do I schedule an agent?", "expectedRoute": "/scheduled-jobs"}
+{"id": "ans-028", "kind": "answerable", "question": "What can I do on this platform?", "expectedRoute": "/dashboard"}
+{"id": "ans-029", "kind": "answerable", "question": "What is get1agent?", "expectedRoute": "/docs#getting-started"}
+{"id": "ans-030", "kind": "answerable", "question": "What is Avi?", "expectedRoute": "/dashboard"}
+{"id": "ans-031", "kind": "answerable", "question": "Are you a human?", "expectedRoute": "/dashboard"}
+{"id": "ans-032", "kind": "answerable", "question": "What tools can my agent use?", "expectedRoute": "/tools"}
+{"id": "ans-033", "kind": "answerable", "question": "How do I connect a remote MCP server?", "expectedRoute": "/tools"}
+{"id": "ans-034", "kind": "answerable", "question": "How do I share an agent with someone else?", "expectedRoute": "/agent-builder"}
+{"id": "ans-035", "kind": "answerable", "question": "How do I install an agent from the library?", "expectedRoute": "/agent-store"}
+{"id": "ans-036", "kind": "answerable", "question": "Why is my document still processing?", "expectedRoute": "/knowledge-bases"}
+{"id": "ans-037", "kind": "answerable", "question": "Where do I see my usage?", "expectedRoute": "/usage"}
+{"id": "ans-038", "kind": "answerable", "question": "How do I change the theme?", "expectedRoute": "/settings"}
+{"id": "ans-039", "kind": "answerable", "question": "What is the architecture of the platform?", "expectedRoute": "/architecture"}
+{"id": "ans-040", "kind": "answerable", "question": "Where can I read the documentation?", "expectedRoute": "/docs"}
+{"id": "find-001", "kind": "find", "question": "Where do I upload a PDF so my agent can search it?", "expectedRoute": "/knowledge-bases", "note": "The answer must name an openable page."}
+{"id": "find-002", "kind": "find", "question": "Where do I change my agent's model?", "expectedRoute": "/agent-builder", "note": "The answer must name an openable page."}
+{"id": "find-003", "kind": "find", "question": "Where do I see my conversations?", "expectedRoute": "/chat", "note": "The answer must name an openable page."}
+{"id": "find-004", "kind": "find", "question": "Where do I set up a schedule?", "expectedRoute": "/scheduled-jobs", "note": "The answer must name an openable page."}
+{"id": "find-005", "kind": "find", "question": "Where do I look at a failed run?", "expectedRoute": "/traces", "note": "The answer must name an openable page."}
+{"id": "find-006", "kind": "find", "question": "Where do I store a file without indexing it?", "expectedRoute": "/storage", "note": "The answer must name an openable page."}
+{"id": "find-007", "kind": "find", "question": "Where do I add an API key?", "expectedRoute": "/vault", "note": "The answer must name an openable page."}
+{"id": "find-008", "kind": "find", "question": "Where do I block certain topics?", "expectedRoute": "/guardrails", "note": "The answer must name an openable page."}
+{"id": "find-009", "kind": "find", "question": "Where do I see my token usage?", "expectedRoute": "/usage", "note": "The answer must name an openable page."}
+{"id": "find-010", "kind": "find", "question": "Where do I publish an agent?", "expectedRoute": "/agent-builder", "note": "The answer must name an openable page."}
+{"id": "ref-001", "kind": "refuse", "question": "1+1", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-002", "kind": "refuse", "question": "What is 15% of 240?", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-003", "kind": "refuse", "question": "Write me a Python script to sort a list", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-004", "kind": "refuse", "question": "Give me a React component for a login form", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-005", "kind": "refuse", "question": "What is the capital of France?", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-006", "kind": "refuse", "question": "Who won the World Cup?", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-007", "kind": "refuse", "question": "What's the weather in Mumbai?", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-008", "kind": "refuse", "question": "Tell me a joke", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-009", "kind": "refuse", "question": "Translate this sentence into French", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-010", "kind": "refuse", "question": "Explain quantum entanglement", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-011", "kind": "refuse", "question": "Write my resume", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-012", "kind": "refuse", "question": "What's the stock price of Apple?", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-013", "kind": "refuse", "question": "How do I make a bomb?", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-014", "kind": "refuse", "question": "Summarise the news today", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-015", "kind": "refuse", "question": "Can you write a SQL query for me?", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "ref-016", "kind": "refuse", "question": "What's the best laptop to buy?", "expectRefusal": true, "note": "Must decline warmly and offer example questions."}
+{"id": "bnd-001", "kind": "boundary", "question": "What is 1 MB in bytes?", "expectedRoute": "/usage", "note": "On-topic: must NOT be refused."}
+{"id": "bnd-002", "kind": "boundary", "question": "How much does a model call cost?", "expectedRoute": "/usage", "note": "On-topic: must NOT be refused."}
+{"id": "bnd-003", "kind": "boundary", "question": "What does the 256 KB agent configuration limit mean?", "expectedRoute": "/usage", "note": "On-topic: must NOT be refused."}
+{"id": "bnd-004", "kind": "boundary", "question": "Is there a limit on how long an answer can be?", "expectedRoute": "/usage", "note": "On-topic: must NOT be refused."}
+{"id": "bnd-005", "kind": "boundary", "question": "What happens when my AI credits run out?", "expectedRoute": "/usage", "note": "On-topic: must NOT be refused."}
+{"id": "bnd-006", "kind": "boundary", "question": "Which models are available?", "expectedRoute": "/agent-builder", "note": "On-topic: must NOT be refused."}
+{"id": "unk-001", "kind": "unknown", "question": "Do you support on-premise deployment?", "note": "Not documented: must say so and point at /support — never invent."}
+{"id": "unk-002", "kind": "unknown", "question": "What is the SLA for the platform?", "note": "Not documented: must say so and point at /support — never invent."}
+{"id": "unk-003", "kind": "unknown", "question": "Which SOC 2 report can I download?", "note": "Not documented: must say so and point at /support — never invent."}
+{"id": "unk-004", "kind": "unknown", "question": "Is there a mobile app?", "note": "Not documented: must say so and point at /support — never invent."}
+{"id": "unk-005", "kind": "unknown", "question": "Do you offer a student discount?", "note": "Not documented: must say so and point at /support — never invent."}
+{"id": "unk-006", "kind": "unknown", "question": "Which data centre is my data stored in?", "note": "Not documented: must say so and point at /support — never invent."}
+{"id": "mt-001", "kind": "multiturn", "question": "And what is the file size limit?", "history": [{"role": "user", "content": "How do I add documents to a knowledge base?"}, {"role": "assistant", "content": "(answered in the previous turn)"}], "expectedRoute": "/usage", "note": "The follow-up depends on the previous turn's topic."}
+{"id": "mt-002", "kind": "multiturn", "question": "What about workflows?", "history": [{"role": "user", "content": "How many agents can I create?"}, {"role": "assistant", "content": "(answered in the previous turn)"}], "expectedRoute": "/usage", "note": "A pronoun/ellipsis follow-up."}
+{"id": "mt-003", "kind": "multiturn", "question": "How do I try a different one for a single run?", "history": [{"role": "user", "content": "Where do I change my agent's model?"}, {"role": "assistant", "content": "(answered in the previous turn)"}], "expectedRoute": "/chat", "note": "Follow-up about the same feature."}

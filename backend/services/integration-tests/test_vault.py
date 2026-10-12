@@ -208,15 +208,28 @@ def test_vault_routes(fake_storage, monkeypatch, vault_key):
         == "sk-live-1234567890abcdef"
     )
 
-    _call("POST", "/v1/vault/secrets", {"name": "openai-prod", "apiKey": "x"}, expect=409)
+    _call(
+        "POST",
+        "/v1/vault/secrets",
+        {"name": "openai-prod", "apiKey": "x", "baseUrl": "https://api.openai.com/v1"},
+        expect=409,
+    )
 
-    generic = _call(
+    # The Vault is provider-only: a generic secret is rejected outright.
+    _call(
         "POST",
         "/v1/vault/secrets",
         {"name": "sentry-dsn", "value": "https://abc@sentry.io/1"},
-        expect=201,
+        expect=400,
     )
-    assert generic["kind"] == "generic"
+    _call(
+        "POST",
+        "/v1/vault/secrets",
+        {"name": "generic-thing", "kind": "generic", "value": "shh"},
+        expect=400,
+    )
+    # A provider secret without a base URL is also rejected.
+    _call("POST", "/v1/vault/secrets", {"name": "no-url", "apiKey": "x"}, expect=400)
 
     _call("DELETE", f"/v1/vault/secrets/{secret_id}")
     _call("GET", f"/v1/vault/secrets/{secret_id}", expect=404)
@@ -228,7 +241,8 @@ def test_settings_exposes_budget_and_pricing(fake_storage, monkeypatch):
     assert payload["budget"]["budgetUsd"] == 0.5
     assert payload["budget"]["budgetCredits"] == 50.0
     assert payload["budget"]["spentUsd"] == 0.0
-    assert payload["budget"]["unlimited"] is False
+    assert payload["budget"]["remainingCredits"] == 50.0
+    assert "unlimited" not in payload["budget"]
     assert payload["pricing"]["__default__"]["input"] >= 0
     assert "nvidia.nemotron-nano-3-30b" in payload["pricing"]
 

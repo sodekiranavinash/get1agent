@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import traceback
 import uuid
 from typing import Any, AsyncIterator
 
@@ -294,7 +295,7 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
         platform_run = provider is None
         try:
             budget = quotas.get_budget(user_id)
-            budget_ok = budget.unlimited or not budget.exceeded
+            budget_ok = not budget.exceeded
         except Exception:  # noqa: BLE001 - a budget read must never break a run
             budget_ok = True
         if platform_run and not budget_ok:
@@ -685,7 +686,15 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
 
     except Exception as exc:  # noqa: BLE001 - surface any failure to the client
         status = "error"
-        failure = {"type": "run.error", "message": str(exc)}
+        failure = {
+            "type": "run.error",
+            "message": str(exc),
+            "errorKind": type(exc).__name__,
+            "detail": repr(exc),
+            "stack": "".join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )[:8000],
+        }
         recorded.append(failure)
         if observation is not None:
             try:
@@ -749,6 +758,7 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
                                 agent_config,
                                 str((provider or {}).get("name") or ""),
                             ),
+                            system_prompt_text=system_prompt,
                         ),
                     )
                 except Exception as exc:  # noqa: BLE001 - tracing never breaks a run

@@ -404,8 +404,13 @@ export function reduceRunEvent<T extends RunFields>(state: T, event: AgentRunEve
       return { ...state, planning: true }
     case 'plan':
       return { ...state, planning: false, plan: makePlan(event) }
-    case 'text':
-      return { ...state, answer: state.answer + event.data, planning: false }
+    case 'text': {
+      // Guard the field: a frame without a string `data` would otherwise be
+      // concatenated as the literal "undefined" into the answer.
+      const text = typeof event.data === 'string' ? event.data : ''
+      if (!text) return state
+      return { ...state, answer: state.answer + text, planning: false }
+    }
     case 'tool.start':
       return applyToolStart(state, event)
     case 'tool.input':

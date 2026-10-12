@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button } from '../ui/Button'
+import { SimpleSelect } from '../ui/SimpleSelect'
 import { Dialog } from '../ui/Dialog'
 import { Spinner } from '../ui/Spinner'
 import { ApiError, useApiClient } from '../../lib/api'
@@ -134,18 +135,14 @@ export function AddToQueueDialog({
       <div className="space-y-4">
         <label className="block space-y-1">
           <span className="text-[11px] font-semibold text-muted">Queue</span>
-          <select
-            className={INPUT_CLASS}
+          <SimpleSelect
             value={choice}
-            onChange={(event) => setChoice(event.target.value)}
-          >
-            {queues.map((queue) => (
-              <option key={queue.id} value={queue.id}>
-                {queue.name}
-              </option>
-            ))}
-            <option value={NEW_QUEUE}>New queue…</option>
-          </select>
+            onValueChange={setChoice}
+            options={[
+              ...queues.map((queue) => ({ value: queue.id, label: queue.name })),
+              { value: NEW_QUEUE, label: 'New queue…' },
+            ]}
+          />
         </label>
 
         {choice === NEW_QUEUE ? (
@@ -200,17 +197,11 @@ export function AddToQueueDialog({
                 placeholder="answer_correct"
                 onChange={(event) => setConfigName(event.target.value)}
               />
-              <select
-                className={INPUT_CLASS}
+              <SimpleSelect
                 value={configType}
-                onChange={(event) => setConfigType(event.target.value)}
-              >
-                {SCORE_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setConfigType}
+                options={SCORE_TYPES.map((type) => ({ value: type, label: type }))}
+              />
             </div>
             {configType === 'CATEGORICAL' ? (
               <input

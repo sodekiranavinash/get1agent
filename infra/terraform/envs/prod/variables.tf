@@ -373,3 +373,39 @@ variable "agent_run_allowed_origins" {
   default     = ["https://www.get1agent.com", "http://localhost:5173"]
   description = "Origins allowed to call the agent-run endpoints (control plane + MicroVM)"
 }
+
+# --- Avi (the in-product assistant) ------------------------------------------
+# Avi is a separate subsystem: its own microVM image, its own Lambdas, its own
+# reserved knowledge scope. These variables are what `infra/aws/deploy-avi.sh`
+# sets after it pushes the agent container.
+
+variable "enable_avi" {
+  type        = bool
+  default     = true
+  description = "Deploy Avi (the in-product assistant): guest Lambda, control plane and MicroVM image"
+}
+
+variable "avi_agent_image_uri" {
+  type        = string
+  default     = ""
+  description = "ARM64 ECR image URI for the Avi agent container (push it before apply)"
+}
+
+variable "avi_microvm_zip" {
+  type        = string
+  default     = ""
+  description = "Path to the Avi MicroVM artifact zip (Dockerfile + Node streaming proxy)"
+}
+
+variable "avi_session_secret" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "HMAC secret for Avi session tokens. Generate with: openssl rand -hex 32. The control plane mints with it; the agent verifies."
+}
+
+variable "avi_guest_salt" {
+  type        = string
+  default     = "get1agent-avi"
+  description = "Salt for the per-IP guest rate-limit bucket hash (raw IPs are never stored)"
+}

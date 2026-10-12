@@ -88,6 +88,14 @@ ROUTES = {
         ("GET", "/v1/user/settings"),
         ("POST", "/v1/user/settings"),
         ("GET", "/v1/user/network"),
+        # Avi feedback. The browser cannot reach the agent service's own
+        # `POST /feedback` (it would need the MicroVM ingress token), so a thumb
+        # is recorded through the ordinary user API. Avi's *turns* never come
+        # through here: locally the widget streams straight from
+        # `make avi-local-agent` (VITE_AVI_URL + VITE_AVI_MICROVM=false), which is
+        # why there are no /v1/avi/badge or /v1/avi/session routes below — the
+        # control-plane Lambda and Lambda MicroVMs are not emulated in Floci.
+        ("POST", "/v1/avi/feedback"),
         # DPDP data-principal routes (consent, access, erasure, grievance).
         ("GET", "/v1/user/consent"),
         ("POST", "/v1/user/consent"),
@@ -254,7 +262,8 @@ ROUTES = {
         ("GET", "/v1/admin/users"),
         ("POST", "/v1/admin/users/{userId}/credits"),
         ("POST", "/v1/admin/users/{userId}/reset"),
-        ("POST", "/v1/admin/users/{userId}/unlimited"),
+        ("GET", "/v1/admin/users/{userId}/limits"),
+        ("POST", "/v1/admin/users/{userId}/limits"),
         ("GET", "/v1/admin/support"),
         ("GET", "/v1/admin/support/{userId}/{ticketId}"),
         ("POST", "/v1/admin/support/{userId}/{ticketId}/reply"),
@@ -275,6 +284,19 @@ ROUTES = {
         ("GET", "/v1/admin/platform/bedrock-features"),
         ("GET", "/v1/admin/platform/network"),
         ("POST", "/v1/admin/platform/network"),
+        # Admin → Avi. The page is reachable locally only if these exist, because
+        # the local stack builds its own route table from this dict (it never reads
+        # the Terraform routes) — a route added only to api_gateway.tf 404s here.
+        ("GET", "/v1/admin/avi"),
+        ("POST", "/v1/admin/avi"),
+        ("GET", "/v1/admin/avi/feedback"),
+        ("DELETE", "/v1/admin/avi/feedback/{userId}/{runId}"),
+        ("GET", "/v1/admin/avi/traces"),
+        ("GET", "/v1/admin/avi/traces/{userId}/{traceId}"),
+        ("GET", "/v1/admin/avi/conversations"),
+        ("GET", "/v1/admin/avi/conversations/{userId}/{conversationId}"),
+        ("GET", "/v1/admin/avi/evaluations"),
+        ("GET", "/v1/admin/avi/knowledge"),
     ],
     "mcp_connections": [
         ("GET", "/v1/mcp/catalog"),

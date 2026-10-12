@@ -6,6 +6,7 @@ import {
   Copy,
   ListTree,
   Loader2,
+  TriangleAlert,
   X,
 } from 'lucide-react'
 import { ObservationList, type TraceView } from './ObservationList'
@@ -78,6 +79,9 @@ export function TraceViewer({
   const usage = usageTotals(trace?.usage)
   const status = STATUS_META[String(trace?.status || 'ok')] ?? STATUS_META.ok
   const traceId = trace?.traceId || trace?.id || ''
+  const summary = trace?.summary
+  const errorCount = summary?.errorCount ?? 0
+  const runError = trace?.statusMessage || ''
 
   async function copyId() {
     if (!traceId) return
@@ -128,6 +132,11 @@ export function TraceViewer({
               <Stat label="Tokens" value={usage.total ? formatTokens(usage.total) : '—'} />
               <Stat label="Cost" value={formatCostUsd(trace.costMicroUsd) ?? '—'} />
               <Stat label="Stages" value={String(observations.length)} />
+              {errorCount > 0 ? (
+                <span className="rounded-full bg-rose-soft px-2 py-0.5 text-[11px] text-rose">
+                  {errorCount} error{errorCount === 1 ? '' : 's'}
+                </span>
+              ) : null}
             </>
           ) : null}
           <button
@@ -140,6 +149,15 @@ export function TraceViewer({
           </button>
         </div>
       </header>
+
+      {runError ? (
+        <div className="border-b border-rose/30 bg-rose-soft/60 px-4 py-2.5">
+          <p className="flex items-start gap-2 text-[12.5px] text-rose">
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+            <span className="min-w-0 break-words">{runError}</span>
+          </p>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="flex flex-1 items-center justify-center p-8">

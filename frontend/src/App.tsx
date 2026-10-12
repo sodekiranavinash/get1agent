@@ -6,6 +6,7 @@ import { RoleRedirect } from './auth/RoleRedirect'
 import { SelectViewPage } from './auth/SelectViewPage'
 import { AdminLayout } from './admin/layouts/AdminLayout'
 import { RequireAuth } from './auth/RequireAuth'
+import { AviLauncher } from './components/avi/AviLauncher'
 import { MainLayout } from './layouts/MainLayout'
 import { AdaptiveLayout } from './layouts/AdaptiveLayout'
 import { CallbackPage } from './pages/CallbackPage'
@@ -155,6 +156,11 @@ const AdminSecurityPage = lazy(() =>
     default: m.AdminSecurityPage,
   })),
 )
+const AdminAviPage = lazy(() =>
+  import('./admin/pages/AdminAviPage').then((m) => ({
+    default: m.AdminAviPage,
+  })),
+)
 const AdminPlatformPage = lazy(() =>
   import('./admin/pages/AdminPlatformPage').then((m) => ({
     default: m.AdminPlatformPage,
@@ -289,6 +295,7 @@ function App() {
             <Route path="support" element={<AdminSupportPage />} />
             <Route path="security-reports" element={<AdminSecurityPage />} />
             <Route path="platform" element={<AdminPlatformPage />} />
+            <Route path="avi" element={<AdminAviPage />} />
             <Route
               path="integrations"
               element={<Navigate to="/admin/mcp-tools" replace />}
@@ -311,6 +318,10 @@ function App() {
       </Route>
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
+    {/* Avi is mounted once, here, deliberately: as a child of a layout it was
+        torn down — losing an in-flight answer — whenever navigation swapped
+        shells. It returns null on the shells that must stay chrome-free. */}
+    <AviLauncher />
     <PrefetchRoutes />
     </>
   )

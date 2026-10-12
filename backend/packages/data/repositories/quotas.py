@@ -14,21 +14,22 @@ class BudgetExceeded(Exception):
 
 @dataclass(frozen=True)
 class Budget:
-    """A user's LLM budget: spend against the platform (app) key."""
+    """A user's LLM budget: spend against the platform (app) key.
+
+    There is no "unlimited" mode — every user has a finite credit grant that an
+    admin raises from the admin console when it runs out.
+    """
 
     budget_micro_usd: int
     spent_micro_usd: int
-    unlimited: bool = False
 
     @property
     def remaining_micro_usd(self) -> int:
-        if self.unlimited:
-            return -1
         return max(0, self.budget_micro_usd - self.spent_micro_usd)
 
     @property
     def exceeded(self) -> bool:
-        return (not self.unlimited) and self.spent_micro_usd >= self.budget_micro_usd
+        return self.spent_micro_usd >= self.budget_micro_usd
 
 # User-level defaults. Rows in the quota item override these per user.
 # Up to 10 knowledge bases x 25 files x 10 MB, capped at 100 MB storage/user.
@@ -58,9 +59,7 @@ def _to_int(value: Any, default: int) -> int:
         return default
 
 
-def ensure_quota(
-    sub: str, *, is_admin: bool = False, unlimited: bool | None = None
-) -> None:
+def ensure_quota(sub: str, *, is_admin: bool = False) -> None:
     timestamp = now_iso()
     user_default = usage.default_budget_micro_usd(is_admin=False)
     admin_default = usage.default_budget_micro_usd(is_admin=True)
@@ -84,7 +83,6 @@ def ensure_quota(
                 "platformTokensIn": 0,
                 "platformTokensOut": 0,
                 "platformRuns": 0,
-                "unlimited": bool(unlimited) if unlimited is not None else False,
                 "createdAt": timestamp,
                 "updatedAt": timestamp,
             },
@@ -99,18 +97,15 @@ def ensure_quota(
         updates: list[str] = []
         values: dict[str, Any] = {":t": timestamp}
         names: dict[str, str] = {}
-        if unlimited is not None:
-            if bool(item.get("unlimited")) != bool(unlimited):
-                updates.append("#u = :u")
-                values[":u"] = bool(unlimited)
-                names["#u"] = "unlimited"
-        elif item.get("unlimited") and not item.get("unlimitedSetAt"):
-            # Clear a stale flag left by the old "admins are unlimited" rule.
-            # A deliberate override (set via :func:`set_unlimited`) carries
-            # ``unlimitedSetAt`` and is preserved.
+        # Drop the retired `unlimited` / `unlimitedSetAt` flags. There is no
+        # unlimited mode: every user has a finite grant an admin can raise.
+        if item.get("unlimited") is not None or item.get("unlimitedSetAt") is not None:
             updates.append("#u = :u")
             values[":u"] = False
             names["#u"] = "unlimited"
+            updates.append("#s = :s")
+            values[":s"] = False
+            names["#s"] = "unlimitedSetAt"
         # Promote an admin from the standard default to the admin default, but
         # never clobber a budget that was set manually.
         if (
@@ -141,8 +136,26 @@ def get_budget(sub: str) -> Budget:
             item.get("budgetMicroUsd"), usage.default_budget_micro_usd()
         ),
         spent_micro_usd=_to_int(item.get("spentMicroUsd"), 0),
-        unlimited=bool(item.get("unlimited")),
     )
+
+
+def get_usage_totals(sub: str) -> dict[str, int]:
+    """Platform-key usage counters for the usage/dashboard views.
+
+    ``platformTokensIn`` / ``platformTokensOut`` / ``platformRuns`` are the
+    lifetime counters charged by :func:`charge_usage`; they are not on the
+    :class:`Budget` or :class:`Quota` shapes, so read them directly.
+    """
+    item = table().get_item(Key={"pk": user_pk(sub), "sk": QUOTA_SK}).get("Item") or {}
+    return {
+        "spentMicroUsd": _to_int(item.get("spentMicroUsd"), 0),
+        "budgetMicroUsd": _to_int(
+            item.get("budgetMicroUsd"), usage.default_budget_micro_usd()
+        ),
+        "tokensIn": _to_int(item.get("platformTokensIn"), 0),
+        "tokensOut": _to_int(item.get("platformTokensOut"), 0),
+        "runs": _to_int(item.get("platformRuns"), 0),
+    }
 
 
 def check_budget(sub: str) -> None:
@@ -220,13 +233,10 @@ def get_budgets(user_ids: list[str]) -> dict[str, Budget]:
                 item.get("budgetMicroUsd"), usage.default_budget_micro_usd()
             ),
             spent_micro_usd=_to_int(item.get("spentMicroUsd"), 0),
-            unlimited=bool(item.get("unlimited")),
         )
     # Users without a quota item yet fall back to the default budget.
     for uid in unique:
-        budgets.setdefault(
-            uid, Budget(usage.default_budget_micro_usd(), 0, False)
-        )
+        budgets.setdefault(uid, Budget(usage.default_budget_micro_usd(), 0))
     return budgets
 
 
@@ -242,17 +252,19 @@ def set_budget_credits(sub: str, credits: float) -> None:
     )
 
 
-def set_unlimited(sub: str, unlimited: bool) -> None:
-    """Admin action: turn the ``unlimited`` override on or off for a user.
+def add_budget_credits(sub: str, credits: float) -> None:
+    """Admin action: top a user's credit grant up by ``credits`` (additive).
 
-    Stamps ``unlimitedSetAt`` so the login-time sync (:func:`ensure_quota`)
-    never clears a deliberate override.
+    The admin console raises a limit when a user runs out; an atomic ``ADD``
+    cannot accidentally lower a grant or race a concurrent top-up.
     """
+    delta = usage.credits_to_micro_usd(credits)
+    if delta <= 0:
+        raise ValueError("credits must be greater than zero")
     table().update_item(
         Key={"pk": user_pk(sub), "sk": QUOTA_SK},
-        UpdateExpression="SET #u = :u, unlimitedSetAt = :t, updatedAt = :t",
-        ExpressionAttributeNames={"#u": "unlimited"},
-        ExpressionAttributeValues={":u": bool(unlimited), ":t": now_iso()},
+        UpdateExpression="ADD budgetMicroUsd :c SET updatedAt = :t",
+        ExpressionAttributeValues={":c": delta, ":t": now_iso()},
     )
 
 
@@ -337,3 +349,82 @@ def adjust_counters(
         UpdateExpression="SET updatedAt = :updated ADD " + ", ".join(updates),
         ExpressionAttributeValues=values,
     )
+
+
+def set_resource_limits(
+    sub: str,
+    *,
+    max_knowledge_bases: int | None = None,
+    max_files_per_kb: int | None = None,
+    max_files_per_user: int | None = None,
+    max_file_bytes: int | None = None,
+    max_storage_bytes: int | None = None,
+) -> None:
+    """Admin action: set a user's resource caps, or clear them back to default.
+
+    This is the per-user rate-limit lever for the admin console: an admin can
+    tighten a specific account instead of changing the platform-wide default.
+    ``None`` removes the override, so the user falls back to the default.
+    """
+    settings = {
+        "maxKnowledgeBases": max_knowledge_bases,
+        "maxFilesPerKb": max_files_per_kb,
+        "maxFilesPerUser": max_files_per_user,
+        "maxFileBytes": max_file_bytes,
+        "maxStorageBytes": max_storage_bytes,
+    }
+    sets: list[str] = []
+    removes: list[str] = []
+    values: dict[str, Any] = {":updated": now_iso()}
+    names: dict[str, str] = {}
+    for index, (attr, value) in enumerate(settings.items()):
+        placeholder = f"#a{index}"
+        if value is None:
+            removes.append(placeholder)
+            names[placeholder] = attr
+            continue
+        sets.append(f"{placeholder} = :v{index}")
+        names[placeholder] = attr
+        values[f":v{index}"] = int(value)
+    expression = "SET " + ", ".join([*sets, "updatedAt = :updated"])
+    if removes:
+        expression += " REMOVE " + ", ".join(removes)
+    table().update_item(
+        Key={"pk": user_pk(sub), "sk": QUOTA_SK},
+        UpdateExpression=expression,
+        ExpressionAttributeValues=values,
+        ExpressionAttributeNames=names,
+    )
+
+
+def get_effective_limits(sub: str) -> dict[str, Any]:
+    """The caps actually in force for a user, plus whether each is an override.
+
+    The admin console reads this to show what the user is currently allowed;
+    the ingestion/quota checks read the same attributes through
+    :func:`get_quota`, so there is one source of truth.
+    """
+    item = table().get_item(Key={"pk": user_pk(sub), "sk": QUOTA_SK}).get("Item") or {}
+    defaults = {
+        "maxKnowledgeBases": DEFAULT_MAX_KNOWLEDGE_BASES,
+        "maxFilesPerKb": DEFAULT_MAX_FILES_PER_KB,
+        "maxFilesPerUser": DEFAULT_MAX_FILES_PER_USER,
+        "maxFileBytes": DEFAULT_MAX_FILE_BYTES,
+        "maxStorageBytes": DEFAULT_MAX_STORAGE_BYTES,
+    }
+    out: dict[str, Any] = {}
+    for attr, default in defaults.items():
+        raw = item.get(attr)
+        # `ensure_quota` writes every default into the item, so presence alone
+        # cannot mean "overridden" — compare against the default instead.
+        if raw is None:
+            out[attr] = {"value": default, "override": False}
+        else:
+            value = _to_int(raw, default)
+            out[attr] = {"value": value, "override": value != default}
+    out["counters"] = {
+        "kbCount": _to_int(item.get("kbCount"), 0),
+        "fileCount": _to_int(item.get("fileCount"), 0),
+        "storageBytes": _to_int(item.get("storageBytes"), 0),
+    }
+    return out

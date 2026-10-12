@@ -12,7 +12,9 @@ import {
   safeStringify,
   usageTotals,
   type MessagePart,
+  formatCostUsd,
   type TraceObservation,
+  type TraceRetrieval,
 } from '../../lib/lab'
 
 const ROLE_STYLE: Record<string, string> = {
@@ -143,6 +145,7 @@ export function ObservationDetail({
   const usage = usageTotals(observation.usage)
   const metadata = observation.metadata ?? {}
   const metadataEntries = Object.entries(metadata).filter(([, value]) => value !== undefined)
+  const retrieval = (observation.metadata?.retrieval ?? null) as TraceRetrieval | null
   const sources = Array.isArray(metadata.sources) ? (metadata.sources as SourceRef[]) : []
   const hasMetadata = metadataEntries.length > 0
 
@@ -213,6 +216,10 @@ export function ObservationDetail({
               value={usage.total ? `${usage.input.toLocaleString()} / ${usage.output.toLocaleString()}` : '—'}
             />
             <Meta label="Type" value={meta.label} />
+            <Meta
+              label="Cost"
+              value={formatCostUsd(observation.costMicroUsd) ?? '—'}
+            />
           </div>
 
           {observation.input !== undefined && observation.input !== null ? (
@@ -226,6 +233,8 @@ export function ObservationDetail({
               <ValueView value={observation.output} />
             </Section>
           ) : null}
+
+          {retrieval ? <RetrievalPanel retrieval={retrieval} /> : null}
 
           {sources.length > 0 ? (
             <Section title="Sources">
@@ -259,5 +268,76 @@ export function ObservationDetail({
         </>
       )}
     </div>
+  )
+}
+
+
+/** Structured view of a retriever call: per-leg timings and chunk scores. */
+function RetrievalPanel({ retrieval }: { retrieval: TraceRetrieval }) {
+  const chunks = retrieval.chunks ?? []
+  const meta = retrieval.meta ?? {}
+  const scoreKeys = [
+    'rerankScore',
+    'rrfScore',
+    'vectorScore',
+    'lexicalScore',
+    'score',
+  ] as const
+  return (
+    <Section title="Retrieval">
+      <div className="flex flex-wrap gap-2">
+        {Object.entries(meta).map(([key, value]) => (
+          <span
+            key={key}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-raised px-2 py-1 text-[11px]"
+          >
+            <span className="text-subtle">{humanizeKey(key)}</span>
+            <span className="font-mono text-foreground">
+              {typeof value === 'number' ? Math.round(value * 100) / 100 : String(value)}
+            </span>
+          </span>
+        ))}
+        {retrieval.chunkCount !== undefined ? (
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-raised px-2 py-1 text-[11px]">
+            <span className="text-subtle">Chunks</span>
+            <span className="font-mono text-foreground">{retrieval.chunkCount}</span>
+          </span>
+        ) : null}
+      </div>
+
+      {chunks.length > 0 ? (
+        <div className="mt-3 overflow-x-auto rounded-md border border-border">
+          <table className="w-full min-w-[560px] border-collapse text-left text-[11.5px]">
+            <thead className="bg-canvas/60 text-subtle">
+              <tr>
+                <th className="px-2.5 py-1.5 font-medium">Chunk</th>
+                {scoreKeys.map((key) => (
+                  <th key={key} className="px-2.5 py-1.5 font-medium">
+                    {humanizeKey(key)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {chunks.map((chunk, index) => (
+                <tr key={chunk.chunkId ?? index} className="border-t border-border">
+                  <td className="max-w-[240px] truncate px-2.5 py-1.5 font-mono text-foreground">
+                    {chunk.fileName ? `${chunk.fileName}` : chunk.chunkId ?? `#${index + 1}`}
+                    {chunk.page ? <span className="text-subtle"> p.{chunk.page}</span> : null}
+                  </td>
+                  {scoreKeys.map((key) => (
+                    <td key={key} className="px-2.5 py-1.5 font-mono text-muted">
+                      {typeof chunk[key] === 'number'
+                        ? (chunk[key] as number).toFixed(4)
+                        : '—'}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </Section>
   )
 }

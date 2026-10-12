@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Check } from 'lucide-react'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { SimpleSelect } from '../ui/SimpleSelect'
 import { Dialog } from '../ui/Dialog'
 import { Spinner } from '../ui/Spinner'
 import { ApiError, useApiClient } from '../../lib/api'
@@ -234,28 +235,27 @@ function ScoreField({
           onChange={(event) => onChange({ value: event.target.value })}
         />
       ) : config.dataType === 'BOOLEAN' ? (
-        <select
-          className={INPUT_CLASS}
+        <SimpleSelect
           value={draft.stringValue ?? ''}
-          onChange={(event) => onChange({ stringValue: event.target.value })}
-        >
-          <option value="">Select…</option>
-          <option value="true">true</option>
-          <option value="false">false</option>
-        </select>
+          onValueChange={(value) => onChange({ stringValue: value })}
+          options={[
+            { value: '', label: 'Select…' },
+            { value: 'true', label: 'true' },
+            { value: 'false', label: 'false' },
+          ]}
+        />
       ) : config.dataType === 'CATEGORICAL' ? (
-        <select
-          className={INPUT_CLASS}
+        <SimpleSelect
           value={draft.stringValue ?? ''}
-          onChange={(event) => onChange({ stringValue: event.target.value })}
-        >
-          <option value="">Select…</option>
-          {(config.categories ?? []).map((category) => (
-            <option key={category.label} value={category.label}>
-              {category.label}
-            </option>
-          ))}
-        </select>
+          onValueChange={(value) => onChange({ stringValue: value })}
+          options={[
+            { value: '', label: 'Select…' },
+            ...(config.categories ?? []).map((category) => ({
+              value: category.label,
+              label: category.label,
+            })),
+          ]}
+        />
       ) : (
         <textarea
           className={`${INPUT_CLASS} min-h-[64px]`}

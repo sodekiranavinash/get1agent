@@ -150,3 +150,33 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+# --- optional Function URL ---------------------------------------------------
+# A Function URL exists for one narrow case: a *streaming* endpoint. API Gateway
+# HTTP APIs cannot stream and cap an integration at 30s, and Lambda response
+# streaming is only reachable through a Function URL — which is why Avi's guest
+# ingress uses one.
+
+variable "create_function_url" {
+  type        = bool
+  default     = false
+  description = "Create a public Function URL for this Lambda."
+}
+
+variable "function_url_invoke_mode" {
+  type        = string
+  default     = "BUFFERED"
+  description = "BUFFERED or RESPONSE_STREAM (RESPONSE_STREAM requires streaming support in the handler)."
+}
+
+variable "function_url_auth_type" {
+  type        = string
+  default     = "NONE"
+  description = "AWS_IAM or NONE. Avi's guest route is NONE, protected by per-IP rate limits instead."
+}
+
+variable "function_url_cors_origins" {
+  type        = list(string)
+  default     = []
+  description = "Allowed origins for the Function URL (empty disables CORS, which a browser SSE client needs)."
+}

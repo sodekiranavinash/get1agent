@@ -1,25 +1,5 @@
-module "api_gateway" {
-  count  = var.enable_api_gateway ? 1 : 0
-  source = "../../modules/api_gateway"
-
-  name_prefix          = "get1agent-prod"
-  api_hostname         = var.api_hostname
-  auth_domain          = var.auth_domain
-  auth_audience        = var.auth_audience
-  enable_custom_domain = var.enable_api_custom_domain
-
-  cors_allow_origins = [
-    "https://www.get1agent.com",
-    "http://localhost:5173",
-  ]
-
-  # Common throttle for every route (per-route limits for the heavy MCP/agent
-  # routes are set on the routes below).
-  stage_throttle_burst_limit = var.stage_throttle_burst_limit
-  stage_throttle_rate_limit  = var.stage_throttle_rate_limit
-
-  # /health is a MOCK 200 integration inside the api_gateway module (no Lambda).
-  lambda_routes = var.enable_backend_lambdas ? merge({
+locals {
+  backend_lambda_routes = {
     user_settings_get = {
       method               = "GET"
       path                 = "/v1/user/settings"
@@ -40,6 +20,18 @@ module "api_gateway" {
       lambda_invoke_arn    = module.user_api[0].invoke_arn
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
+    }
+    # Avi feedback. The browser cannot reach the agent service's own
+    # `POST /feedback` (it would need the MicroVM ingress token), so a thumb is
+    # recorded through the ordinary user API into the same AVIFEEDBACK# item.
+    avi_feedback = {
+      method               = "POST"
+      path                 = "/v1/avi/feedback"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+      throttle_burst_limit = 20
+      throttle_rate_limit  = 10
     }
     # DPDP data-principal routes (consent, access, erasure, grievance). The
     # ConsentGate mounted on every signed-in page reads GET /v1/user/consent, so
@@ -1233,6 +1225,80 @@ module "api_gateway" {
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
+    # Avi admin controls (/v1/admin/avi/*): the kill switch, the model pickers
+    # and limits, plus the owner-scoped feedback/trace/conversation reads the
+    # /admin/avi page makes. Distinct from `local.avi_routes`, which is the
+    # user-facing /v1/avi/* ingress served by the Avi control plane.
+    admin_avi_config = {
+      method               = "GET"
+      path                 = "/v1/admin/avi"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_avi_config_update = {
+      method               = "POST"
+      path                 = "/v1/admin/avi"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_avi_feedback = {
+      method               = "GET"
+      path                 = "/v1/admin/avi/feedback"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_avi_feedback_delete = {
+      method               = "DELETE"
+      path                 = "/v1/admin/avi/feedback/{userId}/{runId}"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_avi_traces = {
+      method               = "GET"
+      path                 = "/v1/admin/avi/traces"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_avi_trace_detail = {
+      method               = "GET"
+      path                 = "/v1/admin/avi/traces/{userId}/{traceId}"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_avi_conversations = {
+      method               = "GET"
+      path                 = "/v1/admin/avi/conversations"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_avi_conversation_detail = {
+      method               = "GET"
+      path                 = "/v1/admin/avi/conversations/{userId}/{conversationId}"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_avi_evaluations = {
+      method               = "GET"
+      path                 = "/v1/admin/avi/evaluations"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
+    admin_avi_knowledge = {
+      method               = "GET"
+      path                 = "/v1/admin/avi/knowledge"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
     mcp_catalog = {
       method               = "GET"
       path                 = "/v1/mcp/catalog"
@@ -1340,19 +1406,80 @@ module "api_gateway" {
       throttle_burst_limit = 20
       throttle_rate_limit  = 10
     }
-    }, var.enable_agent_runtime && var.agent_worker_image_uri != "" ? {
-    # Auth is enforced at the gateway (JWT authorizer); the Lambda only launches
-    # a Lambda MicroVM and returns its endpoint + ingress token. Gated on the
-    # worker image URI because the control-plane Lambda only exists once the
-    # agent runtime is deployed (see deploy-agent-runtime.sh).
+  }
+
+  agent_runtime_routes = var.enable_agent_runtime && var.agent_worker_image_uri != "" ? {
+    # Auth is enforced at the gateway (JWT authorizer); the Lambda only launches a
+    # Lambda MicroVM and returns its endpoint + ingress token. Gated on the worker
+    # image URI because the control-plane Lambda only exists once the agent runtime
+    # is deployed (see deploy-agent-runtime.sh).
     agent_run_session = {
       method               = "POST"
       path                 = "/v1/agent-run/session"
-      lambda_invoke_arn    = module.agent_runtime[0].control_plane_invoke_arn
-      lambda_function_name = module.agent_runtime[0].control_plane_function_name
+      lambda_invoke_arn    = one(module.agent_runtime[*].control_plane_invoke_arn)
+      lambda_function_name = one(module.agent_runtime[*].control_plane_function_name)
       authorization_type   = "JWT"
       throttle_burst_limit = 10
       throttle_rate_limit  = 5
     }
-  } : {}) : {}
+  } : null
+
+  # Avi (the in-product assistant). One control plane serves both audiences:
+  # `/badge` is unauthenticated by design (guests have no account) and throttled
+  # much harder; `/session` requires the gateway-verified JWT. Both return the
+  # MicroVM endpoint plus a signed token the agent service verifies, so the service
+  # never has to trust a header or a body field.
+  avi_routes = var.enable_avi && one(module.avi_session[*].invoke_arn) != null ? {
+    avi_badge = {
+      method               = "POST"
+      path                 = "/v1/avi/badge"
+      lambda_invoke_arn    = one(module.avi_session[*].invoke_arn)
+      lambda_function_name = one(module.avi_session[*].function_name)
+      authorization_type   = "NONE"
+      throttle_burst_limit = 4
+      throttle_rate_limit  = 2
+    }
+    avi_session = {
+      method               = "POST"
+      path                 = "/v1/avi/session"
+      lambda_invoke_arn    = one(module.avi_session[*].invoke_arn)
+      lambda_function_name = one(module.avi_session[*].function_name)
+      authorization_type   = "JWT"
+      throttle_burst_limit = 10
+      throttle_rate_limit  = 5
+    }
+  } : null
+}
+
+module "api_gateway" {
+  count  = var.enable_api_gateway ? 1 : 0
+  source = "../../modules/api_gateway"
+
+  name_prefix          = "get1agent-prod"
+  api_hostname         = var.api_hostname
+  auth_domain          = var.auth_domain
+  auth_audience        = var.auth_audience
+  enable_custom_domain = var.enable_api_custom_domain
+
+  cors_allow_origins = [
+    "https://www.get1agent.com",
+    "http://localhost:5173",
+  ]
+
+  # Common throttle for every route (per-route limits for the heavy MCP/agent
+  # routes are set on the routes below).
+  stage_throttle_burst_limit = var.stage_throttle_burst_limit
+  stage_throttle_rate_limit  = var.stage_throttle_rate_limit
+
+  # /health is a MOCK 200 integration inside the api_gateway module (no Lambda).
+  # Route groups are composed in locals: `merge()` accepts several arguments and
+  # ignores nulls, so each optional group (the agent runtime, Avi) is its own flat
+  # conditional instead of a ternary nested inside another ternary. Referencing a
+  # module that `count = 0` removed is avoided with `one(...)`, which yields null
+  # rather than erroring.
+  lambda_routes = merge(
+    local.backend_lambda_routes,
+    local.agent_runtime_routes,
+    local.avi_routes,
+  )
 }

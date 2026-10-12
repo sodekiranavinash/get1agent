@@ -39,8 +39,8 @@ MODEL_PRICES: dict[str, tuple[float, float]] = {
 }
 
 # Per-user default budget in USD (overridable per user on the quota item).
-# Everyone — including admins — starts on the same default; an admin can grant
-# more credits from the admin console. A per-user `unlimited` flag also exists.
+# Everyone — including admins — starts on the same default and an admin raises
+# the limit from the admin console when it runs out. There is no unlimited mode.
 DEFAULT_USER_BUDGET_USD = float(os.environ.get("USER_DEFAULT_BUDGET_USD", "0.5"))
 DEFAULT_ADMIN_BUDGET_USD = float(os.environ.get("ADMIN_DEFAULT_BUDGET_USD", "0.5"))
 

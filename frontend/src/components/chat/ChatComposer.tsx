@@ -27,7 +27,7 @@ import {
   type RunResourceOverrides,
 } from '../../lib/agents'
 import type { RunContext } from '../../lib/agentRun'
-import { decodeVaultModel, encodeVaultModel, type VaultSecret } from '../../lib/vault'
+import { decodeVaultModel, encodeVaultModel, type VaultSecret, vaultModelLabel } from '../../lib/vault'
 import { RunConfigButton, WorkflowRunConfigButton } from './ChatRunConfigDialog'
 
 const MAX_TEXTAREA_HEIGHT = 200
@@ -226,7 +226,9 @@ export function ChatComposer({
     : null
   const modelLabel = vaultSelection
     ? `${vaultProvider?.label ?? 'Vault provider'}${
-        vaultSelection.model ? ` · ${vaultSelection.model}` : ''
+        vaultSelection.model
+          ? ` · ${vaultModelLabel(vaultSelection.model, vaultProvider?.modelLabels)}`
+          : ''
       }`
     : agentModelLabel(model)
   const contextFull = Boolean(context?.full)
@@ -400,10 +402,14 @@ export function ChatComposer({
                                 </span>
                                 <span className="min-w-0 flex-1">
                                   <span className="block truncate text-[12.5px] font-medium text-foreground">
-                                    {secretModel || secret.label}
+                                    {secretModel
+                                      ? vaultModelLabel(secretModel, secret.modelLabels)
+                                      : secret.label}
                                   </span>
                                   <span className="block truncate text-[10.5px] text-subtle">
-                                    {secret.label} · Vault
+                                    {secretModel
+                                      ? `${secret.label} · ${secretModel}`
+                                      : `${secret.label} · Vault`}
                                   </span>
                                 </span>
                                 {active ? <Check className="size-3.5 shrink-0 text-accent" /> : null}

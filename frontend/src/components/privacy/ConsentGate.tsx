@@ -34,9 +34,11 @@ export function ConsentGate() {
   const demo = useDemoMode()
   const enabled = isAuthenticated && !demo
 
-  const { data } = usePageQuery(CONSENT_QUERY_KEY, () => fetchConsent(api), {
-    enabled,
-  })
+  const { data, refetch } = usePageQuery(
+    CONSENT_QUERY_KEY,
+    () => fetchConsent(api),
+    { enabled },
+  )
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [ageChoice, setAgeChoice] = useState<AgeChoice>(null)
@@ -84,6 +86,10 @@ export function ConsentGate() {
         language: navigator.language?.slice(0, 2) || 'en',
       })
       toast.success('Thanks — your consent has been recorded.')
+      // Re-read the stored consent so `needsConsent` flips false and the gate
+      // closes. Without this the cached `privacy-consent` entry keeps its old
+      // `consent: null` and the dialog stays open after a successful save.
+      refetch()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not save consent')
     } finally {

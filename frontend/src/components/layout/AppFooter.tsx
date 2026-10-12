@@ -53,7 +53,7 @@ export function AppFooter({ className = '' }: { className?: string } = {}) {
 
   return (
     <footer
-      className={`relative z-10 mt-auto border-t border-border bg-canvas/95 px-6 py-3.5 backdrop-blur lg:px-8 ${className}`}
+      className={`relative z-10 mt-auto border-t border-border bg-canvas/95 px-6 py-2 backdrop-blur lg:px-8 ${className}`}
     >
       <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-center gap-x-2 gap-y-1.5 whitespace-nowrap text-[11px] text-subtle lg:flex-nowrap">
         <span>&copy; {new Date().getFullYear()} get1agent</span>

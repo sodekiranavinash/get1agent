@@ -22,6 +22,7 @@ import {
   type Strength,
 } from '../../lib/guardrails'
 import type { ApiClient } from '../../lib/api'
+import { SimpleSelect } from '../ui/SimpleSelect'
 
 type Props = {
   open: boolean
@@ -92,7 +93,7 @@ function Labelled({ label, children }: { label: string; children: ReactNode }) {
 }
 
 const inputClass =
-  'mt-1 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-[12.5px] text-foreground outline-none placeholder:text-subtle focus:border-accent disabled:opacity-60'
+  'mt-1 w-full rounded-md border border-border bg-canvas px-2.5 py-1.5 text-[12.5px] text-foreground outline-none placeholder:text-subtle focus:border-accent disabled:opacity-60'
 
 function InlineSelect({
   value,
@@ -108,19 +109,16 @@ function InlineSelect({
   label?: string
 }) {
   return (
-    <select
+    <SimpleSelect
       aria-label={label}
       value={value}
+      onValueChange={onChange}
       disabled={disabled}
-      onChange={(event) => onChange(event.target.value)}
-      className="rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground outline-none focus:border-accent disabled:opacity-60"
-    >
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+      options={options.map((option) => ({
+        value: option.value,
+        label: option.label,
+      }))}
+    />
   )
 }
 
@@ -624,7 +622,7 @@ export function GuardrailEditorDialog({ open, onOpenChange, api, initial, onSave
                             threshold: Math.max(0, Math.min(0.99, Number(event.target.value) || 0)),
                           })
                         }
-                        className="w-20 rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground outline-none focus:border-accent"
+                        className="w-20 rounded-md border border-border bg-canvas px-2 py-1 text-[12px] text-foreground outline-none focus:border-accent"
                       />
                     </span>
                     <InlineSelect

@@ -221,65 +221,62 @@ def test_lab_queue_review(monkeypatch, fake_storage):
 
 
 def test_lab_metrics(monkeypatch, fake_storage):
-    patch_lambda_storage(monkeypatch, handler, fake_storage)
-    pass  # AWS-native Lab store is always configured
+    """The metrics endpoint passes the store's aggregated payload straight through.
 
-    import json as _json
+    Regression guard: the handler used to consume a Langfuse-style
+    ``{"data": [...]}`` response while the store returned
+    ``{totals, series, scores, models}``, so every chart rendered zeros.
+    """
+    patch_lambda_storage(monkeypatch, handler, fake_storage)
+
     import urllib.parse
 
-    seen: list[dict] = []
+    seen: list[str] = []
+    seen_user: list[str] = []
 
     def fake_request(method, path, payload=None):
+        seen.append(path)
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
-        spec = _json.loads(query.get("query", ["{}"])[0])
-        seen.append(spec)
-        if spec["view"] == "scores-numeric":
-            return {"data": [{"name": "eval_faithfulness", "avg_value": 0.9, "count_count": 4}]}
-        if spec.get("dimensions"):
-            return {
-                "data": [
-                    {
-                        "providedModelName": "gpt-4o-mini",
-                        "count_count": 5,
-                        "sum_totalCost": 0.04,
-                        "sum_totalTokens": 1200,
-                    }
-                ]
-            }
-        if "timeDimension" in spec:
-            return {
-                "data": [
-                    {"time_dimension": "2026-09-27T00:00:00Z", "count_count": 3, "p95_latency": 1200, "sum_totalCost": 0.02},
-                    {"time_dimension": "2026-09-28T00:00:00Z", "count_count": 5, "p95_latency": 900, "sum_totalCost": 0.03},
-                ]
-            }
-        measures = {item["measure"] for item in spec["metrics"]}
-        if measures == {"totalTokens"}:
-            return {"data": [{"sum_totalTokens": 1500}]}
-        return {"data": [{"count_count": 8, "avg_latency": 700, "p95_latency": 1200, "sum_totalCost": 0.05}]}
+        seen_user.append((query.get("userId") or [""])[0])
+        assert query.get("days") == ["7"]
+        return {
+            "totals": {
+                "count_count": 8,
+                "run_count": 8,
+                "message_count": 21,
+                "avg_latency": 700,
+                "p95_latency": 1200,
+                "sum_totalCost": 0.05,
+                "sum_totalTokens": 1500,
+            },
+            "series": [
+                {"time_dimension": "2026-09-27", "count_count": 3, "p95_latency": 0.0, "sum_totalCost": 0.0},
+                {"time_dimension": "2026-09-28", "count_count": 5, "p95_latency": 0.0, "sum_totalCost": 0.0},
+            ],
+            "scores": [{"name": "eval_faithfulness", "avg_value": 0.9, "count_count": 4}],
+            "models": [{"model": "gpt-4o-mini", "count": 5, "cost": 0.04, "tokens": 1200}],
+        }
 
     monkeypatch.setattr(handler, "_lab_request", fake_request)
 
     payload = _call("GET", "/v1/lab/metrics?days=7")
     assert payload["configured"] is True
+    assert payload["days"] == 7
     assert payload["totals"]["traces"] == 8
+    assert payload["totals"]["runs"] == 8
+    assert payload["totals"]["messages"] == 21
     assert payload["totals"]["p95Latency"] == 1200
     assert payload["totals"]["cost"] == 0.05
     assert payload["totals"]["tokens"] == 1500
     assert len(payload["series"]) == 2
     assert payload["series"][1]["count"] == 5
-    assert payload["scores"] == [
-        {"name": "eval_faithfulness", "avg": 0.9, "count": 4}
-    ]
+    assert payload["scores"] == [{"name": "eval_faithfulness", "avg": 0.9, "count": 4}]
     assert payload["models"] == [
         {"model": "gpt-4o-mini", "count": 5, "cost": 0.04, "tokens": 1200}
     ]
-    # Every query is scoped to the caller and the trace root.
-    from data.repositories.users import get_user_by_sub
-
-    uid = get_user_by_sub(SUB)["userId"]
-    for spec in seen:
-        assert {"column": "userId", "operator": "=", "value": uid, "type": "string"} in spec["filters"]
+    # One round trip, scoped to the caller — not five queries per metric.
+    assert len(seen) == 1
+    assert seen_user[0]
 
 
 def test_lab_add_trace_creates_missing_dataset(monkeypatch, fake_storage):

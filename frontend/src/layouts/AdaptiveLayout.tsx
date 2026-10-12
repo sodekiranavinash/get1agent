@@ -41,7 +41,9 @@ export function AdaptiveLayout() {
 
   const content = (
     <>
-      <div className="mx-auto w-full max-w-[1440px] px-6 pt-5 lg:px-8">
+      {/* The gutter must match `PageShell` (px-4 sm:px-6 lg:px-8) so the
+          "Return to …" row and the page content below it share one left edge. */}
+      <div className="mx-auto w-full max-w-[1440px] px-4 pt-5 sm:px-6 lg:px-8">
         <ReturnLink />
       </div>
       <Outlet />

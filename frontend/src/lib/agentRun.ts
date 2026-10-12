@@ -65,6 +65,11 @@ export type AgentSource = {
   /** Web sources: preview assets returned by the search provider. */
   favicon?: string
   image?: string
+  /**
+   * In-app page this source documents, when the source is platform knowledge.
+   * Avi links it; the agent chat carousel does not use it.
+   */
+  route?: string
 }
 
 /** A skill folded into the agent's system prompt (not a tool). */
@@ -120,7 +125,21 @@ export type AgentRunEvent =
       /** Present when a resumed turn is replayed from the transcript. */
       answer?: string
     }
-  | { type: 'run.completed'; stopReason?: string; usage?: AgentUsage }
+  | {
+      type: 'run.completed'
+      stopReason?: string
+      usage?: AgentUsage
+      /**
+       * Avi's final answer text. The agent runtime does not send it (its answer
+       * arrives as `text` frames), but Avi's `FrameWriter` does — and the widget
+       * needs it: the reducer blanks the accumulated answer when a tool call
+       * starts, so a turn that streamed its text *before* its last tool call
+       * would otherwise render as "No answer."
+       */
+      text?: string
+      /** Avi's run-global citations, including ones gathered before any tool call. */
+      sources?: AgentSource[]
+    }
   | { type: 'trace'; traceId?: string | null; traceUrl?: string | null }
   | {
       type: 'context'

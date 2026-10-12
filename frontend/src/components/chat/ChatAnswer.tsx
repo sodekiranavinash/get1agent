@@ -20,6 +20,19 @@ function linkCitations(content: string, turnId: string): string {
   )
 }
 
+/**
+ * Drop the inline `[n]` markers entirely.
+ *
+ * Used by the narrow widget, which renders no numbered source carousel — a badge
+ * there jumps nowhere and just leaves a stray blue "1" mid-sentence. The
+ * horizontal whitespace goes with it so no double space is left behind, while a
+ * leading newline is deliberately *not* matched (that would glue two paragraphs
+ * together).
+ */
+function stripCitations(content: string): string {
+  return content.replace(/[ \t]*\[(\d+(?:\s*[-,]\s*\d+)*)\](?!\()/g, '')
+}
+
 /** A round, numbered citation badge that jumps to its source line. */
 function CitationBadge({ number, turnId }: { number: number; turnId: string }) {
   return (
@@ -123,14 +136,20 @@ export function ChatAnswer({
   format,
   status,
   turnId,
+  compact = false,
 }: {
   content: string
   format: AgentOutputFormat
   status: ChatTurnStatus
   turnId: string
+  /** Wide surfaces (chat, builder) keep the format header; narrow widgets drop it. */
+  compact?: boolean
 }) {
   const streaming = status === 'streaming'
   const FormatIcon = format === 'json' ? Braces : format === 'text' ? FileText : Sparkles
+  // The widget has no numbered carousel to jump to, so it drops the markers
+  // instead of rendering badges that go nowhere.
+  const body = compact ? stripCitations(content) : content
 
   if (status === 'error' && !content) {
     return (
@@ -156,21 +175,29 @@ export function ChatAnswer({
 
   return (
     <div>
-      <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.12em] text-subtle uppercase">
-        <FormatIcon className="size-3" />
-        Response · {format}
-      </div>
+      {!compact && (
+        <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.12em] text-subtle uppercase">
+          <FormatIcon className="size-3" />
+          Response · {format}
+        </div>
+      )}
       {format === 'markdown' ? (
-        <div className="md-preview">
+        <div
+          className={
+            compact
+              ? 'md-preview text-[12.5px] [&_.md-preview]:text-[12.5px] [&_.md-preview]:leading-[1.65]'
+              : 'md-preview'
+          }
+        >
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
-            {linkCitations(content, turnId)}
+            {linkCitations(body, turnId)}
           </ReactMarkdown>
           {streaming ? <Caret /> : null}
         </div>
       ) : format === 'json' ? (
-        <JsonAnswer content={content} streaming={streaming} />
+        <JsonAnswer content={body} streaming={streaming} />
       ) : (
-        <TextWithCitations content={content} turnId={turnId} streaming={streaming} />
+        <TextWithCitations content={body} turnId={turnId} streaming={streaming} />
       )}
     </div>
   )

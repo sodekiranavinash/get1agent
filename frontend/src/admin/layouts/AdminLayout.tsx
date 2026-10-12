@@ -31,7 +31,7 @@ function AdminLayoutContent() {
       </aside>
 
       <main
-        className={`flex min-h-screen flex-col transition-[padding] duration-200 ease-out ${
+        className={`flex min-h-screen min-w-0 flex-col transition-[padding] duration-200 ease-out ${
           effectiveCollapsed ? 'pl-[60px]' : 'pl-[240px]'
         }`}
       >

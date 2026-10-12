@@ -100,6 +100,16 @@ NOTIFICATION_PREFIX = "NOTIF#"
 # Sort-key prefix for per-case run results under an ``EVALRUN#<runId>`` partition.
 # (Curated datasets/cases live in the LAB# DynamoDB partition.)
 EVAL_CASE_PREFIX = "CASE#"
+# --- Avi (the in-product assistant) ------------------------------------------
+# Avi owns its own prefixes so its conversations, feedback, traces and eval runs
+# never mix with the agent equivalents in the sidebar, the trace list or the
+# admin feedback table.
+AVI_CHAT_PREFIX = "AVICHAT#"
+AVI_FEEDBACK_PREFIX = "AVIFEEDBACK#"
+AVI_TRACE_PREFIX = "AVITRACE#"
+AVI_EVAL_RUN_PREFIX = "AVIEVAL#"
+# Fixed-window guest counter partition (keyed by a hash of the caller's IP).
+AVI_GUEST_RATE_PK = "RATE#avi-guest"
 USER_PREFIX = "USER#"
 SUB_PREFIX = "SUB#"
 
@@ -349,3 +359,46 @@ def security_report_sk(report_id: str) -> str:
 def security_all_sk(created_at: str, report_id: str) -> str:
     """GSI3 ``byStatus`` sort key: ``<createdAt>#<reportId>`` (newest first)."""
     return f"{created_at}#{report_id}"
+
+
+# --- Avi (the in-product assistant) ------------------------------------------
+#
+# Avi keeps its own entity prefixes so nothing it writes can appear in the
+# agent chat sidebar (``CHAT#``), the agent trace list (``TRACE#``) or the
+# agent run-feedback list (``FEEDBACK#``). Avi conversations and traces are
+# surfaced only on the admin → Avi page.
+
+
+def avi_chat_sk(conversation_id: str) -> str:
+    """One Avi conversation's metadata (transcript lives in S3)."""
+    return f"{AVI_CHAT_PREFIX}{conversation_id}"
+
+
+def avi_chat_by_user_sk(updated_at: str, conversation_id: str) -> str:
+    """GSI2 ``byUser`` sort key: the admin conversation list, newest first."""
+    return f"{AVI_CHAT_PREFIX}{updated_at}#{conversation_id}"
+
+
+def avi_feedback_sk(run_id: str) -> str:
+    """One Avi answer's feedback (thumbs + comment + the question it answered)."""
+    return f"{AVI_FEEDBACK_PREFIX}{run_id}"
+
+
+def avi_trace_sk(trace_id: str) -> str:
+    """One Avi run's trace index item (the tree itself lives in S3)."""
+    return f"{AVI_TRACE_PREFIX}{trace_id}"
+
+
+def avi_trace_by_user_sk(started_at: str, trace_id: str) -> str:
+    """GSI2 ``byUser`` sort key: the admin Avi trace list, newest first."""
+    return f"{AVI_TRACE_PREFIX}{started_at}#{trace_id}"
+
+
+def avi_eval_run_sk(run_id: str) -> str:
+    """GSI2 ``byUser`` sort key for an Avi evaluation run (admin-owned)."""
+    return f"{AVI_EVAL_RUN_PREFIX}{run_id}"
+
+
+def avi_guest_rate_sk(window: str) -> str:
+    """A per-IP guest counter for one fixed window (under ``RATE#avi-guest``)."""
+    return f"W#{window}"

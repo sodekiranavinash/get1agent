@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Plus } from 'lucide-react'
+import { ErrorState } from '../components/ui/ErrorState'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
 import { Skeleton } from '../components/ui/Skeleton'
@@ -27,7 +28,7 @@ type EvalsData = {
 
 export function EvaluationsPage() {
   const api = useApiClient()
-  const { data, isPending, refetch } = usePageQuery<EvalsData>(EVALS_QUERY_KEY, async () => {
+  const { data, isPending, isError, error, refetch } = usePageQuery<EvalsData>(EVALS_QUERY_KEY, async () => {
     const [datasets, runs, kbs, agents] = await Promise.all([
       api.get<{ datasets: EvalDataset[] }>('/v1/evals/datasets'),
       api.get<{ runs: EvalRun[] }>('/v1/evals/runs'),
@@ -60,6 +61,22 @@ export function EvaluationsPage() {
   }
 
   if (isPending) return <EvaluationsSkeleton />
+
+  // `usePageQuery` leaves `data` undefined when the fetch fails, so without this
+  // the tabs below would render as genuinely empty datasets and runs.
+  if (isError) {
+    return (
+      <PageShell>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <ErrorState
+            title="Couldn't load evaluations"
+            error={error}
+            onRetry={() => refetch()}
+          />
+        </div>
+      </PageShell>
+    )
+  }
 
   const datasets = data?.datasets ?? []
   const runs = data?.runs ?? []

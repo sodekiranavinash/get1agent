@@ -45,6 +45,28 @@ class ProviderPresetTests(unittest.TestCase):
     def test_ollama_does_not_require_a_key(self) -> None:
         self.assertFalse(providers.get_provider("ollama")["requiresKey"])
 
+    def test_deepseek_offers_current_model_ids(self) -> None:
+        """DeepSeek retired `deepseek-chat`/`deepseek-reasoner`.
+
+        Seeing those stale aliases in the model picker is the symptom; the ids
+        must track the provider's current list.
+        """
+        deepseek = providers.get_provider("deepseek")
+        self.assertEqual(deepseek["defaultModel"], "deepseek-flash")
+        self.assertNotIn("deepseek-chat", deepseek["models"])
+        self.assertNotIn("deepseek-reasoner", deepseek["models"])
+        self.assertEqual(deepseek["models"], ["deepseek-flash", "deepseek-v4-pro"])
+
+    def test_model_labels_are_public(self) -> None:
+        listed = {p["id"]: p for p in providers.provider_public_list()}
+        self.assertEqual(
+            listed["deepseek"]["modelLabels"]["deepseek-flash"],
+            "DeepSeek V4.1 Flash",
+        )
+        for preset in providers.provider_public_list():
+            self.assertIsInstance(preset["models"], list, preset["id"])
+            self.assertIsInstance(preset["modelLabels"], dict, preset["id"])
+
 
 class SsrfGuardTests(unittest.TestCase):
     def test_is_blocked_covers_internal_ranges(self) -> None:

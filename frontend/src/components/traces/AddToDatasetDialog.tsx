@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button } from '../ui/Button'
+import { SimpleSelect } from '../ui/SimpleSelect'
 import { Dialog } from '../ui/Dialog'
 import { Spinner } from '../ui/Spinner'
 import { ApiError, useApiClient } from '../../lib/api'
@@ -76,18 +77,17 @@ export function AddToDatasetDialog({
       <div className="space-y-3">
         <label className="block space-y-1">
           <span className="text-[11px] font-semibold text-muted">Dataset</span>
-          <select
-            className={INPUT_CLASS}
+          <SimpleSelect
             value={choice}
-            onChange={(event) => setChoice(event.target.value)}
-          >
-            {datasets.map((dataset) => (
-              <option key={dataset.fullName} value={dataset.name}>
-                {dataset.name}
-              </option>
-            ))}
-            <option value={NEW_DATASET}>New dataset…</option>
-          </select>
+            onValueChange={setChoice}
+            options={[
+              ...datasets.map((dataset) => ({
+                value: dataset.name,
+                label: dataset.name,
+              })),
+              { value: NEW_DATASET, label: 'New dataset…' },
+            ]}
+          />
         </label>
 
         {choice === NEW_DATASET ? (

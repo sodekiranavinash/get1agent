@@ -9,8 +9,10 @@ import {
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
+import { ErrorState } from '../components/ui/ErrorState'
 import { PageHeader } from '../components/ui/PageHeader'
 import { PageShell } from '../components/ui/PageShell'
+import { SimpleSelect } from '../components/ui/SimpleSelect'
 import { Skeleton } from '../components/ui/Skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { useApiClient } from '../lib/api'
@@ -176,44 +178,50 @@ export function TracesPage() {
                 className="w-full rounded-md border border-border bg-surface py-2 pl-9 pr-3 text-[12.5px] text-foreground outline-none placeholder:text-subtle focus:border-accent"
               />
             </div>
-            <select
+            <SimpleSelect
+              aria-label="Filter by agent"
               value={agentFilter}
-              onChange={(event) => {
-                setAgentFilter(event.target.value)
+              onValueChange={(value) => {
+                setAgentFilter(value)
                 setCursor(null)
                 setHistory([])
               }}
-              className="rounded-md border border-border bg-surface px-3 py-2 text-[12.5px] text-foreground outline-none focus:border-accent"
-            >
-              <option value="">All agents</option>
-              {agentOptions.map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
-                </option>
-              ))}
-            </select>
-            <select
+              options={[
+                { value: '', label: 'All agents' },
+                ...agentOptions.map(([id, name]) => ({ value: id, label: name })),
+              ]}
+              className="h-9 w-[160px] bg-surface"
+            />
+            <SimpleSelect
+              aria-label="Filter by status"
               value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              className="rounded-md border border-border bg-surface px-3 py-2 text-[12.5px] text-foreground outline-none focus:border-accent"
-            >
-              <option value="">All statuses</option>
-              <option value="ok">Success</option>
-              <option value="error">Error</option>
-              <option value="awaiting_input">Awaiting input</option>
-            </select>
+              onValueChange={setStatusFilter}
+              options={[
+                { value: '', label: 'All statuses' },
+                { value: 'ok', label: 'Success' },
+                { value: 'error', label: 'Error' },
+                { value: 'awaiting_input', label: 'Awaiting input' },
+              ]}
+              className="h-9 w-[160px] bg-surface"
+            />
           </div>
 
           {tracesQuery.isPending ? (
             <TracesSkeleton />
           ) : tracesQuery.isError ? (
-            <EmptyCard
-              message={`Traces API error: ${tracesQuery.error?.message ?? 'unknown error'}`}
+            <ErrorState
+              title="Couldn't load traces"
+              error={tracesQuery.error}
+              onRetry={() => tracesQuery.refetch()}
             />
           ) : !configured ? (
             <EmptyCard message="Traces aren’t available in this environment yet." />
           ) : data?.error ? (
-            <EmptyCard message={`Could not load traces: ${data.error}`} />
+            <ErrorState
+              title="Couldn't load traces"
+              error={data.error}
+              onRetry={() => tracesQuery.refetch()}
+            />
           ) : visible.length === 0 ? (
             <EmptyCard message="No traces match. Traces are written by agent runs — run an agent in chat and it will show up here." />
           ) : (
@@ -226,6 +234,7 @@ export function TracesPage() {
                       <th className="px-4 py-2.5">Status</th>
                       <th className="px-4 py-2.5">Agent</th>
                       <th className="px-4 py-2.5">Model</th>
+                      <th className="px-4 py-2.5">Stages</th>
                       <th className="px-4 py-2.5">Latency</th>
                       <th className="px-4 py-2.5">Tokens</th>
                       <th className="px-4 py-2.5">Cost</th>
@@ -260,6 +269,16 @@ export function TracesPage() {
                           </td>
                           <td className="px-4 py-3 text-[12px] text-muted">
                             {trace.model || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-[12px] tabular-nums text-muted">
+                            <span className="font-mono">
+                              {trace.observationCount ?? '—'}
+                            </span>
+                            {trace.errorCount ? (
+                              <span className="ml-1.5 rounded-full bg-rose-soft px-1.5 py-0.5 text-[10px] text-rose">
+                                {trace.errorCount} err
+                              </span>
+                            ) : null}
                           </td>
                           <td className="px-4 py-3 font-mono text-[12px] tabular-nums text-muted">
                             {formatDurationMs(latencyMs)}

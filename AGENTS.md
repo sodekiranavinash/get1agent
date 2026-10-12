@@ -17,8 +17,10 @@ backend/
   services/ingestion/  ingestion-{dispatcher,extract,embed,index,mark-failed,watchdog}
   services/scheduler/  scheduled agent/workflow runs
   services/agent-run/  AgentCore control-plane Lambda + MicroVM proxy
+  services/avi/       Avi control-plane Lambda + MicroVM proxy
   services/integration-tests/   moto + in-memory S3 integration tests
   agents/              AgentCore runtime (agentflow: single-agent; workflow: multi-agent)
+  avi/                 Avi agent service (LangChain Deep Agents) + its guest Lambda
   packages/            shared modules: core, data, retrieval, ingestion
 infra/                 Terraform, deploy scripts, local Floci stack
 ```
@@ -128,6 +130,21 @@ chunks or postings in DynamoDB.
 | Security report | `USER#<userId>` | `SREPORT#<reportId>` | `byStatus` (`SREPORT#all`) |
 | Notification | `USER#<userId>` | `NOTIF#<id>` | — (TTL 90d) |
 | User memory (local fallback) | `USER#<userId>` | `MEM#<memId>` | — (prod uses AgentCore Memory) |
+| Avi conversation | `USER#<userId>` | `AVICHAT#<id>` | `byUser` (`AVICHAT#<updatedAt>#<id>`) |
+| Avi feedback | `USER#<userId>` | `AVIFEEDBACK#<runId>` | — |
+| Avi trace index | `USER#<userId>` | `AVITRACE#<traceId>` | `byUser`; TTL 90d |
+| Avi eval run | `USER#<userId>` | `AVIEVAL#<runId>` | `byUser` |
+| Avi guest rate window | `RATE#avi-guest` | `W#<window>` | — (TTL; per-IP-hash counter) |
+| Avi settings | `PLATFORM#SETTINGS` | `#AVI` | — (kill switch, models, limits) |
+
+Avi (the in-product assistant, `docs/design/avi-architecture.md`) owns the
+`AVI*`/`RATE#avi-guest` prefixes so nothing it writes can surface in the agent
+chat sidebar (`CHAT#`), the agent trace list (`TRACE#`) or the agent feedback
+table (`FEEDBACK#`). Its transcripts and trace trees live in S3
+(`conversations/…`, `traces/…`); only small metadata items are in DynamoDB. The
+platform knowledge base it answers from is the reserved scope `USER#platform` /
+`KB#platform-docs` with the `idx-platform` vector index — an ordinary KB, so
+retrieval reuses `retrieval.*` unchanged.
 
 - **GSI1 `byId`** resolves a KB/document/skill/agent/workflow by UUID.
 - **GSI2 `byUser`** lists a user's KBs/skills/agents/workflows/tags by prefix.
@@ -735,6 +752,99 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - A scheduled run is one synchronous Lambda invocation (15-minute cap); a run
   longer than that keeps going in AgentCore but its Lambda wait is cut short.
 
+### Avi (in-product assistant) — a separate runtime
+
+Avi is the assistant behind the button in the bottom-right of every page. It is a
+**separate subsystem**, not part of the agent runtime: its own service, image,
+lockfile, data prefixes and admin page. Design:
+[`docs/design/avi-architecture.md`](docs/design/avi-architecture.md); product plan
+[`docs/design/avi-assistant.md`](docs/design/avi-assistant.md); interactive
+diagrams at `/architecture?tab=avi`. **Do not fold Avi into the agent or knowledge
+docs** — it has its own space on purpose.
+
+- **Deliberately not Strands.** Avi runs on **LangChain Deep Agents** (LangGraph
+  under the hood) so the platform demonstrates a second framework. The isolation
+  is the point: `backend/avi/` is its own image with its own `uv.lock`, and the
+  integration surface is only the SSE frame contract, the DynamoDB keys and the
+  shared `retrieval` package. LangChain is imported **inside functions**, never at
+  module scope, so one shared package serves both the container and a slim Lambda.
+- **Two ingress paths, one engine.**
+  - **Signed-in** — `POST /v1/avi/session` (Auth0 JWT at the gateway) → the
+    `avi-session` control plane resolves `sub` → `userId` and **signs a session
+    token** (HMAC) → launches the **Avi MicroVM** → the browser streams SSE from
+    it. Sessions are reused, so the ~2.3 s MicroVM start is paid once.
+  - **Guest** — `POST /v1/avi/badge` (NONE auth, throttled hard) → the same
+    control plane applies a per-IP counter, signs a **guest badge** (the same
+    token with `guest: true`) and returns the MicroVM ingress, in one round trip.
+    Nothing a guest does is stored.
+  - `backend/avi/handler.py` is also a **standalone guest Lambda** (a Function URL
+    in `RESPONSE_STREAM` mode) for a deployment that wants guests served without a
+    MicroVM. Its zip excludes the agent framework; `tests/test_guest_packaging.py`
+    fails the build if that regresses.
+- **Identity is never taken from the request.** The agent service verifies the
+  HMAC on the token the control plane minted (cross-language contract, pinned by
+  `test_avi_token_contract.py`). A `userId` in a request body is ignored.
+- **Intent classification is its own component with its own model**
+  (`avi/classifier.py`, default `zai.glm-4.7-flash`): a rules stage that costs
+  nothing, then one strict-JSON call. It **fails open** to `platform`, so a
+  classifier outage can never block a real user, and an off-topic reply ships
+  tappable example questions instead of a dead end.
+- **Retrieval reuses the platform's own stack** under a reserved `platform`
+  scope: `USER#platform` / `KB#platform-docs` (id `kb_platform_docs_0001`) with
+  the `idx-platform` S3 Vectors index. Avi implements RRF fusion over
+  `retrieval.s3_vectors` + `retrieval.term_index` and hydrates parents, so the
+  exact cache, semantic cache and BM25 behave as they do for a user's KB.
+- **The corpus is generated from the repository** and ingested through the normal
+  pipeline — `tools/avi-knowledge/` reads `frontend/src/content/docs.ts`, the real
+  route table (nested routes included), the sidebar registries and the **enforced
+  limit constants**, then writes 48 documents to `knowledge/avi/`. `make
+  avi-knowledge` regenerates; `make avi-knowledge-verify` fails CI when the
+  committed corpus is stale. It also emits `backend/avi/avi/features.json` (the
+  deep-link allow-list) and `frontend/src/content/aviStarters.ts` (the widget's
+  example questions), so those three can never drift from their sources.
+- **Limits are stated from code, not prose.** The limits document is generated
+  from `quotas.py` and the `user-api` constants, and points at `/usage` for
+  per-user overrides — `docs.ts` and this file still carry older figures, so Avi
+  deliberately does not trust them.
+- **Agent shape.** A turn is a plan frame, then a tool-using loop
+  (`search_platform_docs`, `find_page`, `escalate_to_support`) with a read-only
+  filesystem (`StateBackend` + a read permission), **no subagents**, and a
+  `TurnCap` middleware bounding model calls per turn. Greetings and refusals use a
+  single direct model call instead of the graph, via `avi/llm.py` (raw Bedrock
+  streaming), which is also what keeps the guest zip small.
+- **Frames** (`avi/frames.py`) are the platform's existing agent-run contract plus
+  one new `avi.intent` frame, so `lib/runState.ts`, `RunTimeline` and `ChatAnswer`
+  render an Avi answer with no Avi-specific renderer.
+- **Persistence** is Avi-prefixed (`AVICHAT#`, `AVIFEEDBACK#`, `AVITRACE#`,
+  `AVIEVAL#`) so nothing it writes can surface in the agent chat sidebar, the agent
+  trace list or the agent feedback table. Transcripts and trace trees are S3
+  objects; only small metadata items are in DynamoDB. Guests are never persisted.
+- **Rate limiting is layered**, cheapest first: API Gateway route throttles
+  (`/v1/avi/badge` burst 4/rate 2, `/v1/avi/session` 10/5), then a per-caller
+  fixed-window counter (`core.ratelimit`, kind `avi-hour`/`avi-day`), then the
+  in-agent turn cap. Every model call also passes `core.ratelimit_bedrock`.
+- **Admin page** `/admin/avi` (routes `GET|POST /v1/admin/avi`, plus owner-scoped
+  `/feedback`, `/traces`, `/conversations`, `/evaluations`, `/knowledge` in
+  `backend/services/admin/admin-console/src/avi.py`): the kill switch, the four
+  model pickers with their measured latency, the limits, feedback, traces and the
+  corpus status. Settings live on `PLATFORM#SETTINGS` / `#AVI`, cached 30 s, so a
+  change applies without a redeploy.
+- **Evaluations** are a committed set of 81 cases
+  (`tools/avi-knowledge/eval/avi-eval.jsonl`) across six kinds — answerable, find,
+  refuse, boundary, unknown, multiturn — each naming the page a correct answer must
+  cite, and validated against the real route table at generation time.
+- **Metrics** use CloudWatch EMF under `get1agent/avi` (`avi/metrics.py`), and cost
+  is attributed through `core.usage` so Avi's numbers match billing.
+- **Infra**: `infra/terraform/modules/avi_runtime/` (ECR + MicroVM image + build
+  and runtime roles), `avi-guest` and `avi-session` registered in
+  `backend/registry.json` under the `avi` group, and
+  `bash infra/aws/deploy-avi.sh` to build/push/apply. The Lambda module gained
+  optional **Function URL** support (`create_function_url`,
+  `function_url_invoke_mode`) for the guest streaming ingress.
+- **Local**: `AVI_MODE=local` runs the agent on `:8091`
+  (`VITE_AVI_URL=http://localhost:8091`), and `VITE_AVI_MICROVM=false` makes the
+  widget stream straight from it.
+
 ### Agent runtime (AgentCore + Strands)
 
 - The runtime lives in **`backend/agents/`** — an **AgentCore Runtime container**
@@ -1137,11 +1247,12 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 
 ### Vault (encrypted user secrets)
 
-- The **Vault** (`frontend/src/pages/VaultPage.tsx`, route `/vault`, sidebar
-  section `manage`) stores a user's secrets — OpenAI-compatible provider keys
+- The **Vault** (`frontend/src/pages/VaultPage.tsx`, route `/vault`, nav-bar
+  icon) stores **AI provider API keys only** — OpenAI-compatible provider keys
   (OpenAI/OpenRouter/Gemini/Groq/DeepSeek/Mistral/Together/xAI/
-  Fireworks/Perplexity/Ollama/`custom`), MCP API keys, or any generic
-  token/connection string. CRUD lives in **`user-api`**; backend test client is
+  Fireworks/Perplexity/Ollama/`custom`). There is **no generic secret type**:
+  `POST/PUT /v1/vault/secrets` reject anything but `kind: "provider"`, and a
+  provider secret requires a base URL. CRUD lives in **`user-api`**; backend test client is
   `src/vault/tester.py`, presets are `src/vault/providers.py`. A **provider
   secret offers a model list** (`models[]`, max 20; `defaultModel` is the
   selected default and is always added to the list), so one provider/API key is
@@ -1222,17 +1333,19 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   **$0.50 = 50 credits** for everyone, admins included
   (`USER_DEFAULT_BUDGET_USD` / `ADMIN_DEFAULT_BUDGET_USD`).
 - **Budget** lives on the existing quota item (`USER#<userId>` / `#QUOTA`):
-  `budgetMicroUsd`, `spentMicroUsd`, `platformTokensIn/Out`, `platformRuns`, and
-  `unlimited` (an optional manual override, default off, toggled from the admin
-  console). A deliberate override stamps `unlimitedSetAt`; a `true` without it is
-  a stale flag from the old "admins are unlimited" rule and is cleared once on
-  the next login sync. Access via `data.repositories.quotas`
-  (`get_budget`/`check_budget`/`charge_usage`/`set_budget_credits`/`set_unlimited`/`reset_spend`).
-- **Admins grant credits** from the admin console (`/admin/users`, "AI Credits"):
+  `budgetMicroUsd`, `spentMicroUsd`, `platformTokensIn/Out`, `platformRuns`.
+  There is **no unlimited mode** — every user has a finite grant, and the only
+  remedy at the limit is an admin raising it. Access via
+  `data.repositories.quotas`
+  (`get_budget`/`check_budget`/`charge_usage`/`set_budget_credits`/`add_budget_credits`/`reset_spend`).
+  The retired `unlimited` / `unlimitedSetAt` attributes are cleared once by the
+  login-time `ensure_quota` sync.
+- **Admins raise limits** from the admin console (`/admin/users`, "AI Credits"):
   `GET /v1/admin/users` (a GSI3 `USERS#all` page — never a Scan),
-  `POST /v1/admin/users/{userId}/credits` and `.../reset`, plus
-  `POST /v1/admin/users/{userId}/unlimited` (`{unlimited: bool}`) to set or clear
-  the override, served by the **`admin-console`** admin Lambda. Admins start on the
+  `POST /v1/admin/users/{userId}/credits` (`{credits, mode}` — `mode: "add"`
+  (default) tops the grant up, `mode: "set"` replaces it and is rejected if the
+  new limit is below what the user already spent), and `.../reset` to zero the
+  spend. Served by the **`admin-console`** admin Lambda. Admins start on the
   same default as users and simply raise their own grant in that page.
 - **Enforcement (clean choke points, no per-request guessing).**
   - The **agent runtime** checks the budget at the start of a run
@@ -1770,6 +1883,17 @@ make floci-down       # stop and remove (named volumes are kept)
   `-dbPath /home/dynamodblocal/data` on the `dynamodb_data` volume. So uploaded
   documents and the retrieval index survive `make floci-down`/`floci-up`. To
   reset everything, `docker compose -f infra/local/floci/docker-compose.yml down -v`.
+
+- **Lambda cold starts are real, and are the dominant local latency source.**
+  Every emulated Lambda is a Docker container, and Floci tears an idle one down
+  after `FLOCI_SERVICES_LAMBDA_CONTAINER_IDLE_TIMEOUT_SECONDS` (Floci's default
+  300s; `docker-compose.yml` sets **3600**). A cold container costs ~3–4s
+  (container create + Python/boto3 import) versus ~30–90ms warm, and the cost
+  multiplies per Lambda a request touches: `GET /v1/admin/mcp/tools` invokes five
+  containers **sequentially** (`core.mcp_client.list_tools_multi` loops over
+  `MCP_FUNCTIONS`), so it measures **~14s cold vs ~0.7s warm**. Raise the knob to
+  stay warm longer; `0` (or `FLOCI_SERVICES_LAMBDA_EPHEMERAL=true`) always
+  cold-starts. Changing it needs a container recreate (`make floci-up`).
 
 - API base URL: `http://get1agent.execute-api.localhost.floci.io:4566`
   (`localhost.floci.io` resolves to 127.0.0.1 on the host, and Floci's embedded

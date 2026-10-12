@@ -67,10 +67,9 @@ type Metrics = {
   series?: { date: string; count: number }[]
 }
 type Budget = {
-  unlimited: boolean
   budgetCredits: number
   spentCredits: number
-  remainingCredits: number | null
+  remainingCredits: number
 }
 type KnowledgeUsage = { usage?: { knowledgeBases: number } }
 
@@ -87,16 +86,34 @@ function safe<T>(promise: Promise<T>): Promise<T | null> {
   return promise.catch(() => null)
 }
 
-async function loadDashboard(api: ApiClient): Promise<DashboardRaw> {
-  const [agents, workflows, conversations, settings, metrics, kbs] = await Promise.all([
+const EMPTY_RAW: DashboardRaw = {
+  agents: null,
+  workflows: null,
+  conversations: null,
+  settings: null,
+  metrics: null,
+  kbs: null,
+}
+
+/**
+ * The fast half of the dashboard: inventory + budget + knowledge usage. These
+ * are plain metadata reads, so the page can paint its counters immediately
+ * instead of waiting for the slower metrics aggregation.
+ */
+async function loadOverview(api: ApiClient): Promise<DashboardRaw> {
+  const [agents, workflows, conversations, settings, kbs] = await Promise.all([
     safe(api.get<AgentList>('/v1/agents')),
     safe(api.get<WorkflowList>('/v1/workflows')),
     safe(api.get<{ conversations: Conversation[] }>('/v1/conversations')),
     safe(api.get<{ budget?: Budget }>('/v1/user/settings')),
-    safe(api.get<Metrics>('/v1/lab/metrics?days=30')),
     safe(api.get<KnowledgeUsage>('/v1/knowledge-bases')),
   ])
-  return { agents, workflows, conversations, settings, metrics, kbs }
+  return { ...EMPTY_RAW, agents, workflows, conversations, settings, kbs }
+}
+
+/** The slow half: 30-day aggregates behind the charts. Loaded separately. */
+async function loadMetrics(api: ApiClient): Promise<Metrics | null> {
+  return safe(api.get<Metrics>('/v1/lab/metrics?days=30'))
 }
 
 function formatCredits(value: number | null | undefined): string {
@@ -133,14 +150,10 @@ function realView(raw: DashboardRaw): DashboardView {
   const graph = workflows.filter((workflow) => workflow.mode === 'graph').length
 
   const creditValue = budget
-    ? budget.unlimited
-      ? '∞'
-      : `${formatCredits(budget.remainingCredits)} left`
+    ? `${formatCredits(budget.remainingCredits)} left`
     : '—'
   const creditChange = budget
-    ? budget.unlimited
-      ? 'No application limit'
-      : `${formatCredits(budget.spentCredits)} of ${formatCredits(budget.budgetCredits)} used`
+    ? `${formatCredits(budget.spentCredits)} of ${formatCredits(budget.budgetCredits)} used`
     : 'No budget yet'
 
   const heroParts = [
@@ -288,32 +301,31 @@ export function DashboardPage() {
   const demo = useDemoMode()
   const navigate = useNavigate()
   const api = useApiClient()
-  const [data, setData] = useState<DashboardView | null>(null)
-  const [loading, setLoading] = useState(!demo)
+  const [raw, setRaw] = useState<DashboardRaw | null>(null)
+  const [metricsLoading, setMetricsLoading] = useState(!demo)
+  const [overviewLoading, setOverviewLoading] = useState(!demo)
 
+  // Two independent passes so one slow endpoint cannot hold the whole page:
+  // the overview paints the counters, the metrics request fills the chart.
   useEffect(() => {
     if (demo) return
     let cancelled = false
-    loadDashboard(api)
-      .then((raw) => {
-        if (!cancelled) setData(realView(raw))
+    loadOverview(api)
+      .then((overview) => {
+        if (!cancelled) setRaw(overview)
       })
       .catch(() => {
-        if (!cancelled) {
-          setData(
-            realView({
-              agents: null,
-              workflows: null,
-              conversations: null,
-              settings: null,
-              metrics: null,
-              kbs: null,
-            }),
-          )
-        }
+        if (!cancelled) setRaw(EMPTY_RAW)
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setOverviewLoading(false)
+      })
+    loadMetrics(api)
+      .then((metrics) => {
+        if (!cancelled) setRaw((current) => ({ ...(current ?? EMPTY_RAW), metrics }))
+      })
+      .finally(() => {
+        if (!cancelled) setMetricsLoading(false)
       })
     return () => {
       cancelled = true
@@ -321,8 +333,8 @@ export function DashboardPage() {
   }, [api, demo])
 
   // Demo has no backend: derive its view from the canned workspace.
-  const view = demo ? demoView() : data
-  if (!view || loading) return <DashboardSkeleton />
+  const view = demo ? demoView() : raw ? realView(raw) : null
+  if (!view || overviewLoading) return <DashboardSkeleton />
 
   const { hero, kpis, agents, runs, activity } = view
   const maxRun = Math.max(1, ...runs.map((entry) => entry.value))
@@ -443,7 +455,12 @@ export function DashboardPage() {
           <motion.div variants={fadeUp}>
             <Card padding="none" className="h-full overflow-hidden">
               <PanelHeader title="Runs · last 7 days" />
-              {runs.length > 0 ? (
+              {metricsLoading ? (
+                <div className="space-y-2 p-4">
+                  <Skeleton className="h-20 w-full rounded-md" />
+                  <Skeleton className="h-3 w-40 rounded" />
+                </div>
+              ) : runs.length > 0 ? (
                 <div className="p-4">
                   <MiniBars
                     data={runs}

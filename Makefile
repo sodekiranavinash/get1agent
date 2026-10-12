@@ -24,7 +24,8 @@ RERANKER_IMAGE ?= ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
 RERANKER_PORT ?= 8080
 
 .PHONY: help ui architecture agent test test-unit floci floci-env floci-artifacts floci-build floci-up floci-wait \
-	floci-embed floci-rerank floci-reload floci-down floci-logs floci-oauth-proxy floci-oauth-proxy-logs
+	floci-embed floci-rerank floci-reload floci-down floci-logs floci-oauth-proxy floci-oauth-proxy-logs \
+	avi-knowledge avi-knowledge-check avi-knowledge-verify avi-bootstrap avi-upload avi-status
 
 help:
 	@echo "get1agent local dev (Floci + DynamoDB Local)"
@@ -36,6 +37,15 @@ help:
 	@echo "  make agent            (Re)build + start the local agent container (:8090)"
 	@echo "  make architecture     Regenerate the README architecture diagrams"
 	@echo "  make test             Run backend integration tests (no Docker; moto)"
+	@echo ""
+	@echo "  Avi (in-product assistant):"
+	@echo "    make avi-knowledge          Regenerate + validate knowledge/avi from the repo"
+	@echo "    make avi-knowledge-verify   Fail if the committed corpus is stale (CI)"
+	@echo "    make avi-bootstrap          Create the reserved platform-docs knowledge base"
+	@echo "    make avi-upload             Push the corpus through the ingestion pipeline"
+	@echo "    make avi-status             Per-document ingestion status"
+	@echo "    make avi-local-ingest       Index the corpus into the local Floci stack"
+	@echo "    make avi-local-agent        Run the Avi service locally on :8091"
 	@echo ""
 	@echo "  Floci stack:"
 	@echo "    make floci          Build + up + provision"
@@ -50,6 +60,49 @@ help:
 
 ui:
 	cd frontend && npm run dev
+
+# --- Avi (the in-product assistant) ------------------------------------------
+#
+# Avi is grounded in the repository, so its corpus is generated from repo sources
+# (the in-app docs, the route and navigation registries, the README/AGENTS design
+# notes, and the limit constants that are actually enforced) into committed
+# markdown. `make avi-knowledge` regenerates + validates it; CI runs
+# `avi-knowledge-verify` and fails if the committed corpus is stale.
+#
+# Ingesting it is deliberately the *existing* pipeline: `avi-bootstrap` creates
+# the reserved `platform-docs` knowledge base once, then `avi-upload` writes
+# raw/platform/… which the normal S3 → EventBridge → Step Functions flow picks up.
+AVI_TOOL := python3 tools/avi-knowledge/build.py
+
+avi-knowledge:
+	$(AVI_TOOL) build
+
+avi-knowledge-check:
+	$(AVI_TOOL) check
+
+avi-knowledge-verify:
+	$(AVI_TOOL) verify
+
+avi-bootstrap: floci-env
+	$(AVI_TOOL) bootstrap
+
+avi-upload: floci-env
+	$(AVI_TOOL) upload
+
+avi-status: floci-env
+	$(AVI_TOOL) status
+
+# Ingest the corpus into the **local** Floci stack from the host. The documented
+# `avi-bootstrap`/`avi-upload` targets drive the deployed pipeline; locally the
+# three ingestion stages are called in-process instead (same code, no queue).
+avi-local-ingest:
+	backend/avi/.venv/bin/python tools/avi-knowledge/local_ingest.py
+
+# Run the Avi agent service against the local stack (:8091). The widget talks to
+# it directly with VITE_AVI_MICROVM=false, which is also how guests reach Avi
+# locally — including on the landing page.
+avi-local-agent:
+	backend/avi/.venv/bin/python tools/avi-knowledge/local_agent.py
 
 # Regenerate the README architecture diagrams (docs/assets/*.svg + *.png) from
 # the app's own diagram spec + layout engine.
@@ -159,16 +212,23 @@ floci-build-browser:
 	$(MAKE) -C backend/services/mcp/browser package
 
 # Check and rebuild only Lambdas that have changed key files
+#
+# The shared packages and `registry.json` are watched too, not just the app's own
+# tree: every zip **bundles** `backend/packages/*`, so a change there with no app
+# file touched would otherwise ship a stale zip and fail at runtime with
+# `AttributeError: module has no attribute ...`. `registry.json` decides which
+# packages a zip gets, so a change to that list must also rebuild.
 floci-rebuild-changed:
 	@echo "Quick check for Lambda changes..."
 	@for dir in $$(find backend/services -maxdepth 3 -name Makefile -exec dirname {} \; | sort); do \
 		if [ -f "$$dir/Makefile" ]; then \
 			name=$$(basename "$$dir"); \
 			package_path="$$dir/dist/function.zip"; \
+			shared_newer="$$(find backend/packages -name '*.py' -newer "$$package_path" 2>/dev/null | head -n1)"; \
 			if [ ! -f "$$package_path" ]; then \
 				echo "🔄 Rebuilding $$name (missing package)..."; \
 				($(MAKE) -C "$$dir" package >/dev/null 2>&1 && echo "✅ Rebuilt $$name" || echo "❌ Failed to rebuild $$name") & \
-			elif [ "$$dir/Makefile" -nt "$$package_path" ] || [ -f "$$dir/handler.py" -a "$$dir/handler.py" -nt "$$package_path" ] || [ -f "$$dir/pyproject.toml" -a "$$dir/pyproject.toml" -nt "$$package_path" ] || [ -n "$$(find "$$dir/src" -type f -newer "$$package_path" 2>/dev/null | head -n1)" ]; then \
+			elif [ "$$dir/Makefile" -nt "$$package_path" ] || [ -f "$$dir/handler.py" -a "$$dir/handler.py" -nt "$$package_path" ] || [ -f "$$dir/pyproject.toml" -a "$$dir/pyproject.toml" -nt "$$package_path" ] || [ "backend/registry.json" -nt "$$package_path" ] || [ -n "$$shared_newer" ] || [ -n "$$(find "$$dir/src" -type f -newer "$$package_path" 2>/dev/null | head -n1)" ]; then \
 				echo "🔄 Rebuilding $$name (key files changed)..."; \
 				($(MAKE) -C "$$dir" package >/dev/null 2>&1 && echo "✅ Rebuilt $$name" || echo "❌ Failed to rebuild $$name") & \
 			fi; \
@@ -328,5 +388,11 @@ floci: floci-env
 	@echo "Floci stack ready."
 	@echo "  API base URL: $(FLOCI_API_URL)"
 	@echo "  Point the UI at it (dev server proxies /v1 to Floci):"
-	@echo "    printf 'VITE_API_URL=/\\nVITE_API_PROXY_TARGET=$(FLOCI_API_URL)\\n' > frontend/.env.local"
+	@echo "    printf 'VITE_API_URL=/\\nVITE_API_PROXY_TARGET=$(FLOCI_API_URL)\\nVITE_AVI_URL=http://localhost:8091\\nVITE_AVI_MICROVM=false\\n' > frontend/.env.local"
+	@echo ""
+	@echo "  Avi (bottom-right assistant) is NOT in the stack: Lambda MicroVMs and"
+	@echo "  AgentCore are not emulated, so there is no /v1/avi/session route. Run it"
+	@echo "  from the host instead, which the two VITE_AVI_* vars above point at:"
+	@echo "    make avi-local-ingest   # once: platform corpus into Floci"
+	@echo "    make avi-local-agent    # Avi on :8091 (guest path; answers Bedrock)"
 	@echo "  Logs:  make floci-logs     Stop:  make floci-down"

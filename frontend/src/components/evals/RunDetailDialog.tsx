@@ -122,8 +122,8 @@ export function RunDetailDialog({
           </div>
 
           <div className="grid gap-3 lg:grid-cols-2">
-            <div className="overflow-hidden rounded-lg border border-border">
-              <table className="w-full text-left">
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full min-w-[420px] text-left">
                 <thead>
                   <tr className="border-b border-border bg-raised/40 text-[11px] font-semibold text-muted">
                     <th className="px-3 py-2">Case</th>

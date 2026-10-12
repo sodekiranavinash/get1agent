@@ -17,7 +17,6 @@ def test_default_budget_and_charge() -> None:
     budget = quotas.get_budget(USER)
     assert budget.budget_micro_usd == usage.default_budget_micro_usd()
     assert budget.spent_micro_usd == 0
-    assert not budget.unlimited
 
     cost = quotas.charge_usage(
         USER, model="nvidia.nemotron-nano-3-30b", input_tokens=1_000_000, output_tokens=0
@@ -51,7 +50,6 @@ def test_default_budget_is_half_a_dollar() -> None:
 def test_admins_share_the_default_budget() -> None:
     quotas.ensure_quota(USER, is_admin=True)
     assert quotas.get_budget(USER).budget_micro_usd == usage.default_budget_micro_usd(False)
-    assert not quotas.get_budget(USER).unlimited
 
 
 def test_credits_conversion() -> None:
@@ -73,46 +71,41 @@ def test_admin_grant_keeps_a_custom_budget() -> None:
     assert quotas.get_budget(USER).budget_micro_usd == int(round(5.0 * usage.MICRO_PER_USD))
 
 
-def test_unlimited_override_still_available() -> None:
-    quotas.ensure_quota(USER, unlimited=True)
-    quotas.set_budget_usd(USER, 0.0)
-    quotas.check_budget(USER)  # must not raise
-    assert quotas.get_budget(USER).unlimited
-    quotas.ensure_quota(USER, unlimited=False)
-    assert not quotas.get_budget(USER).unlimited
+def test_admin_raise_is_additive() -> None:
+    """Raising the limit tops the grant up; it never lowers it."""
+    quotas.ensure_quota(USER)
+    start = quotas.get_budget(USER).budget_micro_usd
+    quotas.add_budget_credits(USER, 25)  # 25 credits = $0.25
+    budget = quotas.get_budget(USER)
+    assert budget.budget_micro_usd == start + usage.credits_to_micro_usd(25)
+
+    with pytest.raises(ValueError):
+        quotas.add_budget_credits(USER, 0)
 
 
-def test_admin_can_toggle_unlimited() -> None:
+def test_exhausted_budget_blocks_until_raised() -> None:
+    """There is no unlimited escape hatch: only raising the grant unblocks."""
     quotas.ensure_quota(USER)
     quotas.set_budget_usd(USER, 0.0)
     with pytest.raises(quotas.BudgetExceeded):
         quotas.check_budget(USER)
-    quotas.set_unlimited(USER, True)
+    quotas.add_budget_credits(USER, 50)
     quotas.check_budget(USER)  # must not raise
-    assert quotas.get_budget(USER).unlimited
-    quotas.set_unlimited(USER, False)
-    assert not quotas.get_budget(USER).unlimited
-
-
-def test_deliberate_unlimited_survives_relogin() -> None:
-    quotas.ensure_quota(USER)
-    quotas.set_unlimited(USER, True)
-    quotas.ensure_quota(USER, is_admin=True)
-    assert quotas.get_budget(USER).unlimited
 
 
 def test_legacy_unlimited_flag_is_cleared_on_relogin() -> None:
+    """The retired flag is dropped the next time the quota item is synced."""
     quotas.ensure_quota(USER)
-    # Simulate the old "admins are unlimited" rule writing the flag directly.
     table().update_item(
         Key={"pk": user_pk(USER), "sk": QUOTA_SK},
-        UpdateExpression="SET #u = :u",
+        UpdateExpression="SET #u = :u, unlimitedSetAt = :t",
         ExpressionAttributeNames={"#u": "unlimited"},
-        ExpressionAttributeValues={":u": True},
+        ExpressionAttributeValues={":u": True, ":t": "2026-01-01T00:00:00Z"},
     )
-    assert quotas.get_budget(USER).unlimited
     quotas.ensure_quota(USER, is_admin=True)
-    assert not quotas.get_budget(USER).unlimited
+    item = table().get_item(Key={"pk": user_pk(USER), "sk": QUOTA_SK})["Item"]
+    assert item.get("unlimited") is False
+    assert item.get("unlimitedSetAt") is False
 
 
 def test_pricing_table_shape() -> None:
