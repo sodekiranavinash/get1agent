@@ -61,9 +61,13 @@ node_modules/
 !.yarn/versions
 .pnp.*
 
-# Frontend / JS build
+# Build output
 dist/
-dist-ssr/
+# Named build-output variants: dist-guest (the avi guest Lambda bundle), dist-ssr,
+# etc. These must be covered as a group — enumerating them one at a time is how
+# backend/avi/dist-guest ended up listing ~4,000 untracked vendored files (91 MB)
+# in git status.
+dist-*/
 build/
 .vite/
 .turbo/
@@ -123,6 +127,10 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+# `terraform plan -generate-config-out` output. Never commit: it would duplicate
+# the very resources it was generated from (see infra/CLOUDFLARE.md → Import).
+generated.tf
+generated.tf.json
 
 
 # Local overrides
@@ -139,3 +147,10 @@ career-notes.md
 
 # Local Floci build markers
 .floci-*
+
+# uv's package cache, redirected into the workspace so `make test` works in a
+# sandboxed shell (the default ~/.cache/uv may not be writable).
+.uv-cache/
+
+# npm cache redirected into the workspace so installs work in a sandboxed shell.
+.npm-cache/
