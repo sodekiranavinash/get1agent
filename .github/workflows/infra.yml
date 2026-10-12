@@ -252,6 +252,27 @@ jobs:
           bash infra/aws/write-cloudflare-tfvars.sh
           bash infra/aws/run-terraform.sh cloudflare apply
 
+      # Avi's Terraform modules are gated on the MicroVM artifact existing, so it
+      # MUST be built before the prod apply: targeting module.avi_runtime with an
+      # empty avi_microvm_zip collapses its count to 0 and plans the whole runtime
+      # (ECR repo, MicroVM image, IAM roles, artifact) for deletion. The agent image
+      # is pushed here too, because the MicroVM image resource pulls it from ECR.
+      # The paths are exported through $GITHUB_ENV for the Prod step below.
+      - name: Avi image + MicroVM artifact
+        if: inputs.lambdas
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE="$(bash infra/aws/deploy-avi.sh image | tail -1)"
+          ZIP="$(bash infra/aws/deploy-avi.sh artifact | tail -1)"
+          {
+            echo "TF_VAR_avi_agent_image_uri=${IMAGE}"
+            echo "TF_VAR_avi_microvm_zip=${ZIP}"
+          } >> "$GITHUB_ENV"
+          echo "Avi agent image:    ${IMAGE}"
+          echo "Avi MicroVM artifact: ${ZIP}"
+
       - name: Prod
         if: inputs.api_gateway || inputs.lambdas
         env:
@@ -274,6 +295,11 @@ jobs:
           # identity on account deletion. Optional; blank = manual step.
           TF_VAR_auth_mgmt_client_id: ${{ secrets.AUTH_MGMT_CLIENT_ID }}
           TF_VAR_auth_mgmt_client_secret: ${{ secrets.AUTH_MGMT_CLIENT_SECRET }}
+          # Avi session tokens. Must be the SAME value on every deploy — the control
+          # plane mints with it and the agent verifies — so it lives in the prod
+          # environment and is never generated here. The image URI and artifact path
+          # arrive from the step above via $GITHUB_ENV.
+          TF_VAR_avi_session_secret: ${{ secrets.AVI_SESSION_SECRET }}
         run: bash infra/aws/apply-prod.sh
 
       - name: Agent runtime (build + push image, deploy)

@@ -111,6 +111,14 @@ build_microvm_artifact() {
   cp "$ROOT/backend/services/avi/microvm/app.mjs" "$build_dir/"
   cp "$ROOT/backend/services/avi/microvm/package.json" "$build_dir/"
 
+  # Normalise mtimes before zipping. `zip` records file timestamps, so without
+  # this the archive differs on every build even when the contents are identical.
+  # That matters because the Terraform artifact key is a hash of this file
+  # (`microvms/avi-${filesha256(zip)}.zip`): a non-reproducible zip re-keys the S3
+  # object and rolls a fresh MicroVM image on EVERY deploy, instead of only when
+  # the artifact actually changes.
+  find "$build_dir" -exec touch -t 198001010000 {} +
+
   zip_path="$ROOT/backend/services/avi/microvm/dist/microvm.zip"
   mkdir -p "$(dirname "$zip_path")"
   rm -f "$zip_path"
@@ -163,6 +171,26 @@ case "$STEP" in
   image)
     build_image
     ;;
+  artifact)
+    # Build only the MicroVM artifact and print its path. CI uses this to stage the
+    # artifact before the main prod apply, which passes it as -var.
+    #
+    # IMAGE_TAG MATTERS HERE. The image URI is templated into the Dockerfile, so the
+    # tag must be one that is actually pushed to ECR. Called as a separate
+    # invocation without AVI_IMAGE_TAG, this computes a fresh clock-based tag, the
+    # MicroVM image then can never resolve its base image, and the image goes to
+    # UPDATE_FAILED. infra.yml pins IMAGE_TAG to ${{ github.sha }} across both the
+    # `image` and `artifact` calls for exactly this reason.
+    image="$(compute_image)"
+    if ! aws ecr describe-images --region "$AWS_REGION" --repository-name "$ECR_REPO" \
+      --image-ids "imageTag=${IMAGE_TAG}" >/dev/null 2>&1; then
+      echo "WARNING: ${image} is not in ECR." >&2
+      echo "         The artifact templates that URI into the Dockerfile, so the MicroVM" >&2
+      echo "         image build will fail until it is pushed (or set AVI_IMAGE_TAG to a" >&2
+      echo "         tag that was)." >&2
+    fi
+    build_microvm_artifact "$image"
+    ;;
   # Both artifact flows bootstrap ECR first, in this order:
   #   compute the image URI (just a string) -> build the MicroVM artifact from it
   #   -> targeted apply to create the ECR repository -> build and push the image
@@ -191,7 +219,7 @@ case "$STEP" in
     echo "      then open /admin/avi to confirm the widget is Live."
     ;;
   *)
-    echo "usage: $0 [all|image|microvm|lambdas] [package|deploy]" >&2
+    echo "usage: $0 [all|image|artifact|microvm|lambdas] [package|deploy]" >&2
     exit 2
     ;;
 esac
