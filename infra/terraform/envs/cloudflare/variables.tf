@@ -27,14 +27,13 @@ variable "cloudflare_email" {
   default     = ""
 }
 
-variable "cloudflare_account_id" {
-  type        = string
-  description = "Cloudflare account id. Required for account-scoped resources (account rulesets, lists, Workers subdomain)."
-}
-
 variable "cloudflare_zone_id" {
-  type        = string
-  description = "Zone id for get1agent.com. Used as the import id prefix and on every zone-scoped resource."
+  type = string
+  # Defaulted rather than required, so nothing has to be configured in CI. It is
+  # an identifier, not a secret, and it already appears as a literal throughout
+  # imports.tf. Override only if the zone is ever recreated.
+  description = "Zone id for get1agent.com. The default is the live zone id."
+  default     = "da1e9ec4c1d4e6aec290c70eacad0681"
 }
 
 variable "cloudflare_zone_name" {

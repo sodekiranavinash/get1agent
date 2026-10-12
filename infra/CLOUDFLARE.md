@@ -84,69 +84,52 @@ safe.
 
 ### Credentials
 
-The provider accepts either a scoped API token (preferred) or the legacy Global
-API Key. Both are wired in `providers.tf`; provide exactly one.
+The provider accepts either the legacy Global API Key or a scoped API token. Both
+are wired in `providers.tf`; provide exactly one, and nothing else.
 
 ```bash
-# .env — preferred
-CLOUDFLARE_API_TOKEN=...
-
-# .env — legacy Global API Key (what the first adoption used)
+# .env — what the adoption used, and what CI uses
 CLOUDFLARE_API_KEY=...
 CLOUDFLARE_EMAIL=...
+
+# the alternative, if you ever prefer a scoped token
+CLOUDFLARE_API_TOKEN=...
 ```
 
-The provider resolves both natively, so nothing needs to be exported as `TF_VAR_`.
-CI passes `TF_VAR_cloudflare_api_token` from a GitHub secret instead.
+The provider resolves both natively, so nothing needs exporting as `TF_VAR_`
+locally. CI passes `TF_VAR_cloudflare_api_key` + `TF_VAR_cloudflare_email`.
 
-Cloudflare's own provider schema describes API keys as legacy:
+**No ids are configured anywhere.** `cloudflare_zone_id` and
+`cloudflare_zone_name` both have defaults in `variables.tf`, and every resource is
+zone-scoped, so there is no account id to supply at all. That is deliberate — it
+keeps the CI configuration down to the credential alone.
 
-> *"API keys are now considered legacy by Cloudflare, API tokens should be used
-> instead."*
-
-The Global API Key is your **user's** key: it cannot be scoped to a zone, cannot
-be IP-restricted, cannot expire, and it grants every zone in the account plus
-billing and member management. Use it for a one-off local adoption if that is
-easiest, then rotate it — a scoped token is needed for CI regardless.
-
-### Token for CI
-
-Create under **My Profile → API Tokens → Create Token → Custom token**, scoped to
-`Zone → Include → Specific zone → get1agent.com`:
-
-| Scope | Permission | Needed for |
-|-------|-----------|------------|
-| Zone | `Zone → Zone → Read` | resolving the zone, reading settings |
-| Zone | `DNS → Edit` | `dns.tf` |
-| Zone | `Zone Settings → Edit` | `zone_settings.tf` |
-| Zone | `Zone WAF → Edit` | the rulesets API (`rules.tf`) |
-| Zone | `Config Rules → Edit` | transform/configuration rules (`rules.tf`) |
-| Account | `Account Settings → Read` | account id and plan tier |
-
-The ruleset API's permissions do not map cleanly onto its phases. If a call comes
-back with a permission error, the error names the exact permission to add — iterate
-there rather than pre-granting everything.
-
-Read-only twin for the plan/drift workflows: `Zone:Read` + `Account:Read` on the
-same zone.
+The trade-off, stated once: the Global API Key is the *user's* key. It cannot be
+scoped to a zone, cannot be IP-restricted, cannot expire, and it grants every zone
+in the account. Cloudflare's own provider schema calls API keys legacy. A scoped
+token (`Zone:Read`, `DNS:Edit`, `Zone Settings:Edit`, `Zone WAF:Edit`,
+`Config Rules:Edit`) is the tighter option and behaves identically — swap the two
+secrets if you want it.
 
 ### GitHub configuration
 
-Secrets (`prod` environment): `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_API_TOKEN_READONLY`.
+Two secrets, at **repository** level so all three Cloudflare workflows can read
+them (the plan and drift workflows run on PRs and schedules, and cannot see
+environment secrets):
 
-Repository variables:
+| Secret | Purpose |
+|--------|---------|
+| `CLOUDFLARE_API_KEY` | provider auth |
+| `CLOUDFLARE_EMAIL` | required alongside the API key |
 
-| Variable | Purpose |
-|----------|---------|
-| `CLOUDFLARE_ACCOUNT_ID` | Account id |
-| `CLOUDFLARE_ZONE_ID` | Zone id for `get1agent.com` |
-| `CLOUDFLARE_ZONE_NAME` | Defaults to `get1agent.com` |
-| `CLOUDFLARE_ENABLE_HSTS` | Leave unset unless HSTS is deliberately wanted |
+Optionally set the variable `CLOUDFLARE_ENABLE_HSTS` to turn HSTS on; leave it
+unset otherwise.
 
-The plan and drift workflows skip themselves, with a warning naming exactly what is
-missing, until these exist — so they cannot turn CI red in the meantime. Note they
-also need a **repository-level** `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (the
-existing ones are scoped to the `prod` environment, which PRs cannot use).
+No Cloudflare variables are required. The plan and drift workflows skip
+themselves, with a warning naming exactly what is missing, until the two secrets
+exist. They also need a **repository-level**
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` to read the Terraform state — the
+existing pair is scoped to the `prod` environment, which PRs cannot use.
 
 ## The `.env` trap
 

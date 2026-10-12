@@ -1,16 +1,14 @@
 # Copy to terraform.tfvars (gitignored) for a local run, or let CI generate it
 # with `bash infra/aws/write-cloudflare-tfvars.sh`.
 #
-# The API token is never stored here. Put it in .env (gitignored) instead:
-#   CLOUDFLARE_API_TOKEN=...
-# The provider reads that variable natively, so no TF_VAR_ export is needed.
+# Credentials never live here. Put them in .env (gitignored) instead:
+#   CLOUDFLARE_API_KEY=...          # or CLOUDFLARE_API_TOKEN=...
+#   CLOUDFLARE_EMAIL=...            # required with the API key
+# The provider reads those natively, so no TF_VAR_ export is needed.
 #
-# Inspection and import only need read access; the first local apply needs the
-# edit-capable token. See infra/CLOUDFLARE.md → Access.
-
-cloudflare_account_id = "REPLACE_ME"
-cloudflare_zone_id    = "REPLACE_ME"
-cloudflare_zone_name  = "get1agent.com"
+# cloudflare_zone_id and cloudflare_zone_name both have defaults in variables.tf,
+# so the ONLY thing you must supply is the credential.
+# See infra/CLOUDFLARE.md → Access.
 
 # --- Copied from the AWS stacks by write-cloudflare-tfvars.sh ---
 # cd infra/terraform/envs/prod && terraform output -json api_gateway_cname_target
@@ -18,8 +16,7 @@ cloudflare_zone_name  = "get1agent.com"
 # cd infra/terraform/envs/web   && terraform output -raw  website_endpoint
 api_gateway_cname_target = "REPLACE_ME.execute-api.ap-south-1.amazonaws.com"
 acm_validation_records   = {}
-
-site_website_endpoint = "REPLACE_ME.s3-website.ap-south-1.amazonaws.com"
+site_website_endpoint    = "REPLACE_ME.s3-website.ap-south-1.amazonaws.com"
 
 # --- HSTS guard (live state is disabled; see variables.tf) ---
-enable_hsts          = false
+enable_hsts = false

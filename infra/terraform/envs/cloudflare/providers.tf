@@ -1,7 +1,6 @@
 # Cloudflare is the only provider here — no AWS resources are created in this
-# env (the S3 backend above only stores state). Account-scoped resources (account
-# rulesets, lists, Workers) pass `account_id = var.cloudflare_account_id` on the
-# resource itself rather than at provider level.
+# env (the S3 backend above only stores state). Every resource is zone-scoped, so
+# no account id is needed.
 #
 # Passing `null` tells the provider to resolve its own default from the
 # environment, so a local run needs nothing more than .env. Provide exactly one

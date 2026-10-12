@@ -34,14 +34,14 @@ jobs:
       - name: Check credentials are configured
         id: creds
         env:
-          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_READONLY }}
+          CF_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CF_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
           AWS_KEY: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          CF_ZONE: ${{ vars.CLOUDFLARE_ZONE_ID }}
         run: |
           missing=""
-          [[ -z "$CF_TOKEN" ]] && missing="$missing CLOUDFLARE_API_TOKEN_READONLY(secret)"
+          [[ -z "$CF_KEY" ]] && missing="$missing CLOUDFLARE_API_KEY(secret)"
+          [[ -z "$CF_EMAIL" ]] && missing="$missing CLOUDFLARE_EMAIL(secret)"
           [[ -z "$AWS_KEY" ]] && missing="$missing AWS_ACCESS_KEY_ID(secret)"
-          [[ -z "$CF_ZONE" ]] && missing="$missing CLOUDFLARE_ZONE_ID(variable)"
           if [[ -n "$missing" ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "::warning::Drift detection skipped — not configured yet:$missing"
@@ -71,16 +71,13 @@ jobs:
 
       - name: Write cloudflare terraform.tfvars
         if: steps.creds.outputs.skip == 'false'
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
-          CLOUDFLARE_ZONE_NAME: ${{ vars.CLOUDFLARE_ZONE_NAME }}
         run: bash infra/aws/write-cloudflare-tfvars.sh
 
       - name: Terraform plan (detailed exit code)
         if: steps.creds.outputs.skip == 'false'
         env:
-          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN_READONLY }}
+          TF_VAR_cloudflare_api_key: ${{ secrets.CLOUDFLARE_API_KEY }}
+          TF_VAR_cloudflare_email: ${{ secrets.CLOUDFLARE_EMAIL }}
         run: |
           cd infra/terraform/envs/cloudflare
           terraform init -input=false -no-color -reconfigure
