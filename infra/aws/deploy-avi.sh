@@ -34,6 +34,34 @@ account_id() {
   aws sts get-caller-identity --query Account --output text
 }
 
+# --- 0. bootstrap: image URI + ECR repository --------------------------------
+
+compute_image() {
+  local account
+  account="$(account_id)"
+  echo "${account}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
+}
+
+# The MicroVM artifact is just a Dockerfile (templated with the agent image URI)
+# plus the Node proxy, so it can be built BEFORE the image exists. That matters:
+# the avi_runtime module is gated on `microvm_zip != ""`, so the module — and
+# therefore the ECR repository inside it — cannot be created until the artifact
+# exists. Creating the repository needs a targeted apply, which needs the zip.
+# This is the chicken-and-egg that made the previous ordering impossible.
+ensure_ecr() {
+  local image="$1" zip_path="$2"
+  if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "$ECR_REPO" >/dev/null 2>&1; then
+    return 0
+  fi
+  log "creating the ECR repository (targeted apply: repository only)"
+  terraform -chdir="$TF_DIR" apply \
+    -var "enable_avi=true" \
+    -var "avi_agent_image_uri=${image}" \
+    -var "avi_microvm_zip=${zip_path}" \
+    -target='module.avi_runtime[0].aws_ecr_repository.agent' \
+    -auto-approve
+}
+
 # --- 1. agent container ------------------------------------------------------
 
 build_image() {
@@ -45,7 +73,7 @@ build_image() {
   aws ecr describe-repositories --region "$AWS_REGION" --repository-names "$ECR_REPO" \
     >/dev/null 2>&1 || {
       echo "ECR repository ${ECR_REPO} does not exist yet." >&2
-      echo "Run 'terraform apply -target=module.avi_runtime' first (it creates it)." >&2
+      echo "Run 'bash infra/aws/deploy-avi.sh microvm' (it creates it), then retry." >&2
       exit 1
     }
 
@@ -103,10 +131,21 @@ upload_artifact() {
 
 apply_infra() {
   log "applying module.avi_runtime"
+  # `avi_session_secret` MUST be supplied: it defaults to "", and an empty HMAC
+  # secret means the control plane cannot mint a token the agent will verify
+  # (minting fails loudly, so Avi would simply be dead). It must also be the same
+  # value on every deploy, so it lives in the environment / GitHub secrets rather
+  # than being generated here.
+  if [[ -z "${AVI_SESSION_SECRET:-}" ]]; then
+    echo "AVI_SESSION_SECRET is not set. Refusing to deploy Avi with an empty session secret." >&2
+    echo "Export it (see .env) or add it as a GitHub secret." >&2
+    exit 1
+  fi
   terraform -chdir="$TF_DIR" apply \
-    -var "avi_enabled=true" \
+    -var "enable_avi=true" \
     -var "avi_agent_image_uri=${1}" \
     -var "avi_microvm_zip=${2}" \
+    -var "avi_session_secret=${AVI_SESSION_SECRET}" \
     -target=module.avi_runtime \
     -auto-approve
 }
@@ -124,19 +163,27 @@ case "$STEP" in
   image)
     build_image
     ;;
+  # Both artifact flows bootstrap ECR first, in this order:
+  #   compute the image URI (just a string) -> build the MicroVM artifact from it
+  #   -> targeted apply to create the ECR repository -> build and push the image
+  #   -> full module apply (the MicroVM image resource can now pull the agent image).
+  # The module uploads the artifact itself via aws_s3_object, so there is no
+  # separate upload step and no AVI_ARTIFACT_BUCKET to set.
   microvm)
-    image="$(build_image)"
+    image="$(compute_image)"
     zip_path="$(build_microvm_artifact "$image")"
-    upload_artifact "$zip_path"
+    ensure_ecr "$image" "$zip_path"
+    build_image >/dev/null
     apply_infra "$image" "$zip_path"
     ;;
   lambdas)
     deploy_lambdas
     ;;
   all)
-    image="$(build_image)"
+    image="$(compute_image)"
     zip_path="$(build_microvm_artifact "$image")"
-    upload_artifact "$zip_path"
+    ensure_ecr "$image" "$zip_path"
+    build_image >/dev/null
     apply_infra "$image" "$zip_path"
     deploy_lambdas
     log "done"

@@ -10,5 +10,8 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.700.0",
     "@aws-sdk/client-lambda-microvms": "^3.1136.0"
+  },
+  "overrides": {
+    "@aws-sdk/credential-provider-node": "3.972.85"
   }
 }
