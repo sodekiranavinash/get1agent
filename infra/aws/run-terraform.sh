@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI / laptop helper. Usage: run-terraform.sh <bootstrap|prod|web> <plan|apply>
+# CI / laptop helper. Usage: run-terraform.sh <bootstrap|prod|web|cloudflare> <plan|apply>
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -7,12 +7,12 @@ STACK="${1:-}"
 MODE="${2:-}"
 BUCKET="${TF_STATE_BUCKET:-get1agent-terraform-state-ap-south-1}"
 
-if [[ "$STACK" != "bootstrap" && "$STACK" != "prod" && "$STACK" != "web" ]]; then
-  echo "usage: $0 <bootstrap|prod|web> <plan|apply>" >&2
+if [[ "$STACK" != "bootstrap" && "$STACK" != "prod" && "$STACK" != "web" && "$STACK" != "cloudflare" ]]; then
+  echo "usage: $0 <bootstrap|prod|web|cloudflare> <plan|apply>" >&2
   exit 2
 fi
 if [[ "$MODE" != "plan" && "$MODE" != "apply" ]]; then
-  echo "usage: $0 <bootstrap|prod|web> <plan|apply>" >&2
+  echo "usage: $0 <bootstrap|prod|web|cloudflare> <plan|apply>" >&2
   exit 2
 fi
 

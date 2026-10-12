@@ -15,6 +15,10 @@ on:
         description: Lambdas - DynamoDB + S3 Vectors + backend Lambdas
         type: boolean
         default: false
+      cloudflare:
+        description: Cloudflare - DNS, zone settings, rules and Workers for get1agent.com
+        type: boolean
+        default: false
 
 concurrency:
   group: infra-prod
@@ -42,7 +46,8 @@ jobs:
         if: >-
           inputs.web == false &&
           inputs.api_gateway == false &&
-          inputs.lambdas == false
+          inputs.lambdas == false &&
+          inputs.cloudflare == false
         run: |
           echo "Select at least one component." >&2
           exit 1
@@ -218,7 +223,7 @@ jobs:
           terraform validate
 
       - name: Configure AWS credentials
-        if: inputs.web || inputs.api_gateway || inputs.lambdas
+        if: inputs.web || inputs.api_gateway || inputs.lambdas || inputs.cloudflare
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -226,12 +231,25 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Bootstrap state bucket
-        if: inputs.web || inputs.api_gateway || inputs.lambdas
+        if: inputs.web || inputs.api_gateway || inputs.lambdas || inputs.cloudflare
         run: bash infra/aws/run-terraform.sh bootstrap apply
 
       - name: Web
         if: inputs.web
         run: bash infra/aws/run-terraform.sh web apply
+
+      - name: Cloudflare
+        if: inputs.cloudflare
+        env:
+          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_ZONE_NAME: ${{ vars.CLOUDFLARE_ZONE_NAME }}
+          # HSTS must stay off unless deliberately enabled; see infra/CLOUDFLARE.md.
+          ENABLE_HSTS: ${{ vars.CLOUDFLARE_ENABLE_HSTS }}
+        run: |
+          bash infra/aws/write-cloudflare-tfvars.sh
+          bash infra/aws/run-terraform.sh cloudflare apply
 
       - name: Prod
         if: inputs.api_gateway || inputs.lambdas

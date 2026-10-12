@@ -38,25 +38,44 @@ In Auth0 Dashboard → **APIs** → Create API:
 
 This must match `auth_audience` in Terraform and the frontend `audience` param.
 
-### 2) Cloudflare DNS for API (`api.get1agent.com`)
+### 2) Cloudflare DNS (`api`, `www`, apex)
 
-**No A record needed** — use **CNAME** records only (grey cloud / DNS only).
+DNS for `get1agent.com` is **managed by Terraform** in
+`infra/terraform/envs/cloudflare` — see [`CLOUDFLARE.md`](CLOUDFLARE.md) for the
+access model, the import procedure and the landmines. Do not add or edit these
+records in the Cloudflare dashboard: that is drift, and the scheduled drift check
+fails when the plan stops being empty.
+
+> **Status:** these records are fully managed in `envs/cloudflare` — imported and
+> verified (`terraform plan` reports no changes, and a live API re-dump matches the
+> committed snapshot). The dashboard is no longer the source of truth for them; see
+> [`CLOUDFLARE.md`](CLOUDFLARE.md).
+
+On a **from-scratch rebuild** the stacks are ordered, because the certificate must
+exist before its validation record can be created, and that record must resolve
+before the custom domain is usable:
 
 1. Set `enable_api_custom_domain = true` in `infra/terraform/envs/prod/terraform.tfvars`
-2. Run `terraform apply` (or Infra GitHub Action)
-3. Get DNS values:
+2. `prod` apply — creates the ACM certificate and the API Gateway regional domain
+3. `cloudflare` apply — creates the validation CNAME, the `api` CNAME and `www`,
+   reading their values from the prod/web outputs via
+   `infra/aws/write-cloudflare-tfvars.sh`
+4. `prod` apply again — `aws_acm_certificate_validation` now completes
+
+To inspect the values directly:
 
 ```bash
 cd infra/terraform/envs/prod
-terraform output acm_validation_records   # step A
-terraform output api_gateway_cname_target # step B
+terraform output acm_validation_records   # ACM validation CNAME (api)
+terraform output api_gateway_cname_target # api -> API Gateway regional domain
 ```
 
-| Step | Cloudflare record | Notes |
-|------|-------------------|--------|
-| **A** | ACM validation **CNAME** | Copy `name` + `value` from `acm_validation_records` (usually `_xxxx.api` → `_xxxx.acm-validations.aws`) |
-| **B** | `api` **CNAME** → API Gateway target | Copy from `api_gateway_cname_target` (looks like `d-xxxxx.execute-api.ap-south-1.amazonaws.com`) |
-| **C** | Delete old records | Remove any stale `api` **A** record if present |
+| Record | Type | Notes |
+|--------|------|-------|
+| `api` | CNAME → API Gateway regional domain | **DNS only** (grey cloud). Proxying it would put Auth0 and the agent-run MicroVM SSE stream through Cloudflare. |
+| `_xxxx.api` | CNAME → ACM validation target | Required for certificate issuance **and renewal**. Never delete. |
+| `www` | CNAME → S3 website endpoint | Proxied. That origin is HTTP-only, so the zone's SSL mode must stay **Flexible** (Full/Strict takes the site down). |
+| apex | — | Proxied; 301s to `https://www.get1agent.com/` via a redirect rule, not a DNS record. |
 
 ### 3) Verify
 

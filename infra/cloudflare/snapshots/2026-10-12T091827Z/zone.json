@@ -1,0 +1,19 @@
+{
+  "id": "da1e9ec4c1d4e6aec290c70eacad0681",
+  "name": "get1agent.com",
+  "status": "active",
+  "paused": false,
+  "type": "full",
+  "plan": "Free Website",
+  "name_servers": [
+    "aria.ns.cloudflare.com",
+    "jaziel.ns.cloudflare.com"
+  ],
+  "vanity_name_servers": [],
+  "account": {
+    "id": "3794a90d74c74912d8a8f360eccb3d7a"
+  },
+  "created_on": "2026-08-23T17:34:08.388116Z",
+  "activated_on": "2026-08-23T17:34:08.877883Z",
+  "modified_on": "2026-10-12T14:36:06.904298Z"
+}

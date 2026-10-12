@@ -1,0 +1,28 @@
+{
+  "description": "",
+  "id": "b8c0c5bf5fd24905bd05898def7234ed",
+  "kind": "zone",
+  "last_updated": "2026-09-07T18:34:11.009069Z",
+  "name": "default",
+  "phase": "http_request_transform",
+  "rules": [
+    {
+      "action": "rewrite",
+      "action_parameters": {
+        "uri": {
+          "path": {
+            "value": "/index.html"
+          }
+        }
+      },
+      "description": "SPA fallback",
+      "enabled": true,
+      "expression": "(http.host eq \"www.get1agent.com\" and http.request.uri.path ne \"/index.html\" and not starts_with(http.request.uri.path, \"/assets/\") and not http.request.uri.path.extension in {\"png\" \"svg\" \"ico\" \"css\" \"js\" \"woff\" \"woff2\" \"json\" \"txt\" \"map\" \"webp\" \"html\"})",
+      "id": "398f66695d68429caf19927d9171449e",
+      "last_updated": "2026-09-07T18:34:11.009069Z",
+      "ref": "398f66695d68429caf19927d9171449e",
+      "version": "2"
+    }
+  ],
+  "version": "2"
+}
