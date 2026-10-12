@@ -1732,7 +1732,12 @@ module "avi_runtime" {
   microvm_zip     = local.avi_microvm_zip
   artifact_bucket = module.knowledge_storage[0].bucket_name
   # Content-addressed so a rebuilt artifact produces a new image version in place.
-  microvm_artifact_key = "microvms/avi-${substr(filesha256(local.avi_microvm_zip), 0, 16)}.zip"
+  #
+  # Wrapped in `try` deliberately: Terraform evaluates a module's arguments even
+  # when `count` is 0, so `filesha256` on an artifact that has not been built yet
+  # made the WHOLE prod configuration unplannable — not just this module. That
+  # blocked every backend deploy, Avi or not. Empty until the artifact exists.
+  microvm_artifact_key = try("microvms/avi-${substr(filesha256(local.avi_microvm_zip), 0, 16)}.zip", "")
 
   table_arn  = module.database[0].table_arn
   bucket_arn = module.knowledge_storage[0].bucket_arn
