@@ -385,27 +385,10 @@ variable "enable_ai_assistant" {
   description = "Deploy AI Assistant (the in-product assistant): guest Lambda, control plane and MicroVM image"
 }
 
-# `ai_assistant_agent_image_uri` and `ai_assistant_microvm_zip` used to live here and are gone.
-#
-# Neither was ever read: the AI Assistant agent image URI is baked into the MicroVM artifact
-# by deploy-ai-assistant.sh (which templates the Dockerfile), and the artifact path is
-# `local.ai_assistant_microvm_zip`, a fixed location that deploy-ai-assistant.sh writes to. Both were
-# pure configuration you had to supply for nothing.
-#
-# Worse, ai_assistant_microvm_zip sat in the module `count` expressions, so "the artifact
-# path is empty" silently became "delete the whole AI Assistant runtime". Intent
-# (enable_ai_assistant) and artifact-presence are now separate concerns, as they are for
-# module.agent_runtime.
-
-variable "ai_assistant_session_secret" {
-  type = string
-  # No default on purpose. With `default = ""` a missing value did not fail — it
-  # applied an empty string over the live one, leaving AI Assistant unable to mint a token
-  # the agent would verify, silently. Required means a missing value is a plan
-  # error naming the variable.
-  sensitive   = true
-  description = "HMAC secret for AI Assistant session tokens. openssl rand -hex 32. The control plane mints with it; the agent verifies. Must be the same value on every deploy."
-}
+# `ai_assistant_session_secret` used to live here and is gone. API Gateway
+# validates the Auth0 JWT, so there is no session token to mint or verify and
+# nothing has to stay in sync between two halves of the system. `guest_salt`
+# remains: it salts the per-IP hash behind the guest rate-limit bucket.
 
 variable "ai_assistant_guest_salt" {
   type        = string

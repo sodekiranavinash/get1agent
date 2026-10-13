@@ -1424,29 +1424,36 @@ locals {
     }
   } : null
 
-  # AI Assistant (the in-product assistant). One control plane serves both audiences:
-  # `/badge` is unauthenticated by design (guests have no account) and throttled
-  # much harder; `/session` requires the gateway-verified JWT. Both return the
-  # MicroVM endpoint plus a signed token the agent service verifies, so the service
-  # never has to trust a header or a body field.
-  ai_assistant_routes = var.enable_ai_assistant && one(module.ai_assistant_session[*].invoke_arn) != null ? {
-    avi_badge = {
+  # AI Assistant. Two routes, one function, deliberately different throttle ceilings:
+  #
+  #   * `/ask`   — signed in. The gateway validates the Auth0 JWT before the Lambda is
+  #                invoked at all, so the function reads verified claims and never
+  #                trusts a header or a body field.
+  #   * `/guest` — unauthenticated by design (a guest has no account) and throttled
+  #                much harder, because nothing upstream can tell one anonymous caller
+  #                from another. The per-IP counter inside the function is the second
+  #                layer behind this.
+  #
+  # Both are buffered: API Gateway cannot stream, and caps an integration at 30s,
+  # which is why the Lambda timeout matches that ceiling exactly.
+  ai_assistant_routes = var.enable_ai_assistant && one(module.ai_assistant[*].invoke_arn) != null ? {
+    ai_assistant_ask = {
       method               = "POST"
-      path                 = "/v1/ai-assistant/badge"
-      lambda_invoke_arn    = one(module.ai_assistant_session[*].invoke_arn)
-      lambda_function_name = one(module.ai_assistant_session[*].function_name)
+      path                 = "/v1/ai-assistant/ask"
+      lambda_invoke_arn    = one(module.ai_assistant[*].invoke_arn)
+      lambda_function_name = one(module.ai_assistant[*].function_name)
+      authorization_type   = "JWT"
+      throttle_burst_limit = 20
+      throttle_rate_limit  = 10
+    }
+    ai_assistant_guest = {
+      method               = "POST"
+      path                 = "/v1/ai-assistant/guest"
+      lambda_invoke_arn    = one(module.ai_assistant[*].invoke_arn)
+      lambda_function_name = one(module.ai_assistant[*].function_name)
       authorization_type   = "NONE"
       throttle_burst_limit = 4
       throttle_rate_limit  = 2
-    }
-    ai_assistant_session = {
-      method               = "POST"
-      path                 = "/v1/ai-assistant/session"
-      lambda_invoke_arn    = one(module.ai_assistant_session[*].invoke_arn)
-      lambda_function_name = one(module.ai_assistant_session[*].function_name)
-      authorization_type   = "JWT"
-      throttle_burst_limit = 10
-      throttle_rate_limit  = 5
     }
   } : null
 }

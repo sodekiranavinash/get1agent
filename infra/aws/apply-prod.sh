@@ -42,25 +42,11 @@ TARGETS=()
   TARGETS+=(-target='module.ingestion_mark_failed[0]')
   TARGETS+=(-target='module.ingestion_watchdog[0]')
 
-  # --- AI Assistant (the in-product assistant) -----------------------------------------
-  # AI Assistant is gated on `enable_ai_assistant` alone, exactly like module.agent_runtime is gated
-  # on `enable_agent_runtime` — intent, not "does a file happen to exist". So these
-  # targets are unconditional and a plain apply can no longer plan the runtime for
-  # deletion.
+  # --- AI Assistant (the in-product assistant) --------------------------------
+  # One zip Lambda, gated on `enable_ai_assistant` alone. There is no image, no
+  # MicroVM and no artifact to stage, so a normal prod apply is all it needs —
+  # the same shape as every other Lambda in this file.
   TARGETS+=(-target='module.ai_assistant[0]')
-  TARGETS+=(-target='module.ai_assistant_session[0]')
-  TARGETS+=(-target='module.ai_assistant_runtime[0]')
-
-  # The module reads the artifact from a fixed path (deploy-ai-assistant.sh writes it there),
-  # so it must be built before this apply. Checked here only to give a clear error
-  # instead of a confusing failure inside the module.
-  AI_ASSISTANT_ARTIFACT="$ROOT/backend/services/ai-assistant/microvm/dist/microvm.zip"
-  if [[ ! -f "$AI_ASSISTANT_ARTIFACT" ]]; then
-    echo "AI Assistant MicroVM artifact missing: $AI_ASSISTANT_ARTIFACT" >&2
-    echo "Build it first: bash infra/aws/deploy-ai-assistant.sh artifact" >&2
-    echo "(infra.yml does this in the step before this apply.)" >&2
-    exit 1
-  fi
 }
 
 need_backend_artifacts=false

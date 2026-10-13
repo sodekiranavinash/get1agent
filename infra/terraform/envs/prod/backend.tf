@@ -23,9 +23,7 @@ locals {
   agent_run_microvm_zip    = abspath("${path.module}/../../../../backend/services/agent-run/dist/microvm.zip")
   # AI Assistant (the in-product assistant): the stateless guest Lambda and the MicroVM
   # artifact (Dockerfile + Node proxy) that Lambda builds into an image.
-  ai_assistant_zip   = abspath("${path.module}/../../../../backend/ai-assistant/dist/function.zip")
-  ai_assistant_session_zip = abspath("${path.module}/../../../../backend/services/ai-assistant/control-plane/dist/function.zip")
-  ai_assistant_microvm_zip = abspath("${path.module}/../../../../backend/services/ai-assistant/microvm/dist/microvm.zip")
+  ai_assistant_zip = abspath("${path.module}/../../../../backend/ai-assistant/dist/function.zip")
 
   # The browser origins AI Assistant's WebSocket and guest Function URL accept. Kept in
   # step with the API Gateway CORS list in api_gateway.tf.
@@ -1636,18 +1634,14 @@ module "scheduler" {
 
 # --- AI Assistant (the in-product assistant) ------------------------------------------
 #
-# Three pieces, deliberately separate from the agent runtime:
+# One function, two routes. It owns the classifier, the retrieval and the answer,
+# and it is reached through API Gateway rather than a Function URL: answers are
+# buffered, the gateway validates the JWT, and both routes land here.
 #
-#   * `ai_assistant`   — the stateless guest ingress. A Function URL in
-#                     RESPONSE_STREAM mode, because API Gateway HTTP APIs cannot
-#                     stream and cap an integration at 30s. It has no MicroVM and
-#                     no session, and it stores nothing.
-#   * `ai_assistant_session` — the control plane. Resolves the verified Auth0 sub to a
-#                     userId, signs the session token the agent verifies, and
-#                     launches the MicroVM. It never sees a question.
-#   * `module.ai_assistant_runtime` — the MicroVM image that runs the agent container.
-#
-# AI Assistant is off until its agent image exists, because the MicroVM build pulls it.
+# The MicroVM, the ECR image, the Node control plane, the S3 artifact and the HMAC
+# session token are all gone. They existed to serve a streaming MicroVM this
+# workload does not need — retrieval plus one answer does not approach the
+# gateway's 30s integration ceiling.
 
 module "ai_assistant" {
   count  = var.enable_backend_lambdas && var.enable_ai_assistant ? 1 : 0
@@ -1661,93 +1655,36 @@ module "ai_assistant" {
   runtime          = "python3.13"
   layer_arns       = []
 
-  # Streaming needs headroom: the classifier plus a streamed answer, cold.
+  # Matched to the API Gateway integration ceiling on purpose. The gateway caps an
+  # integration at 30s and returns 504 to the caller if the Lambda outlives it,
+  # while the Lambda keeps running — so a mismatch means paying for an answer
+  # nobody receives. Equal timeouts make a slow answer fail cleanly.
   memory_size = 1024
-  timeout     = 120
+  timeout     = 30
 
-  # A guest answer is never persisted, so this function reaches the corpus (S3,
-  # vectors) and the models — not the user data it would have no right to see.
+  # No Function URL. Answers are buffered and served through API Gateway, so there
+  # is no streaming ingress to expose and no HMAC session token to mint: the
+  # gateway validates the Auth0 JWT and this function reads the verified claims.
+  # Both the signed-in and the guest route reach this one function.
   dynamodb_table_arns   = [module.database[0].table_arn]
   s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
   s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
   bedrock_model_arns    = local.bedrock_llm_model_arns
 
-  create_function_url       = true
-  function_url_invoke_mode  = "RESPONSE_STREAM"
-  function_url_auth_type    = "NONE"
-  function_url_cors_origins = local.ai_assistant_allowed_origins
-
   environment = {
-    DYNAMODB_TABLE    = module.database[0].table_name
-    S3_BUCKET         = module.knowledge_storage[0].bucket_name
-    BEDROCK_REGION    = "ap-south-1"
+    DYNAMODB_TABLE             = module.database[0].table_name
+    S3_BUCKET                  = module.knowledge_storage[0].bucket_name
+    BEDROCK_REGION             = "ap-south-1"
     AI_ASSISTANT_SCOPE         = "platform"
     AI_ASSISTANT_KB_ID         = "kb_platform_docs_0001"
     AI_ASSISTANT_GUEST_SALT    = var.ai_assistant_guest_salt
     AI_ASSISTANT_GUEST_ENABLED = "true"
-    VECTOR_STORE      = "s3vectors"
-    EMBED_MODE        = "bedrock"
-    CACHE_BACKEND     = "dynamodb"
+    VECTOR_STORE               = "s3vectors"
+    EMBED_MODE                 = "bedrock"
+    CACHE_BACKEND              = "dynamodb"
   }
 
   depends_on = [module.database, module.knowledge_storage, module.vectors]
-}
-
-module "ai_assistant_session" {
-  count  = var.enable_backend_lambdas && var.enable_ai_assistant ? 1 : 0
-  source = "../../modules/lambda_function"
-
-  name             = "get1agent-prod-ai-assistant"
-  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
-  filename         = local.ai_assistant_session_zip
-  source_code_hash = try(filebase64sha256(local.ai_assistant_session_zip), "")
-  handler          = "index.handler"
-  runtime          = "nodejs22.x"
-  layer_arns       = []
-
-  memory_size = 256
-  timeout     = 30
-
-  dynamodb_table_arns = [module.database[0].table_arn]
-
-  environment = {
-    DYNAMODB_TABLE                = module.database[0].table_name
-    AI_ASSISTANT_MICROVM_IMAGE_ARN         = try(module.ai_assistant_runtime[0].microvm_image_arn, "")
-    AI_ASSISTANT_SESSION_SECRET            = var.ai_assistant_session_secret
-    AI_ASSISTANT_GUEST_SALT                = var.ai_assistant_guest_salt
-    AI_ASSISTANT_GUEST_BADGES_PER_HOUR     = "30"
-    AI_ASSISTANT_MICROVM_TOKEN_TTL_MINUTES = "25"
-  }
-
-  depends_on = [module.database, module.ai_assistant_runtime]
-}
-
-module "ai_assistant_runtime" {
-  count  = var.enable_backend_lambdas && var.enable_ai_assistant ? 1 : 0
-  source = "../../modules/ai_assistant_runtime"
-
-  name = "get1agent-prod"
-
-  # No agent_image_uri input: the agent image URI is templated into the artifact's
-  # Dockerfile by deploy-ai-assistant.sh, so the module never needed it. See variables.tf.
-  microvm_zip     = local.ai_assistant_microvm_zip
-  artifact_bucket = module.knowledge_storage[0].bucket_name
-  # Content-addressed so a rebuilt artifact produces a new image version in place.
-  #
-  # Wrapped in `try` deliberately: Terraform evaluates a module's arguments even
-  # when `count` is 0, so `filesha256` on an artifact that has not been built yet
-  # made the WHOLE prod configuration unplannable — not just this module. That
-  # blocked every backend deploy, AI Assistant or not. Empty until the artifact exists.
-  microvm_artifact_key = try("microvms/ai-assistant-${substr(filesha256(local.ai_assistant_microvm_zip), 0, 16)}.zip", "")
-
-  table_arn  = module.database[0].table_arn
-  bucket_arn = module.knowledge_storage[0].bucket_arn
-
-  scope_user_id   = "platform"
-  kb_id           = "kb_platform_docs_0001"
-  session_secret  = var.ai_assistant_session_secret
-  guest_salt      = var.ai_assistant_guest_salt
-  allowed_origins = local.ai_assistant_allowed_origins
 }
 
 resource "aws_cloudwatch_event_rule" "scheduler" {

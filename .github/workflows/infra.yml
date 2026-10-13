@@ -252,22 +252,6 @@ jobs:
           bash infra/aws/write-cloudflare-tfvars.sh
           bash infra/aws/run-terraform.sh cloudflare apply
 
-      # AI Assistant's Terraform inputs are just `enable_ai_assistant` and the session secret — the
-      # artifact path is fixed and the agent image URI lives inside the artifact —
-      # so this step only has to build and push. It runs BEFORE the prod apply
-      # because the module uploads and builds from the artifact.
-      - name: AI Assistant image + MicroVM artifact
-        if: inputs.lambdas
-        env:
-          AWS_REGION: ${{ env.AWS_REGION }}
-          # Pinned to the commit so the `image` and `artifact` calls agree on the
-          # tag: `artifact` templates the URI into the Dockerfile, and a tag that
-          # was never pushed leaves the MicroVM image unable to resolve its base.
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          bash infra/aws/deploy-ai-assistant.sh image
-          bash infra/aws/deploy-ai-assistant.sh artifact
-
       - name: Prod
         if: inputs.api_gateway || inputs.lambdas
         env:
@@ -294,7 +278,6 @@ jobs:
           # plane mints with it and the agent verifies — so it lives in the prod
           # environment and is never generated here. The image URI and artifact path
           # arrive from the step above via $GITHUB_ENV.
-          TF_VAR_ai_assistant_session_secret: ${{ secrets.AI_ASSISTANT_SESSION_SECRET }}
         run: bash infra/aws/apply-prod.sh
 
       - name: Agent runtime (build + push image, deploy)
@@ -308,9 +291,6 @@ jobs:
           # The runtime only needs the M2M client *id* (SERVICE_AUTH_CLIENT_ID) to
           # know which `sub` to trust; it never receives the secret.
           TF_VAR_agent_service_client_id: ${{ secrets.AGENT_SERVICE_CLIENT_ID }}
-          # This step applies too, and ai_assistant_session_secret is a required variable, so
-          # it must be supplied here as well as in the Prod step.
-          TF_VAR_ai_assistant_session_secret: ${{ secrets.AI_ASSISTANT_SESSION_SECRET }}
         run: bash infra/aws/deploy-agent-runtime.sh
 
       - name: Print prod outputs

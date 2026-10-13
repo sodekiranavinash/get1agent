@@ -9,7 +9,7 @@
 #                       stay small. `ai-assistant/agent.py` imports the framework lazily
 #                       precisely so this works, and tests/test_guest_packaging.py
 #                       fails the build if that ever regresses.
-#   dist/ai-assistant/           the same zip, unpacked, for local handler testing.
+#   dist/pkg/           the same zip, unpacked, for local handler testing.
 #   ../services/ai-assistant/*   the control-plane Lambda, the MicroVM proxy and the
 #                       container image (see their own Makefiles and Dockerfile).
 #
@@ -20,34 +20,32 @@ PACKAGES=core data retrieval
 AI_ASSISTANT_DIR:=$(realpath $(CURDIR)/$(dir $(lastword $(MAKEFILE_LIST))))
 PKG_ROOT:=$(AI_ASSISTANT_DIR)/../packages
 
-# Everything the guest path must never need: an agent framework, the other
-# provider SDKs, and a numerical stack. `numpy` matters because langchain-aws
-# depends on it, so excluding it is what keeps the zip near 25 MB rather than 90.
-GUEST_EXCLUDE=langchain langchain_core langchain_aws langchain_anthropic \
-	langchain_google_genai langchain_community langgraph langgraph_sdk \
-	langgraph_checkpoint langgraph_prebuilt langgraph_checkpoint_sqlite \
-	deepagents langsmith anthropic google numpy aws_sdk_bedrock_runtime \
-	aws_bedrock_token_generator
+# There is one Lambda now, and it runs Deep Agents, so the agent framework is no
+# longer excluded — it is the product. What IS dropped is anything the Lambda
+# runtime already provides: boto3/botocore and their transitive deps are ~28 MB of
+# dead weight in the zip. `fastapi`/`uvicorn`/`starlette` existed only for the
+# container's ASGI server, which no longer exists.
+RUNTIME_EXCLUDE=boto3 botocore s3transfer jmespath fastapi uvicorn starlette
 
 package:
 	rm -rf dist
 	mkdir -p dist/unpacked
 	cp handler.py dist/unpacked/
-	cp -R ai-assistant dist/unpacked/
-	rm -rf dist/unpacked/ai-assistant/__pycache__
+	cp -R src dist/unpacked/
+	rm -rf dist/unpacked/src/__pycache__
 	for p in $(PACKAGES); do cp -R "$(PKG_ROOT)/$$p" "dist/unpacked/$$p"; done
 	@if [ -d .venv ]; then \
 		cp -R .venv/lib/python*/site-packages/* dist/unpacked/ ; \
-		for x in $(GUEST_EXCLUDE); do rm -rf "dist/unpacked/$$x" "dist/unpacked/$$x"-*.dist-info; done; \
+		for x in $(RUNTIME_EXCLUDE); do rm -rf "dist/unpacked/$$x" "dist/unpacked/$$x"-*.dist-info; done; \
 		rm -rf dist/unpacked/bin dist/unpacked/*.pth dist/unpacked/INSTALLER dist/unpacked/_virtualenv.py; \
 	fi
-	@# Keep the unpacked copy as `dist/ai-assistant/` for `python -c "import handler"` checks.
-	mv dist/unpacked dist/ai-assistant
-	find dist/ai-assistant -type d -name __pycache__ -prune -exec rm -rf {} +
-	find dist/ai-assistant -type d -name "*.dist-info" -prune -exec rm -rf {} +
-	find dist/ai-assistant -type d -name tests -prune -exec rm -rf {} +
-	cd dist/ai-assistant && zip -qXr ../function.zip .
-	@echo "ai-assistant zip: $$(du -h dist/function.zip | cut -f1) (unzipped $$(du -sh dist/ai-assistant | cut -f1))"
+	@# Keep the unpacked copy as `dist/pkg/` for `python -c "import handler"` checks.
+	mv dist/unpacked dist/pkg
+	find dist/pkg -type d -name __pycache__ -prune -exec rm -rf {} +
+	find dist/pkg -type d -name "*.dist-info" -prune -exec rm -rf {} +
+	find dist/pkg -type d -name tests -prune -exec rm -rf {} +
+	cd dist/pkg && zip -qXr ../function.zip .
+	@echo "ai-assistant zip: $$(du -h dist/function.zip | cut -f1) (unzipped $$(du -sh dist/pkg | cut -f1))"
 
 test:
 	@PYTHONPATH="$(PKG_ROOT):$(AI_ASSISTANT_DIR)" .venv/bin/python -m unittest discover -s tests -t . -v

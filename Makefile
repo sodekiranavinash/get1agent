@@ -99,7 +99,7 @@ ai-assistant-local-ingest:
 	backend/ai-assistant/.venv/bin/python tools/ai-assistant-knowledge/local_ingest.py
 
 # Run the AI Assistant agent service against the local stack (:8091). The widget talks to
-# it directly with VITE_AI_ASSISTANT_MICROVM=false, which is also how guests reach AI Assistant
+# it directly with , which is also how guests reach AI Assistant
 # locally — including on the landing page.
 ai-assistant-local-agent:
 	backend/ai-assistant/.venv/bin/python tools/ai-assistant-knowledge/local_agent.py
@@ -388,7 +388,7 @@ floci: floci-env
 	@echo "Floci stack ready."
 	@echo "  API base URL: $(FLOCI_API_URL)"
 	@echo "  Point the UI at it (dev server proxies /v1 to Floci):"
-	@echo "    printf 'VITE_API_URL=/\\nVITE_API_PROXY_TARGET=$(FLOCI_API_URL)\\nVITE_AI_ASSISTANT_URL=http://localhost:8091\\nVITE_AI_ASSISTANT_MICROVM=false\\n' > frontend/.env.local"
+	@echo "    printf 'VITE_API_URL=/\\nVITE_API_PROXY_TARGET=$(FLOCI_API_URL)\\nVITE_AI_ASSISTANT_URL=http://localhost:8091\\n\\n' > frontend/.env.local"
 	@echo ""
 	@echo "  AI Assistant (bottom-right assistant) is NOT in the stack: Lambda MicroVMs and"
 	@echo "  AgentCore are not emulated, so there is no /v1/ai-assistant/session route. Run it"
