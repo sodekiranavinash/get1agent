@@ -988,3 +988,82 @@ body {
     background: color-mix(in srgb, var(--app-accent) 55%, transparent);
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * Avi — the in-product assistant's launcher and dialog.
+ *
+ * Geometry lives in variables because the launcher and the dialog have to
+ * agree on it: the launcher's height plus a little air *is* the dialog's
+ * floor, and the dialog must clear the button so the button stays visible
+ * (it is also the close control). Written once so the two cannot drift.
+ * ------------------------------------------------------------------ */
+:root {
+  --avi-launcher-bottom: 4.5rem;
+  --avi-launcher-size: 3.5rem;
+  --avi-gap: 0.75rem;
+}
+
+@keyframes avi-launcher-in {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/*
+ * The dialog scales from the corner nearest the launcher, so it reads as
+ * growing out of the button that opened it rather than appearing from nowhere.
+ * `transform-origin` is set inline by the component.
+ *
+ * Both directions are driven by `data-state`, and the component keeps the dialog
+ * mounted through the closing transition — otherwise React would unmount it and
+ * the exit would never be seen.
+ */
+@keyframes avi-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes avi-dialog-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.96);
+  }
+}
+
+.avi-launcher-in {
+  animation: avi-launcher-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.avi-dialog[data-state='open'] {
+  animation: avi-dialog-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.avi-dialog[data-state='closed'] {
+  animation: avi-dialog-out 140ms cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avi-launcher-in,
+  .avi-dialog[data-state='open'],
+  .avi-dialog[data-state='closed'] {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

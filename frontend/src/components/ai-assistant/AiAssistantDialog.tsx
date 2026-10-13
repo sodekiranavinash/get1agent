@@ -18,10 +18,12 @@ import { useDemoMode } from '../../auth/useDemoMode'
  * looking at, on every page, and never navigates them away. The only exits are
  * the close button, `Esc`, and a deliberately-clicked deep link.
  *
- * The panel has a **fixed height** (`min(540px, 72vh)`, and a taller sheet on a
- * phone) rather than a max-height, so the transcript, the header and the
- * composer never resize as an answer streams in — a chat that grows and shrinks
- * with its content makes the send button jump under the cursor.
+ * The panel has a **fixed height** rather than a max-height, so the transcript, the
+ * header and the composer never resize as an answer streams in — a chat that grows
+ * and shrinks with its content makes the send button jump under the cursor. The
+ * desktop height is additionally capped so the panel can never grow tall enough to
+ * cover the launcher below it (see `AiAssistantLauncher`): the button stays visible
+ * while open, because it is also the close control.
  */
 export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const location = useLocation()
@@ -94,10 +96,8 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
     [open, location.pathname],
   )
 
-  if (!open) return null
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
+  const submit = (event: FormEvent) => {    event.preventDefault()
     const text = draft.trim()
     if (!text) return
     setDraft('')
@@ -125,11 +125,20 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
         aria-modal="true"
         aria-label="Avi, the get1agent assistant"
         // On desktop the panel is anchored **above** the launcher (`sm:bottom-32`),
-        // not over it: the launcher stays visible and turns into an X, so the
-        // control that opened the dialog is the one that closes it. That offset
-        // must stay clear of the launcher's `5.5rem` resting height; below `sm` the
-        // dialog is a bottom sheet and simply covers the button.
-        className="fixed inset-x-0 bottom-0 z-[61] flex h-[min(80vh,600px)] flex-col overflow-hidden rounded-t-xl border border-border bg-canvas shadow-2xl sm:inset-x-auto sm:right-5 sm:bottom-32 sm:h-[min(540px,72vh)] sm:w-[380px] sm:rounded-xl"
+        // not over it: the launcher stays visible and shows an X, so the control
+        // that opened the dialog is the one that closes it. The offset is derived
+        // from the shared `--avi-*` variables (the launcher's own bottom + height +
+        // a gap), so the two cannot drift apart; below `sm` the dialog is a bottom
+        // sheet and covers the button, which is fine there — the sheet's own Close
+        // button is in reach.
+        data-state={open ? 'open' : 'closed'}
+        // Scales from the corner nearest the launcher, so the dialog reads as
+        // growing out of the button that opened it.
+        style={{ transformOrigin: 'bottom right' }}
+        // The desktop height is capped against the viewport AND the launcher's
+        // footprint (`--avi-launcher-bottom` + `--avi-launcher-size` + a gap) so it
+        // can never grow tall enough to cover the button below it on a short screen.
+        className="avi-dialog fixed inset-x-0 bottom-0 z-[61] flex h-[min(80vh,600px)] flex-col overflow-hidden rounded-t-xl border border-border bg-canvas shadow-2xl sm:inset-x-auto sm:right-5 sm:bottom-[calc(var(--avi-launcher-bottom)+var(--avi-launcher-size)+var(--avi-gap))] sm:h-[min(540px,72vh,calc(100vh-var(--avi-launcher-bottom)-var(--avi-launcher-size)-var(--avi-gap)-1.5rem))] sm:w-[380px] sm:rounded-xl"
       >
         {/* Grab handle: the phone sheet reads as draggable even though it is not. */}
         <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-border-strong sm:hidden" aria-hidden />
