@@ -2,6 +2,7 @@ import { useCallback, useMemo, type ReactNode } from 'react'
 import { Auth0Provider, type AppState } from '@auth0/auth0-react'
 import { useNavigate } from 'react-router-dom'
 import { AUTH_PATHS, authAbsoluteUrl } from './authUrls'
+import { exitDemoMode } from './demo'
 import { clearStoredView } from './view'
 
 const AUTH_DOMAIN = import.meta.env.VITE_AUTH_DOMAIN
@@ -19,8 +20,13 @@ export function Auth0ProviderWithNavigate({
 
   const onRedirectCallback = useCallback(
     (appState?: AppState) => {
-      // Fresh login: forget the previous view so the user chooses again.
+      // Fresh login: forget the previous view so the user chooses again, and leave
+      // the read-only demo behind. This is the only place demo mode is cleared on
+      // the sign-in path: the in-app handlers used to clear it *before* the
+      // redirect, which handed the current route back to `RequireAuth` while Auth0
+      // was still resolving and bounced the visitor through `/`.
       clearStoredView()
+      exitDemoMode()
       navigate(appState?.returnTo || '/dashboard', { replace: true })
     },
     [navigate],

@@ -1,14 +1,11 @@
 import type { LucideIcon } from 'lucide-react'
 import { BookText, CreditCard, KeyRound, LifeBuoy } from 'lucide-react'
-import { useAuth0 } from '@auth0/auth0-react'
 import { Link, useLocation } from 'react-router-dom'
 import { AccountMenu } from './AccountMenu'
 import { NotificationsMenu } from './NotificationsMenu'
 import { ThemeSwitch } from './ThemeSwitch'
 import { CommandPalette } from '../CommandPalette'
 import { originState } from './returnTarget'
-import { exitDemoMode } from '../../auth/demo'
-import { googleLoginOptions } from '../../auth/login'
 import { useDemoMode } from '../../auth/useDemoMode'
 import { useView } from '../../auth/ViewProvider'
 type TopBarProps = {
@@ -49,24 +46,20 @@ function NavLinkItem({
 
 /**
  * The "DEMO MODE" tag shown only in the read-only demo. It sits left of the
- * theme switch and clicking it exits the demo and starts sign-in.
+ * theme switch and is **not** a control: it is a label, and it used to be a
+ * button that signed you in, which read as a stray click target next to the
+ * theme switch. Signing in lives in the account menu (and on the landing page).
  */
 function DemoModeBadge() {
   const demo = useDemoMode()
-  const { loginWithRedirect } = useAuth0()
   if (!demo) return null
   return (
-    <button
-      type="button"
-      title="Read-only demo — sign in to make changes"
-      onClick={() => {
-        exitDemoMode()
-        void loginWithRedirect(googleLoginOptions('/dashboard'))
-      }}
-      className="mr-1 inline-flex shrink-0 items-center rounded-md border border-accent/35 bg-accent-soft/70 px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-accent uppercase transition-colors hover:border-accent/60 hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+    <span
+      title="Read-only demo — sign in from the account menu to make changes"
+      className="mr-1 inline-flex shrink-0 items-center rounded-md border border-accent/35 bg-accent-soft/70 px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-accent uppercase"
     >
       Demo mode
-    </button>
+    </span>
   )
 }
 

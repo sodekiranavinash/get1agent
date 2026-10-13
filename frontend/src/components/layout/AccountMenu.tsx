@@ -1,5 +1,5 @@
 import { useAuth0 } from '@auth0/auth0-react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   ArrowLeftRight,
   ChevronsUpDown,
@@ -10,7 +10,6 @@ import {
 import { AUTH_PATHS } from '../../auth/authUrls'
 import { getUserProfile } from '../../auth/userProfile'
 import { useView } from '../../auth/ViewProvider'
-import { exitDemoMode } from '../../auth/demo'
 import { googleLoginOptions } from '../../auth/login'
 import { useDemoMode } from '../../auth/useDemoMode'
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar'
@@ -33,6 +32,7 @@ export function AccountMenu({ settingsPath = '/settings' }: AccountMenuProps) {
   const { user, loginWithRedirect } = useAuth0()
   const { view, canSwitch, chooseView } = useView()
   const demo = useDemoMode()
+  const location = useLocation()
   const profile = getUserProfile(user)
   const displayName = demo
     ? 'Demo visitor'
@@ -92,8 +92,19 @@ export function AccountMenu({ settingsPath = '/settings' }: AccountMenuProps) {
         {demo ? (
           <DropdownMenuItem
             onSelect={() => {
-              exitDemoMode()
-              void loginWithRedirect(googleLoginOptions('/dashboard'))
+              // Deliberately **not** `exitDemoMode()` first. Leaving the demo hands
+              // the current route back to `RequireAuth` while Auth0's redirect is
+              // still resolving, so the visitor was bounced to `/` and only sent to
+              // Google from there. The round trip clears the demo on success
+              // (`onRedirectCallback`), which also means cancelling at Google leaves
+              // them where they were.
+              void loginWithRedirect(
+                googleLoginOptions(
+                  location.pathname === '/'
+                    ? '/dashboard'
+                    : location.pathname + location.search,
+                ),
+              )
             }}
           >
             <LogIn className="size-3.5" />

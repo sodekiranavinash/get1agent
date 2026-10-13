@@ -241,7 +241,9 @@ export function LoginPage() {
   const signIn = () => {
     exitDemoMode()
     // Signing in from the landing page itself carries nothing, and the workspace
-    // is the right default.
+    // is the right default. (`exitDemoMode` is safe here — this page is not behind
+    // the guard, so nothing bounces. The in-app handlers must not do it; see
+    // `AccountMenu`.)
     void loginWithRedirect(googleLoginOptions(returnTo || '/dashboard'))
   }
 

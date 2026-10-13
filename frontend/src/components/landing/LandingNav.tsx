@@ -1,7 +1,7 @@
 import { useAuth0 } from '@auth0/auth0-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { BookText, Eye, Loader2 } from 'lucide-react'
-import { enterDemoMode, exitDemoMode } from '../../auth/demo'
+import { enterDemoMode } from '../../auth/demo'
 import { useDemoMode } from '../../auth/useDemoMode'
 import { googleLoginOptions } from '../../auth/login'
 import { Button } from '../ui/Button'
@@ -32,7 +32,9 @@ export function LandingNav({ wide = false }: { wide?: boolean } = {}) {
     'hidden size-9 shrink-0 items-center justify-center rounded-md border border-border-strong bg-transparent text-foreground transition-colors hover:border-accent/50 hover:bg-raised hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none sm:inline-flex'
 
   const signIn = () => {
-    exitDemoMode()
+    // Not `exitDemoMode()` first: that un-bypasses `RequireAuth` on whatever route
+    // is mounted while Auth0 resolves, which is the `/` hop this avoids. The
+    // round trip clears the demo mode on success instead.
     void loginWithRedirect(googleLoginOptions('/dashboard'))
   }
 
