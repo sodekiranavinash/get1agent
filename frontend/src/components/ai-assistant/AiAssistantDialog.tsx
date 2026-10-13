@@ -123,7 +123,7 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="AI Assistant, the get1agent assistant"
+        aria-label="Avi, the get1agent assistant"
         className="fixed inset-x-0 bottom-0 z-[61] flex h-[min(80vh,600px)] flex-col overflow-hidden rounded-t-xl border border-border bg-canvas shadow-2xl sm:inset-x-auto sm:right-5 sm:bottom-24 sm:h-[min(540px,72vh)] sm:w-[380px] sm:rounded-xl"
       >
         {/* Grab handle: the phone sheet reads as draggable even though it is not. */}
@@ -138,7 +138,7 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
             )}
           </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[13px] font-semibold text-foreground">AI Assistant</p>
+            <p className="truncate text-[13px] font-semibold text-foreground">Avi</p>
             <p className="truncate text-[11px] text-muted">
               {streaming
                 ? 'Answering…'
@@ -162,7 +162,7 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
             type="button"
             onClick={onClose}
             title="Close"
-            aria-label="Close AI Assistant"
+            aria-label="Close Avi"
             className="grid size-7 place-items-center rounded-md text-muted transition-colors hover:bg-raised hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
           >
             <X className="size-4" />
@@ -178,7 +178,7 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
             <div className="space-y-3.5">
               <div className="rounded-lg border border-border bg-raised/60 px-3 py-2.5">
                 <p className="text-[12.5px] leading-relaxed text-foreground">
-                  Hi — I&apos;m AI Assistant.
+                  Hi — I&apos;m Avi.
                 </p>
                 <p className="mt-1 text-[12px] leading-relaxed text-muted">
                   I can explain any feature, show you where to find it, and answer how-to
@@ -218,7 +218,7 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
           {status === 'limited' && (
             <div className="rounded-lg border border-border bg-raised px-3 py-2">
               <p className="text-[12px] text-foreground">
-                You&apos;ve reached the AI Assistant limit for now
+                You&apos;ve reached the Avi limit for now
                 {retryAfter > 0
                   ? ` — try again in about ${Math.ceil(retryAfter / 60)} min`
                   : ''}
@@ -259,7 +259,7 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
               rows={1}
               maxLength={2000}
               placeholder="Ask about a feature…"
-              aria-label="Ask AI Assistant a question"
+              aria-label="Ask Avi a question"
               className="scrollbar-thin max-h-28 min-h-8 flex-1 resize-none bg-transparent px-1.5 py-1 text-[12.5px] leading-relaxed text-foreground placeholder:text-muted focus-visible:outline-none"
             />
             {streaming ? (

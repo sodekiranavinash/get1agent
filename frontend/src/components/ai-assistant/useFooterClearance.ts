@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 
-/** The launcher's resting distance from the viewport bottom (its `2rem` offset). */
-const BASE_OFFSET = 32
+/** The launcher's resting distance from the viewport bottom, unless overridden. */
+const DEFAULT_BASE_OFFSET = 32
 /** Breathing room between the button and the footer's top edge. */
 const GAP = 10
 
@@ -14,12 +14,16 @@ const GAP = 10
  * than reserve dead space under every page, the button moves up by exactly the
  * overlap.
  *
+ * `baseOffset` must be the launcher's own resting `bottom` in px. It is a
+ * parameter because the two have to agree: measuring against a stale offset makes
+ * the button stop short of the footer on one screen and float above it on another.
+ *
  * Scroll is listened for with `capture: true` on `document`: the two shells scroll
  * differently (the app shell scrolls an inner `overflow-y-auto` column, the public
  * shell the document), and scroll events do not bubble — capture is what catches
  * both without a ref to either container.
  */
-export function useFooterClearance(active: boolean): number {
+export function useFooterClearance(active: boolean, baseOffset = DEFAULT_BASE_OFFSET): number {
   const { pathname } = useLocation()
   const [clearance, setClearance] = useState(0)
   const footerRef = useRef<HTMLElement | null>(null)
@@ -49,7 +53,7 @@ export function useFooterClearance(active: boolean): number {
         return
       }
       const rect = footer.getBoundingClientRect()
-      const needed = window.innerHeight - BASE_OFFSET - rect.top + GAP
+      const needed = window.innerHeight - baseOffset - rect.top + GAP
       // Never lift the button more than the footer is tall: past that it would
       // float in the middle of the page, which looks broken rather than tidy.
       setClearance(Math.min(Math.max(0, needed), Math.max(0, rect.height + GAP)))
@@ -66,7 +70,7 @@ export function useFooterClearance(active: boolean): number {
       document.removeEventListener('scroll', onScroll, { capture: true })
       window.removeEventListener('resize', onScroll)
     }
-  }, [active, pathname])
+  }, [active, pathname, baseOffset])
 
   return clearance
 }

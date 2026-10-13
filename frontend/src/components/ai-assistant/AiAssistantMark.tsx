@@ -25,7 +25,7 @@ export function AiAssistantMark({ className = '' }: { className?: string }) {
     <svg
       viewBox="0 0 64 64"
       role="img"
-      aria-label="AI Assistant"
+      aria-label="Avi"
       className={`shrink-0 ${className}`}
     >
       <rect width="64" height="64" rx="14" fill={background} />

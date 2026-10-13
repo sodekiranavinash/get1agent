@@ -153,7 +153,7 @@ export function useAiAssistant({
       if (!text || status === 'streaming') return
       if (!aviConfigured()) {
         setStatus('error')
-        setError('AI Assistant is not configured in this build.')
+        setError('Avi is not configured in this build.')
         return
       }
 
