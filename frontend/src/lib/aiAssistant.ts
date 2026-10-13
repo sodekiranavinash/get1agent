@@ -78,8 +78,13 @@ const LOCAL_URL = (import.meta.env.VITE_AI_ASSISTANT_URL ?? '').replace(/\/+$/, 
 
 /** Local development talks to the service directly; otherwise the gateway routes. */
 function turnUrl(authenticated: boolean): string {
-  if (LOCAL_URL) return `${LOCAL_URL}`
-  return `${API_BASE_URL}${authenticated ? '/v1/ai-assistant/ask' : '/v1/ai-assistant/guest'}`
+  const route = authenticated ? '/v1/ai-assistant/ask' : '/v1/ai-assistant/guest'
+  // The local override is an **origin** (`http://localhost:8091`), not a route —
+  // it replaces the gateway, not the path. Returning it bare posted every turn to
+  // `/`, which the local server answers with a 404 body that has no `error` field,
+  // so the widget said "AI Assistant is unavailable (404)" — while the service
+  // itself was healthy. The route has to be appended on both branches.
+  return LOCAL_URL ? `${LOCAL_URL}${route}` : `${API_BASE_URL}${route}`
 }
 
 /**
