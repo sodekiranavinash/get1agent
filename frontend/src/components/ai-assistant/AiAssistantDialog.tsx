@@ -137,7 +137,7 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
         {/* Header — fixed above the transcript. */}
         <header className="flex shrink-0 items-center gap-2.5 border-b border-border px-3.5 py-2.5">
           <span className="relative shrink-0">
-            <AviIcon className="size-7 text-accent" />
+            <AviIcon plate className="size-8" />
             {streaming && (
               <span className="absolute -right-0.5 -bottom-0.5 size-2.5 animate-pulse rounded-full border-2 border-canvas bg-accent" />
             )}

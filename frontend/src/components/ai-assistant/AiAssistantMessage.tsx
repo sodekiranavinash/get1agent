@@ -200,7 +200,7 @@ export function AiAssistantMessage({
 
       {/* The answer, with AI Assistant's mark on the outside. */}
       <div className="flex items-start gap-2">
-        <AviIcon className="mt-0.5 size-5 text-accent" />
+        <AviIcon plate className="mt-0.5 size-6" />
         <div className="min-w-0 flex-1 pt-0.5">
           {run.answer ? (
             <ChatAnswer

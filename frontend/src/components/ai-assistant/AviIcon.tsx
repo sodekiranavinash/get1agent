@@ -1,55 +1,127 @@
 /**
- * Avi's icon — a solid four-point sparkle.
+ * Avi's icon — a luminous orb, optionally on an accent plate.
  *
- * Short history, because the failures are instructive:
+ * Three earlier attempts, and why they went:
  *
- *   - the **product logo** said "this is get1agent", not "there is something here,
- *     click me";
- *   - a **glowing orbit** (core + ring + satellite) looked soft and blurry at the
- *     ~30px it actually renders at, and its animation read as dated — a radial
- *     gradient with 1.1px strokes *is* the blur at that size;
- *   - a **cluster of three sparkles** read as specks rather than a mark, and a
- *     **bloom cross** degenerated into an X, colliding with the close control.
+ *   - the **product logo**: said "this is get1agent", not "there is something
+ *     here, click me";
+ *   - a **four-point sparkle**: crisp, but it is the industry's default AI glyph,
+ *     so it read as generic — the opposite of a reason to click;
+ *   - a **flat orbit** drawn with thin strokes: washed out, because a 1px stroke at
+ *     28px is anti-aliased grey.
  *
- * So: one **solid, single-colour** shape, no gradient, no glow, no animation. A
- * filled four-point star is unmistakable at 28px, and it is what the industry
- * settled on for AI entry points, so it explains itself. Deliberately **not**
- * lucide's `Sparkles`, which is already used across chat, playground, landing and
- * architecture — sharing it would make the launcher look like decoration belonging
- * to the page rather than a fixed control.
+ * This is the shape the category has converged on for a *living* assistant rather
+ * than a *feature*: a lit orb, not a glyph. The orb is the subject; the ring is
+ * context, broken where a satellite rides it so it reads as motion rather than as
+ * a bullseye.
  *
- * `currentColor` throughout, so it takes the contrast its surface already sets.
+ * ## Why there is a `plate`
+ *
+ * The orb is white, so it needs a surface to sit on. The launcher already *is*
+ * that surface (an accent tile), but the dialog header and the message avatar sit
+ * on `bg-canvas` — which is `#ffffff` in the light theme. A white orb on white is
+ * invisible: measured, not assumed, and it vanished completely.
+ *
+ * So callers on a plain surface pass `plate`, which draws the same accent disc the
+ * launcher uses. One icon, two mountings, and neither depends on the background
+ * happening to be dark.
+ *
+ * No animation on purpose — motion on a persistent control is tiring, and the orb
+ * is meant to be looked at, not watched.
  */
 
-/** Identifies this icon in the DOM and in tests, independent of size. */
-export const AVI_ICON_TESTID = 'avi-icon'
+export function AviIcon({
+  className = '',
+  plate = false,
+}: {
+  className?: string
+  /** Draw the accent disc behind the orb. Use on any light/plain surface. */
+  plate?: boolean
+}) {
+  // Unique ids would be safer for a component that renders more than once; this
+  // renders at most twice on a page, and stable ids keep the markup greppable.
+  const body = 'avi-orb-body'
+  const sheen = 'avi-orb-sheen'
 
-/**
- * A four-point star with concave sides, as one closed path.
- *
- * The control points sit ~26% of the way from each tip to the centre — that is the
- * pinch that reads as a sparkle. Closer to the centre it thins into a cross (which
- * is what the bloom attempt produced, and it read as an X); further out it rounds
- * into a diamond.
- *
- * Filled rather than stroked on purpose: a 1px stroke at 28px is anti-aliased grey,
- * which is exactly the washed-out look this replaced.
- */
-const D =
-  'M12 1.4c.62 4.4 1.6 6.86 3.28 8.18C16.8 10.74 19.3 11.4 22.6 12c-3.3.6-5.8 1.26-7.32 2.42' +
-  'C13.6 15.74 12.62 18.2 12 22.6c-.62-4.4-1.6-6.86-3.28-8.18C7.2 13.26 4.7 12.6 1.4 12' +
-  'c3.3-.6 5.8-1.26 7.32-2.42C10.4 8.26 11.38 5.8 12 1.4Z'
-
-export function AviIcon({ className = '' }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
       role="img"
       aria-label="Avi"
-      data-testid={AVI_ICON_TESTID}
+      // The mounting is part of the id: `plate` and no-plate are genuinely
+      // different marks, so a test asserting "the launcher shows the icon" must not
+      // pass for the avatar.
+      data-testid={plate ? 'avi-icon-plated' : 'avi-icon'}
+      // The plate is a *container*, so it scales with the icon rather than being a
+      // fixed background the glyph has to fit inside.
+      data-plate={plate ? '' : undefined}
       className={`shrink-0 ${className}`}
     >
-      <path d={D} fill="currentColor" />
+      <defs>
+        {/*
+         * Light comes from the upper-left, which is what gives the orb a front and
+         * a back. The outer stop is a warm grey rather than a tinted white so the
+         * edge still reads as an edge.
+         */}
+        <radialGradient id={body} gradientUnits="userSpaceOnUse" cx="9.4" cy="8.6" r="11.6">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="46%" stopColor="#fdfbfa" />
+          <stop offset="80%" stopColor="#f0e7e4" />
+          <stop offset="100%" stopColor="#d9c8c4" />
+        </radialGradient>
+        {/* A tight specular, separate from the body shading, for a glassy top-left. */}
+        <radialGradient id={sheen} gradientUnits="userSpaceOnUse" cx="9.1" cy="8.1" r="5.2">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      {/*
+       * The plate, and the ring over it. The ring only exists on the plate: on the
+       * launcher the surrounding tile already supplies that contrast, and a second
+       * ring there would be two rings around one orb.
+       */}
+      {plate && (
+        <>
+          <circle cx="12" cy="12" r="11.6" className="fill-accent" />
+          <circle
+            cx="12"
+            cy="12"
+            r="10.2"
+            fill="none"
+            stroke="#ffffff"
+            strokeOpacity="0.5"
+            strokeWidth="0.8"
+            strokeLinecap="round"
+            strokeDasharray="48 16"
+            transform="rotate(-58 12 12)"
+          />
+          <circle cx="19.1" cy="9.8" r="1.3" fill="#ffffff" />
+        </>
+      )}
+
+      {/* The subject. */}
+      <circle cx="12" cy="12" r="6.6" fill={`url(#${body})`} />
+      <circle cx="12" cy="12" r="6.6" fill={`url(#${sheen})`} />
+
+      {/* On the launcher the ring is drawn at the tile's scale instead. */}
+      {!plate && (
+        <>
+          <circle
+            cx="12"
+            cy="12"
+            r="10.5"
+            fill="none"
+            stroke="#ffffff"
+            strokeOpacity="0.55"
+            strokeWidth="0.9"
+            strokeLinecap="round"
+            strokeDasharray="52 14"
+            transform="rotate(-58 12 12)"
+          />
+          <circle cx="19.4" cy="9.5" r="1.45" fill="#ffffff" />
+        </>
+      )}
     </svg>
   )
 }
