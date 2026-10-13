@@ -1003,7 +1003,9 @@ body {
    * clear of the in-flow footer, so the smaller resting gap only moves the
    * resting spot — it never lets the button cover the footer's links. */
   --avi-launcher-bottom: 1.75rem;
-  --avi-launcher-size: 3.5rem;
+  /* `3rem` (48px), matching the launcher's `size-12`: the dialog subtracts this
+   * plus the bottom offset to find its floor, so the two cannot drift. */
+  --avi-launcher-size: 3rem;
   --avi-gap: 0.75rem;
 }
 

@@ -109,31 +109,45 @@ export function AiAssistantLauncher() {
         // dialog covers the button that is meant to close it.
         style={{ bottom: `calc(var(--avi-launcher-bottom) + ${clearance}px)` }}
         // `right-4`, not `right-5`: the button hugs the right edge (and the dialog
-        // uses the same gutter, so the two stay aligned). `rounded-2xl`, not a full
-        // pill: softer than the old square, without reading as a generic chat
-        // widget. `avi-launcher-in` is the entrance only — it is `both`-filled, so
-        // it settles at scale(1) and then the hover transform takes over.
-        className="avi-launcher-in fixed right-4 z-[62] grid size-14 place-items-center rounded-2xl border border-accent/30 bg-accent text-white shadow-lg transition-[bottom,scale] duration-200 ease-out hover:scale-105 focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas focus-visible:outline-none"
+        // uses the same gutter, so the two stay aligned). `size-12` (48px) rather
+        // than `size-14` (56px) — a 56px tile with a 32px glyph was loud enough to
+        // compete with page content. It must stay equal to `--avi-launcher-size` in
+        // `index.css`, which the dialog subtracts to find its floor.
+        // `rounded-2xl`, not a full pill: softer than the old square, without
+        // reading as a generic chat widget. `avi-launcher-in` is the entrance only
+        // — it is `both`-filled, so it settles at scale(1) and then the hover
+        // transform takes over.
+        className="avi-launcher-in fixed right-4 z-[62] grid size-12 place-items-center rounded-2xl border border-accent/30 bg-accent text-white shadow-lg transition-[bottom,scale] duration-200 ease-out hover:scale-105 focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas focus-visible:outline-none"
         // NOTE: no `relative` here. `fixed` already establishes the containing block
-        // for the X badge, and adding `relative` silently overrode `fixed` — Tailwind
-        // emits `.relative` after `.fixed`, so the button dropped out of fixed
-        // positioning into the document flow at the bottom of the page.
+        // for the swapped glyph, and adding `relative` silently overrode `fixed` —
+        // Tailwind emits `.relative` after `.fixed`, so the button dropped out of
+        // fixed positioning into the document flow at the bottom of the page.
       >
         {/*
-         * The icon is always present and the state rides on it, rather than swapping
-         * one glyph for another:
-         *   - closed — the sparkle alone;
-         *   - open   — the sparkle stays and an X *badge* appears in its corner, so
-         *     "it turns into an X" is literal and the brand mark never disappears.
+         * The glyph itself swaps — closed is the sparkle, open is a full-size X.
+         *
+         * An earlier version kept the sparkle and floated a small X *badge* in its
+         * corner; that read as two marks competing for one tile, and the badge was
+         * far too small to be the close affordance it claimed to be. So the X takes
+         * the tile, at the same size as the mark it replaces.
+         *
+         * Both glyphs stay mounted and crossfade rather than being conditionally
+         * rendered, so the swap eases instead of snapping. The wrapper is
+         * `aria-hidden`: the button's own `aria-label` already says whether this
+         * control opens or closes, so the pair would only be noise.
          */}
-        <AviIcon className="size-8" />
-        <span
-          aria-hidden
-          className={`absolute right-1.5 bottom-1.5 grid size-4 place-items-center rounded-full bg-canvas text-foreground shadow-sm transition-[opacity,scale] duration-150 ease-out ${
-            open ? 'scale-100 opacity-100' : 'scale-75 opacity-0'
-          }`}
-        >
-          <X className="size-2.5" strokeWidth={3} />
+        <span aria-hidden className="relative size-6">
+          <AviIcon
+            className={`absolute inset-0 m-auto size-6 transition-[opacity,scale] duration-150 ease-out ${
+              open ? 'scale-75 opacity-0' : 'scale-100 opacity-100'
+            }`}
+          />
+          <X
+            strokeWidth={2.75}
+            className={`absolute inset-0 m-auto size-6 transition-[opacity,scale] duration-150 ease-out ${
+              open ? 'scale-100 opacity-100' : 'scale-75 opacity-0'
+            }`}
+          />
         </span>
       </button>
 

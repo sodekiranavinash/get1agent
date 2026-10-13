@@ -135,10 +135,16 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
         // Scales from the corner nearest the launcher, so the dialog reads as
         // growing out of the button that opened it.
         style={{ transformOrigin: 'bottom right' }}
-        // The desktop height is capped against the viewport AND the launcher's
-        // footprint (`--avi-launcher-bottom` + `--avi-launcher-size` + a gap) so it
-        // can never grow tall enough to cover the button below it on a short screen.
-        className="avi-dialog fixed inset-x-0 bottom-0 z-[61] flex h-[min(80vh,600px)] flex-col overflow-hidden rounded-t-xl border border-border bg-canvas shadow-2xl sm:inset-x-auto sm:right-4 sm:bottom-[calc(var(--avi-launcher-bottom)+var(--avi-launcher-size)+var(--avi-gap))] sm:h-[min(540px,72vh,calc(100vh-var(--avi-launcher-bottom)-var(--avi-launcher-size)-var(--avi-gap)-1.5rem))] sm:w-[380px] sm:rounded-xl"
+        // Deliberately a popover, not a panel: `360px × min(440px, 58vh)` on desktop
+        // and `min(70vh, 480px)` as a phone sheet. The earlier `540px`/`72vh` cap let
+        // it swallow over half the viewport, which is a lot of screen for a question
+        // box — the transcript scrolls, so the extra height bought nothing.
+        //
+        // The last height term is a hard cap against the launcher's footprint
+        // (`--avi-launcher-bottom` + `--avi-launcher-size` + a gap): however tall the
+        // viewport, the dialog can never reach far enough down to cover the button
+        // that closes it.
+        className="avi-dialog fixed inset-x-0 bottom-0 z-[61] flex h-[min(70vh,480px)] flex-col overflow-hidden rounded-t-xl border border-border bg-canvas shadow-2xl sm:inset-x-auto sm:right-4 sm:bottom-[calc(var(--avi-launcher-bottom)+var(--avi-launcher-size)+var(--avi-gap))] sm:h-[min(440px,58vh,calc(100vh-var(--avi-launcher-bottom)-var(--avi-launcher-size)-var(--avi-gap)-1.5rem))] sm:w-[360px] sm:rounded-xl"
       >
         {/* Grab handle: the phone sheet reads as draggable even though it is not. */}
         <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-border-strong sm:hidden" aria-hidden />
