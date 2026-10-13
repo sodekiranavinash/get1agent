@@ -13,5 +13,3 @@ questions:
 ## How many things can I create?
 
 How many things can I create? Common limits: 10 knowledge bases, 50 agents, 50 workflows, 50 skills and 100 Vault secrets per user.
-
-How many things can I create? Common limits: 10 knowledge bases, 50 agents, 50 workflows, 50 skills and 100 Vault secrets per user.

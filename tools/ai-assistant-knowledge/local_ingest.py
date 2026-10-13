@@ -136,6 +136,51 @@ def _upload(documents: list, kb_id: str) -> list[dict]:
     return registered
 
 
+def _prune(kb_id: str, documents: list) -> int:
+    """Delete local documents the corpus no longer contains.
+
+    Renaming or removing a corpus file leaves the previous document **ready and
+    searchable** in the local stack — an old generation's `avi-what-is-avi.md`
+    was still being retrieved (and cited) long after the file became
+    `ai-assistant-what-is-ai-assistant.md`. Deployed ingestion never sees this
+    because a document only exists there if it was uploaded; locally the corpus is
+    re-ingested over whatever was there before, so the ingest has to prune.
+
+    Uses the same manifest-driven cleanup as `DELETE /v1/knowledge-bases/{id}/
+    documents/{docId}`: vectors, parent objects, postings, stats, the raw upload
+    and the item, so nothing is left behind to retrieve.
+    """
+    from retrieval.maintenance import delete_document_index
+    from retrieval.s3_vectors import vector_store
+
+    expected = {document.filename for document in documents}
+    stale = [
+        item
+        for item in docs_repo.list_documents(kb_id)
+        if str(item.get("fileName")) not in expected
+    ]
+    if not stale:
+        return 0
+
+    storage = Storage()
+    store = vector_store(storage)
+    print(f"  pruning    {len(stale)} document(s) no longer in the corpus")
+    for item in stale:
+        doc_id = str(item.get("docId"))
+        file_name = str(item.get("fileName"))
+        print(f"    - {file_name}")
+        try:
+            delete_document_index(storage, store, scope.PLATFORM_USER_ID, doc_id)
+            if file_name:
+                storage.delete(
+                    raw_key(scope.PLATFORM_USER_ID, kb_id, doc_id, file_name)
+                )
+            docs_repo.delete_document(doc_id)
+        except Exception as exc:  # noqa: BLE001 - a stale doc must not stop the ingest
+            print(f"      could not prune {file_name}: {type(exc).__name__}: {exc}")
+    return len(stale)
+
+
 def _ingest(items: list[dict], *, timeout_seconds: int = 1800) -> int:
     """Run extract → embed → index for every document, in-process."""
     kb_id = str(items[0]["kbId"]) if items else scope.PLATFORM_KB_ID
@@ -185,13 +230,15 @@ def main() -> int:
     print(f"  corpus     {len(documents)} documents")
 
     kb = _ensure_kb()
-    items = _upload(documents, str(kb["kbId"]))
+    kb_id = str(kb["kbId"])
+    _prune(kb_id, documents)
+    items = _upload(documents, kb_id)
 
     print("  ingesting (extract → embed → index)…")
     failures = _ingest(items)
 
     statuses: dict[str, int] = {}
-    for item in docs_repo.list_documents(str(kb["kbId"])):
+    for item in docs_repo.list_documents(kb_id):
         status = str(item.get("status") or "unknown")
         statuses[status] = statuses.get(status, 0) + 1
     print(f"\n  status: {statuses}")
@@ -202,11 +249,11 @@ def main() -> int:
         return 1
 
     print(f"\nAll {ready} documents are ready.")
-    print("\nNext: run the agent service locally and point the widget at it:")
-    print("  AI_ASSISTANT_SESSION_SECRET=local-dev-secret AI_ASSISTANT_MODE=local \\")
-    print("  PYTHONPATH=backend/packages backend/ai-assistant/.venv/bin/python backend/ai-assistant/main.py")
-    print("  then in frontend/.env.local:")
-    print("    printf 'VITE_AI_ASSISTANT_URL=http://localhost:8091\\\\nVITE_AI_ASSISTANT_MICROVM=false\\\\n' > frontend/.env.local")
+    print("\nThe assistant is already serving them: it is the `ai-assistant` service")
+    print("in the Floci stack, which `make floci` started on http://localhost:8091.")
+    print("Open the app, click the assistant button and ask. If the widget is not")
+    print("pointed at it, `frontend/.env.local` needs:")
+    print("  VITE_AI_ASSISTANT_URL=http://localhost:8091")
     return 0
 
 

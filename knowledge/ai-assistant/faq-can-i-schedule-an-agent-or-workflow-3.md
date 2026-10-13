@@ -13,5 +13,3 @@ questions:
 ## Can I schedule an agent or workflow?
 
 Can I schedule an agent or workflow? Yes — add a schedule card/node in the builder, then check the Schedules page.
-
-Can I schedule an agent or workflow? Yes — add a schedule card/node in the builder, then check the Schedules page.

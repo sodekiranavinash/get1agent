@@ -27,7 +27,7 @@
 {"id": "ans-027", "kind": "answerable", "question": "How do I schedule an agent?", "expectedRoute": "/scheduled-jobs"}
 {"id": "ans-028", "kind": "answerable", "question": "What can I do on this platform?", "expectedRoute": "/dashboard"}
 {"id": "ans-029", "kind": "answerable", "question": "What is get1agent?", "expectedRoute": "/docs#getting-started"}
-{"id": "ans-030", "kind": "answerable", "question": "What is Avi?", "expectedRoute": "/dashboard"}
+{"id": "ans-030", "kind": "answerable", "question": "What is AI Assistant?", "expectedRoute": "/dashboard"}
 {"id": "ans-031", "kind": "answerable", "question": "Are you a human?", "expectedRoute": "/dashboard"}
 {"id": "ans-032", "kind": "answerable", "question": "What tools can my agent use?", "expectedRoute": "/tools"}
 {"id": "ans-033", "kind": "answerable", "question": "How do I connect a remote MCP server?", "expectedRoute": "/tools"}

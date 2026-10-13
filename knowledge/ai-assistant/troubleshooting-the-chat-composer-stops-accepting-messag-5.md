@@ -1,6 +1,6 @@
 ---
 id: troubleshooting-the-chat-composer-stops-accepting-messag-5
-title: The Chat composer stops accepting messages and the context meter is full: start a new chat to continue with a fresh context.
+title: The Chat composer stops accepting messages and the context meter is full
 route: "/docs#troubleshooting"
 group: Help
 audience: user
@@ -10,8 +10,6 @@ questions:
   - The Chat composer stops accepting messages and the context meter is full: start a new chat to continue with a fresh context.
 ---
 
-## The Chat composer stops accepting messages and the context meter is full: start a new chat to continue with a fresh context.
-
-The Chat composer stops accepting messages and the context meter is full: start a new chat to continue with a fresh context.
+## The Chat composer stops accepting messages and the context meter is full
 
 The Chat composer stops accepting messages and the context meter is full: start a new chat to continue with a fresh context.

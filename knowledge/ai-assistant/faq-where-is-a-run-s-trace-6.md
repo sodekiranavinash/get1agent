@@ -13,5 +13,3 @@ questions:
 ## Where is a run’s trace?
 
 Where is a run’s trace? Every answer has a View trace link; the full trace also lives on the Traces page.
-
-Where is a run’s trace? Every answer has a View trace link; the full trace also lives on the Traces page.

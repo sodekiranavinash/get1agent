@@ -48,10 +48,10 @@
     },
     {
       "audience": "public",
-      "chars": 1149,
+      "chars": 1274,
       "fileName": "ai-assistant-what-is-ai-assistant.md",
       "group": "Help",
-      "hash": "5b661f4b9dd62198",
+      "hash": "8a91c732456e4601",
       "id": "ai-assistant-what-is-ai-assistant",
       "route": "/dashboard",
       "source": "curated",
@@ -141,10 +141,10 @@
     },
     {
       "audience": "user",
-      "chars": 599,
+      "chars": 483,
       "fileName": "faq-can-i-schedule-an-agent-or-workflow-3.md",
       "group": "Help",
-      "hash": "8dff9fe13c72c289",
+      "hash": "40945a72e76d9af3",
       "id": "faq-can-i-schedule-an-agent-or-workflow-3",
       "route": "/docs#faq",
       "source": "docs",
@@ -157,10 +157,10 @@
     },
     {
       "audience": "user",
-      "chars": 770,
+      "chars": 599,
       "fileName": "faq-do-i-need-a-bedrock-or-openai-account-0.md",
       "group": "Help",
-      "hash": "c8f58e76bb4fd64a",
+      "hash": "9a2b89d8ba083c02",
       "id": "faq-do-i-need-a-bedrock-or-openai-account-0",
       "route": "/docs#faq",
       "source": "docs",
@@ -173,10 +173,10 @@
     },
     {
       "audience": "user",
-      "chars": 698,
+      "chars": 560,
       "fileName": "faq-do-uploaded-files-become-searchable-auto-1.md",
       "group": "Help",
-      "hash": "b1fab2271683d9cb",
+      "hash": "23d9e7d945901054",
       "id": "faq-do-uploaded-files-become-searchable-auto-1",
       "route": "/docs#faq",
       "source": "docs",
@@ -189,10 +189,10 @@
     },
     {
       "audience": "user",
-      "chars": 620,
+      "chars": 485,
       "fileName": "faq-how-do-i-share-an-agent-2.md",
       "group": "Help",
-      "hash": "c5e2e37b34cd7adc",
+      "hash": "53c6bcb8f58e10ed",
       "id": "faq-how-do-i-share-an-agent-2",
       "route": "/docs#faq",
       "source": "docs",
@@ -205,10 +205,10 @@
     },
     {
       "audience": "user",
-      "chars": 563,
+      "chars": 451,
       "fileName": "faq-how-do-i-use-my-own-api-key-5.md",
       "group": "Help",
-      "hash": "213e418d0f3ad31d",
+      "hash": "eba7beb236aad079",
       "id": "faq-how-do-i-use-my-own-api-key-5",
       "route": "/docs#faq",
       "source": "docs",
@@ -221,10 +221,10 @@
     },
     {
       "audience": "user",
-      "chars": 629,
+      "chars": 496,
       "fileName": "faq-how-many-things-can-i-create-7.md",
       "group": "Help",
-      "hash": "c027bddc3852edb6",
+      "hash": "94408d9632608331",
       "id": "faq-how-many-things-can-i-create-7",
       "route": "/docs#faq",
       "source": "docs",
@@ -237,10 +237,10 @@
     },
     {
       "audience": "user",
-      "chars": 533,
+      "chars": 426,
       "fileName": "faq-where-is-a-run-s-trace-6.md",
       "group": "Help",
-      "hash": "2a537f57407d7f61",
+      "hash": "b3e6249ed681369f",
       "id": "faq-where-is-a-run-s-trace-6",
       "route": "/docs#faq",
       "source": "docs",
@@ -253,10 +253,10 @@
     },
     {
       "audience": "user",
-      "chars": 813,
+      "chars": 636,
       "fileName": "faq-why-did-an-answer-cite-a-source-i-did-no-4.md",
       "group": "Help",
-      "hash": "50b4c3ed4400e5c0",
+      "hash": "f9c19c4119a9c60f",
       "id": "faq-why-did-an-answer-cite-a-source-i-did-no-4",
       "route": "/docs#faq",
       "source": "docs",
@@ -269,10 +269,10 @@
     },
     {
       "audience": "user",
-      "chars": 3843,
+      "chars": 3852,
       "fileName": "feature-index.md",
       "group": "Features",
-      "hash": "c786c90d0232288e",
+      "hash": "224462e59d8282b5",
       "id": "feature-index",
       "route": "/dashboard",
       "source": "navigation",
@@ -377,10 +377,10 @@
     },
     {
       "audience": "user",
-      "chars": 1580,
+      "chars": 1607,
       "fileName": "platform-limits.md",
       "group": "Manage",
-      "hash": "513e3871fb566f69",
+      "hash": "b7d09108b683d729",
       "id": "platform-limits",
       "route": "/usage",
       "source": "code",
@@ -516,10 +516,10 @@
     },
     {
       "audience": "user",
-      "chars": 1664,
+      "chars": 856,
       "fileName": "troubleshooting-a-custom-tool-times-out-or-errors-check--4.md",
       "group": "Help",
-      "hash": "abae50e67ea571dc",
+      "hash": "efb2c0d0d660d041",
       "id": "troubleshooting-a-custom-tool-times-out-or-errors-check--4",
       "route": "/docs#troubleshooting",
       "source": "docs",
@@ -528,14 +528,14 @@
         "troubleshooting",
         "help"
       ],
-      "title": "A custom tool times out or errors: check the Test dialog first. Tools run sandboxed with public HTTP(S) access (up to 25 network calls and ~90s per run, 180s while testing); heavy ML libraries and private hosts are blocked. Use Storage for files and Code Interpreter for heavy calculations."
+      "title": "A custom tool times out or errors"
     },
     {
       "audience": "user",
-      "chars": 990,
+      "chars": 574,
       "fileName": "troubleshooting-a-document-stays-processing-ingestion-re-1.md",
       "group": "Help",
-      "hash": "a97685aff328515e",
+      "hash": "00c5bc4be612292a",
       "id": "troubleshooting-a-document-stays-processing-ingestion-re-1",
       "route": "/docs#troubleshooting",
       "source": "docs",
@@ -544,14 +544,14 @@
         "troubleshooting",
         "help"
       ],
-      "title": "A document stays Processing: ingestion retries automatically and a watchdog fails anything stuck past the threshold. Re-upload the document and note its id."
+      "title": "A document stays Processing"
     },
     {
       "audience": "user",
-      "chars": 780,
+      "chars": 514,
       "fileName": "troubleshooting-a-remote-mcp-connection-shows-reconnect--3.md",
       "group": "Help",
-      "hash": "adb586102df1d59c",
+      "hash": "b84c3d4bbc09e5d9",
       "id": "troubleshooting-a-remote-mcp-connection-shows-reconnect--3",
       "route": "/docs#troubleshooting",
       "source": "docs",
@@ -560,14 +560,14 @@
         "troubleshooting",
         "help"
       ],
-      "title": "A remote MCP connection shows Reconnect: the token was revoked or expired. Run Reconnect from the connection card."
+      "title": "A remote MCP connection shows Reconnect"
     },
     {
       "audience": "user",
-      "chars": 1030,
+      "chars": 618,
       "fileName": "troubleshooting-a-workflow-run-produces-no-visible-answe-7.md",
       "group": "Help",
-      "hash": "ccc11a94e641e3d9",
+      "hash": "cb88e9cee5abc4fa",
       "id": "troubleshooting-a-workflow-run-produces-no-visible-answe-7",
       "route": "/docs#troubleshooting",
       "source": "docs",
@@ -576,14 +576,14 @@
         "troubleshooting",
         "help"
       ],
-      "title": "A workflow run produces no visible answer: open View final answer to read the persisted conversation in Chat. Intermediate agent text is intentionally not streamed."
+      "title": "A workflow run produces no visible answer"
     },
     {
       "audience": "user",
-      "chars": 1124,
+      "chars": 670,
       "fileName": "troubleshooting-agent-runs-are-not-configured-warning-in-0.md",
       "group": "Help",
-      "hash": "ed38fdf3d3d4eae3",
+      "hash": "df9ec5690c0d8a5d",
       "id": "troubleshooting-agent-runs-are-not-configured-warning-in-0",
       "route": "/docs#troubleshooting",
       "source": "docs",
@@ -592,14 +592,14 @@
         "troubleshooting",
         "help"
       ],
-      "title": "\u201cAgent runs are not configured\u201d warning in Chat: the run endpoint is not set for this environment. In a managed workspace this is an operator setting; report it rather than retrying."
+      "title": "\u201cAgent runs are not configured\u201d warning in Chat"
     },
     {
       "audience": "user",
-      "chars": 790,
+      "chars": 482,
       "fileName": "troubleshooting-credits-are-exhausted-add-a-provider-key-6.md",
       "group": "Help",
-      "hash": "ce1f42fd41a9b584",
+      "hash": "9aa557519329aea0",
       "id": "troubleshooting-credits-are-exhausted-add-a-provider-key-6",
       "route": "/docs#troubleshooting",
       "source": "docs",
@@ -608,14 +608,14 @@
         "troubleshooting",
         "help"
       ],
-      "title": "Credits are exhausted: add a provider key in the Vault to run on your own account, or ask an admin for more credits."
+      "title": "Credits are exhausted"
     },
     {
       "audience": "user",
-      "chars": 1000,
+      "chars": 568,
       "fileName": "troubleshooting-search-returns-nothing-confirm-the-knowl-2.md",
       "group": "Help",
-      "hash": "0a8f7262ca3fc473",
+      "hash": "1fee0e9bf8fa2944",
       "id": "troubleshooting-search-returns-nothing-confirm-the-knowl-2",
       "route": "/docs#troubleshooting",
       "source": "docs",
@@ -624,14 +624,14 @@
         "troubleshooting",
         "help"
       ],
-      "title": "Search returns nothing: confirm the knowledge base is Ready and attached to the agent, and that your query is not restricted by tags that no document carries."
+      "title": "Search returns nothing"
     },
     {
       "audience": "user",
-      "chars": 830,
+      "chars": 600,
       "fileName": "troubleshooting-the-chat-composer-stops-accepting-messag-5.md",
       "group": "Help",
-      "hash": "e039bd41384d5329",
+      "hash": "f0799c4eeaa3dbb0",
       "id": "troubleshooting-the-chat-composer-stops-accepting-messag-5",
       "route": "/docs#troubleshooting",
       "source": "docs",
@@ -640,7 +640,7 @@
         "troubleshooting",
         "help"
       ],
-      "title": "The Chat composer stops accepting messages and the context meter is full: start a new chat to continue with a fresh context."
+      "title": "The Chat composer stops accepting messages and the context meter is full"
     },
     {
       "audience": "user",

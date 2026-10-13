@@ -13,5 +13,3 @@ questions:
 ## Why did an answer cite a source I did not expect?
 
 Why did an answer cite a source I did not expect? Answers are grounded in retrieved passages; open the Source carousel to see the exact document and page behind each citation.
-
-Why did an answer cite a source I did not expect? Answers are grounded in retrieved passages; open the Source carousel to see the exact document and page behind each citation.

@@ -13,5 +13,3 @@ questions:
 ## Do uploaded files become searchable automatically?
 
 Do uploaded files become searchable automatically? Only files added to a knowledge base. Files in Storage are never ingested or indexed.
-
-Do uploaded files become searchable automatically? Only files added to a knowledge base. Files in Storage are never ingested or indexed.

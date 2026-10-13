@@ -331,7 +331,10 @@ def load_docs() -> list[DocSection]:
                 sections.append(
                     DocSection(
                         id=f"{section.id}-{_slug(question)[:40]}-{index}",
-                        title=question,
+                        # The id and the searchable text stay keyed to `question`
+                        # (the whole bullet); only what the citation *shows* is
+                        # shortened. See `_title_of`.
+                        title=_title_of(item),
                         summary=item,
                         group=section.group,
                         group_title=section.group_title,
@@ -363,6 +366,36 @@ def _question_of(text: str) -> str:
         return ""
     question = stripped[: position + 1].strip()
     return question if len(question) > 8 else ""
+
+
+#: Longest title a spin-off may show — in the citation chip and as its own H1.
+MAX_SPINOFF_TITLE_CHARS = 90
+
+
+def _title_of(text: str) -> str:
+    """The title of one FAQ/troubleshooting bullet.
+
+    A FAQ bullet is a question, and its question is the title. A **troubleshooting**
+    bullet is a statement, and taking the whole sentence as the title put a
+    paragraph in the citation chip — clients rendered
+    "Search returns nothing: confirm the knowledge base is Ready and attached to
+    the agent, and that your query is not restricted by tags…" as a *source title*.
+
+    So for a statement, the title is its leading clause (the symptom) and the whole
+    bullet stays the document's searchable text, which is what retrieval matches on.
+    """
+    question = _question_of(text)
+    if question:
+        return question
+
+    stripped = " ".join(text.split())
+    for separator in (": ", " — ", " – ", " - ", "; "):
+        head = stripped.split(separator, 1)[0].strip()
+        if 12 <= len(head) <= MAX_SPINOFF_TITLE_CHARS:
+            return head
+    if len(stripped) <= MAX_SPINOFF_TITLE_CHARS:
+        return stripped
+    return stripped[:MAX_SPINOFF_TITLE_CHARS].rsplit(" ", 1)[0].rstrip(" ,;:") + "…"
 
 
 def _slug(value: str) -> str:

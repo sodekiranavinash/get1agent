@@ -34,5 +34,7 @@ What AI Assistant does not do:
 - For anything it cannot answer, it will point you to the Support page so a human
   can help.
 
+## What is AI Assistant?
+
 AI Assistant answers only from the product's own documentation, so if something is not
 documented yet it will say so rather than guess.

@@ -193,6 +193,14 @@ def docs_documents(routes: set[str]) -> list[Document]:
             # A curated single-question document: the question *is* the title, so
             # lexical retrieval matches the user's phrasing directly.
             #
+            # A spin-off's `summary` **is** its one block's text (the bullet), so the
+            # assembly above wrote that sentence three times: the title heading, the
+            # summary, and the block. That reads badly and — worse — triples the term
+            # frequency of a one-sentence document, which is the shape BM25 already
+            # over-rewards for being short. One of these was turning up as a cited
+            # source for almost every question. Keep exactly one copy.
+            body = f"# {section.title}\n\n{rendered or section.summary}".strip()
+            #
             # It links to its **parent section**, not to a synthetic per-question
             # anchor: the docs page renders one element per section and nothing in
             # the DOM carries `#faq-do-i-need-a-bedrock-…`, so the old link landed
