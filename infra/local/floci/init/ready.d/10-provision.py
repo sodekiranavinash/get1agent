@@ -297,6 +297,7 @@ ROUTES = {
         ("GET", "/v1/admin/ai-assistant/conversations/{userId}/{conversationId}"),
         ("GET", "/v1/admin/ai-assistant/evaluations"),
         ("GET", "/v1/admin/ai-assistant/knowledge"),
+        ("POST", "/v1/admin/ai-assistant/knowledge/reingest"),
     ],
     "mcp_connections": [
         ("GET", "/v1/mcp/catalog"),

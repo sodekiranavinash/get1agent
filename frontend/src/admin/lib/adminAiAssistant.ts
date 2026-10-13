@@ -97,6 +97,15 @@ export type AviKnowledge = {
   error?: string
 }
 
+/** What a re-ingest started. `started` is empty when every document failed. */
+export type AviReingest = {
+  started: { documentId: string; fileName?: string; executionName: string }[]
+  failed: { documentId: string; error: string }[]
+  count: number
+  scope: string
+  kbId: string
+}
+
 export type AviEvalRun = {
   runId: string
   dataset?: string
@@ -157,4 +166,23 @@ export async function fetchAviEvalRuns(
 
 export async function fetchAviKnowledge(api: ApiClient): Promise<AviKnowledge> {
   return api.get<AviKnowledge>('/v1/admin/ai-assistant/knowledge')
+}
+
+/**
+ * Re-run ingestion for the platform corpus, or for one document.
+ *
+ * This starts the same Step Functions state machine the S3 → EventBridge → SQS
+ * dispatcher starts, so it is a real ingest rather than a re-index of whatever
+ * happens to be staged: extract → embed → index, with the normal status
+ * transitions and ingestion events. Documents left `failed` are the usual reason
+ * to use it.
+ */
+export async function reingestAviKnowledge(
+  api: ApiClient,
+  documentId?: string,
+): Promise<AviReingest> {
+  return api.post<AviReingest>(
+    '/v1/admin/ai-assistant/knowledge/reingest',
+    documentId ? { documentId } : {},
+  )
 }

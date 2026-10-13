@@ -4,6 +4,7 @@ import {
   BookOpen,
   Gauge,
   MessageSquare,
+  RefreshCw,
   Sparkles,
   ThumbsDown,
   ThumbsUp,
@@ -24,6 +25,7 @@ import {
   fetchAiAssistantFeedback,
   fetchAviKnowledge,
   fetchAviTraces,
+  reingestAviKnowledge,
   updateAviConfig,
   type AiAssistantFeedback,
   type AviSettings,
@@ -97,6 +99,36 @@ export function AdminAiAssistantPage() {
 
   const config = usePageQuery('admin-ai-assistant-config', () => fetchAviConfig(api))
   const knowledge = usePageQuery('admin-ai-assistant-knowledge', () => fetchAviKnowledge(api))
+  const [reingesting, setReingesting] = useState(false)
+
+  /** Re-run ingestion for the whole corpus through the real pipeline. */
+  const reingest = async () => {
+    setReingesting(true)
+    try {
+      const result = await reingestAviKnowledge(api)
+      const failed = result.failed.length
+      if (result.count === 0) {
+        toast.error(
+          failed ? `Could not start ingestion for ${failed} document(s)` : 'Nothing to re-ingest',
+        )
+        return
+      }
+      // The ingest is asynchronous (Step Functions), so report what was *started* —
+      // the operator watches the statuses below for the outcome.
+      toast.success(
+        failed
+          ? `Re-ingesting ${result.count} document(s); ${failed} could not start`
+          : `Re-ingesting ${result.count} document(s) — statuses update as it runs`,
+      )
+      // Give the pipeline a moment before the first status read, otherwise the refetch
+      // always shows the pre-ingest snapshot and the button looks inert.
+      window.setTimeout(() => void knowledge.refetch(), 4000)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not start re-ingestion')
+    } finally {
+      setReingesting(false)
+    }
+  }
 
   // The per-user panels only load once an operator names a user.
   const feedback = usePageQuery(
@@ -274,14 +306,28 @@ export function AdminAiAssistantPage() {
             hint="AI Assistant answers only from the platform documentation, generated from the repository and ingested through the normal pipeline."
             icon={<BookOpen className="size-3.5" />}
             action={
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => void knowledge.refetch()}
-                disabled={knowledge.isPending}
-              >
-                Refresh
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void knowledge.refetch()}
+                  disabled={knowledge.isPending}
+                >
+                  Refresh
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => void reingest()}
+                  disabled={reingesting || knowledge.isPending}
+                >
+                  {reingesting ? (
+                    <Spinner className="size-3.5" />
+                  ) : (
+                    <RefreshCw className="size-3.5" />
+                  )}
+                  Re-ingest
+                </Button>
+              </div>
             }
           >
             {knowledge.isPending ? (

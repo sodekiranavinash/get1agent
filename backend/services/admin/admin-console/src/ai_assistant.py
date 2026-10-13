@@ -25,6 +25,8 @@ Routes:
     GET    /v1/admin/ai-assistant/conversations/{userId}/{id}  one transcript
     GET    /v1/admin/ai-assistant/evaluations?userId=          evaluation run history
     GET    /v1/admin/ai-assistant/knowledge                    platform corpus status
+    POST   /v1/admin/ai-assistant/knowledge/reingest           re-run ingestion for the corpus
+                                                               (body: {documentId?} — omit for all)
 """
 
 from __future__ import annotations
@@ -120,7 +122,7 @@ def route(
             "evaluation runs", user_id, lambda uid: ai_assistant_repo.list_eval_runs(uid, limit=20)
         )
     if head == "knowledge":
-        return _knowledge(method)
+        return _knowledge(method, tail, body)
     return _json(404, {"error": "Not found"})
 
 
@@ -206,11 +208,125 @@ def _conversation(user_id: str, conversation_id: str) -> dict[str, Any]:
 # --- knowledge ----------------------------------------------------------------
 
 
-def _knowledge(method: str) -> dict[str, Any]:
-    """The platform corpus status: how many documents are indexed and ready."""
+def _knowledge(method: str, tail: list[str], body: dict[str, Any]) -> dict[str, Any]:
+    """The platform corpus: status on GET, re-ingest on POST.
+
+    Re-ingest is deliberately *not* a reimplementation of ingestion. It starts the
+    same Step Functions state machine the S3 → EventBridge → SQS dispatcher starts,
+    with the same input shape, so the admin button and a real re-upload run
+    identical code. Everything downstream (extract → embed → index, the
+    delete-then-write idempotency, the document status transitions and the
+    ingestion events the UI reads) is therefore unchanged.
+    """
+    if tail and tail[0] == "reingest":
+        if method != "POST":
+            return _json(405, {"error": f"Method not allowed: {method}"})
+        return _reingest(body)
     if method != "GET":
         return _json(405, {"error": f"Method not allowed: {method}"})
     return _json(200, _knowledge_payload())
+
+
+def _reingest(body: dict[str, Any]) -> dict[str, Any]:
+    """Start an ingestion execution for one document, or for the whole corpus."""
+    import os  # noqa: PLC0415 - only needed on this admin path
+    import time  # noqa: PLC0415
+    import uuid  # noqa: PLC0415
+
+    import boto3  # noqa: PLC0415
+
+    from data.repositories import documents as docs_repo
+
+    state_machine_arn = str(os.environ.get("INGESTION_STATE_MACHINE_ARN") or "").strip()
+    if not state_machine_arn:
+        return _json(
+            503,
+            {
+                "error": (
+                    "Re-ingest is not configured on this deployment "
+                    "(INGESTION_STATE_MACHINE_ARN is unset)."
+                )
+            },
+        )
+
+    kb_id = str(os.environ.get("AI_ASSISTANT_KB_ID") or "kb_platform_docs_0001").strip()
+    scope = str(os.environ.get("AI_ASSISTANT_SCOPE") or "platform").strip()
+    bucket = str(os.environ.get("S3_BUCKET") or "").strip()
+
+    wanted = str(body.get("documentId") or "").strip()
+    try:
+        items = docs_repo.list_documents(kb_id)
+    except Exception as exc:  # noqa: BLE001 - report, never 500 the admin page
+        return _json(502, {"error": f"Could not read the corpus: {str(exc)[:300]}"})
+
+    targets = [
+        item
+        for item in items
+        if not wanted or str(item.get("documentId") or item.get("id") or "") == wanted
+    ]
+    if wanted and not targets:
+        return _json(404, {"error": "No such document in the platform corpus"})
+    if not targets:
+        return _json(409, {"error": "The platform corpus is empty — nothing to re-ingest"})
+
+    client = boto3.client("stepfunctions", region_name=os.environ.get("AWS_REGION"))
+    started: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for item in targets:
+        document_id = str(item.get("documentId") or item.get("id") or "")
+        file_name = str(item.get("fileName") or "")
+        s3_key = str(item.get("s3Key") or item.get("s3_key") or "")
+        if not s3_key and bucket and document_id and file_name:
+            s3_key = f"raw/{scope}/{kb_id}/{document_id}/{file_name}"
+        if not (document_id and s3_key):
+            failed.append({"documentId": document_id, "error": "missing s3 key"})
+            continue
+
+        # The execution name has to be unique: a STANDARD state machine ignores a
+        # repeat name for 90 days, so re-ingesting unchanged content would be
+        # silently dropped. The dispatcher uses the object's ETag for this; here a
+        # fresh token per click is the equivalent, and the click itself is the
+        # idempotency boundary (an operator pressing the button twice gets two
+        # runs, which is what a retry means).
+        execution_name = f"reingest-{document_id}-{uuid.uuid4().hex[:12]}"
+        payload = {
+            "userId": scope,
+            "knowledgeBaseId": kb_id,
+            "documentId": document_id,
+            "fileName": file_name,
+            "s3Key": s3_key,
+            "contentHash": str(item.get("contentHash") or item.get("etag") or ""),
+            "trigger": "admin",
+            "requestedAt": int(time.time()),
+        }
+        try:
+            client.start_execution(
+                stateMachineArn=state_machine_arn,
+                name=execution_name,
+                input=json.dumps(payload, default=str),
+            )
+            started.append(
+                {
+                    "documentId": document_id,
+                    "fileName": file_name,
+                    "executionName": execution_name,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - one bad document must not stop the rest
+            failed.append({"documentId": document_id, "error": str(exc)[:200]})
+
+    status = 200 if started else 502
+    return _json(
+        status,
+        {
+            "started": started,
+            "failed": failed,
+            "count": len(started),
+            "scope": scope,
+            "kbId": kb_id,
+        },
+    )
+
 
 
 def _knowledge_payload() -> dict[str, Any]:
