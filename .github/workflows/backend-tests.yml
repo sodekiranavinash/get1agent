@@ -49,3 +49,21 @@ jobs:
 
       - name: Run unit tests
         run: make test-unit
+
+  ai-assistant:
+    # Its own job because AI Assistant is not a `backend/services/*` lambda: it lives
+    # in `backend/ai-assistant/` with its own lockfile, so the per-lambda loop in
+    # `make test-unit` never reached it. That is exactly how its suite went un-run —
+    # including the tests pinning the gateway-claims identity rule. Keeping it a
+    # named job makes a regression here impossible to miss in the checks list.
+    name: AI Assistant tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Run AI Assistant tests
+        run: make test-ai-assistant

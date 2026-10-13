@@ -10,7 +10,7 @@ import {
   type AiAssistantFeedbackValue,
   type AviFrame,
   type AviWidgetTurn,
-} from '../../lib/ai-assistant'
+} from '../../lib/aiAssistant'
 import type { ApiClient } from '../../lib/api'
 import { markRunStopped } from '../../lib/runState'
 

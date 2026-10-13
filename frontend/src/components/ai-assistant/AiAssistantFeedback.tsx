@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Check, ThumbsDown, ThumbsUp } from 'lucide-react'
 
-import type { AiAssistantFeedbackValue } from '../../lib/ai-assistant'
+import type { AiAssistantFeedbackValue } from '../../lib/aiAssistant'
 
 /**
  * AI Assistant's thumb control.

@@ -95,10 +95,11 @@ never navigates them away.
 - Components: `frontend/src/components/ai-assistant/` — `AiAssistantLauncher` (the button),
   `AiAssistantDialog` (lazy-loaded, so a visitor who never opens AI Assistant never downloads it),
   `AiAssistantMessage`, and `useAiAssistant` (transcript + streaming state).
-- Client: `frontend/src/lib/ai-assistant.ts` — the **only** file that knows whether the
-  caller is a guest or signed in. Both present a signed token to the same MicroVM
-  proxy; local dev streams from `VITE_AI_ASSISTANT_URL` instead
-  (`VITE_AI_ASSISTANT_MICROVM=false`).
+- Client: `frontend/src/lib/aiAssistant.ts` — the **only** file that knows whether the
+  caller is a guest or signed in. It selects `POST /v1/ai-assistant/ask` (the gateway
+  verified the Auth0 JWT) or `POST /v1/ai-assistant/guest` (no authorizer) from the
+  presence of a token, then parses the **buffered** SSE body; local dev posts to
+  `VITE_AI_ASSISTANT_URL` instead.
 - Answers render through the **same** `ChatAnswer` and `lib/runState.ts` the chat
   screen uses, because AI Assistant emits the same SSE frames plus one `ai-assistant.intent` frame.
   Nothing here is an AI Assistant-specific renderer.

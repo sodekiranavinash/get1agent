@@ -1,18 +1,21 @@
-"""Run AI Assistant's agent service against the **local** Floci stack.
+"""Run AI Assistant's Lambda handler locally, on the **local** Floci stack.
 
-This is the local stand-in for the deployed ingress. In production the browser
-streams from a MicroVM whose session token the control-plane Lambda signed after
-API Gateway verified the Auth0 JWT; locally there is no gateway and no MicroVM, so
-the widget talks to this process directly (``VITE_AI_ASSISTANT_URL`` +
-``VITE_AI_ASSISTANT_MICROVM=false``) and **guests** are served here too — which is what
-makes the landing page work.
+This is the local stand-in for API Gateway. In production the browser POSTs to two
+API Gateway routes, the authorizer validates the Auth0 JWT (on `/ask` only) and the
+Lambda reads the verified claims; locally there is no gateway, so
+`backend/ai-assistant/main.py` translates HTTP into the same payload-format-2.0
+event, verifies the token itself (`src/local_auth.py`) and calls the **same**
+`handler.lambda_handler`. Nothing about the turn is reimplemented locally.
+
+**Guests work with no setup at all** — the widget serves the landing page through
+the `/guest` route, which has no authorizer in either environment. The signed-in
+path needs a real Auth0 token, which the SPA already sends.
 
     python3 tools/ai-assistant-knowledge/local_agent.py
 
 Then, in `frontend/.env.local`:
 
     VITE_AI_ASSISTANT_URL=http://localhost:8091
-    VITE_AI_ASSISTANT_MICROVM=false
 
 and `make ui`. Open `/` (signed out) to exercise the guest path.
 """
@@ -30,9 +33,10 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 import local_env  # noqa: E402  (same directory)
 
 local_env.apply()
-# Local development is the *only* place the service is reached without a gateway,
-# so the Auth0 JWT authorizer that normally protects it is absent. That is fine for
-# loopback and unacceptable anywhere else, so bind to loopback and say so loudly.
+# Local development is the *only* place the service is reached without API Gateway,
+# so the Auth0 JWT authorizer that normally protects `/ask` is absent and
+# `main.py` verifies the token instead. That is fine for loopback and unacceptable
+# anywhere else, so bind to loopback and say so loudly.
 os.environ.setdefault("AI_ASSISTANT_HOST", "127.0.0.1")
 
 for extra in (REPO_ROOT / "backend" / "packages", REPO_ROOT / "backend" / "ai-assistant"):
@@ -66,6 +70,8 @@ def _raise_local_limits() -> None:
 def main() -> int:
     import uvicorn  # noqa: PLC0415
 
+    # Imported here so `--help`-style failures and a missing dev dependency surface
+    # as a clear message rather than at module scope.
     from main import app  # noqa: PLC0415
 
     host = os.environ["AI_ASSISTANT_HOST"]
@@ -73,20 +79,22 @@ def main() -> int:
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(
             "Refusing to bind the local AI Assistant service to a non-loopback address: it "
-            "has no JWT authorizer in front of it.",
+            "stands in for API Gateway, and `main.py` — not a managed authorizer — is what "
+            "verifies the JWT here.",
             file=sys.stderr,
         )
         return 2
 
     _raise_local_limits()
     print(f"AI Assistant (local) on http://{host}:{port}")
+    print("  routes     : POST /v1/ai-assistant/ask (JWT verified here) · /v1/ai-assistant/guest (none)")
+    print("  health     : GET  /health")
     print("  scope      :", os.environ.get("AI_ASSISTANT_SCOPE"), "/", os.environ.get("AI_ASSISTANT_KB_ID"))
     print("  embeddings :", os.environ.get("EMBED_MODE"), "via", os.environ.get("LOCAL_EMBED_URL"))
     print("  models     : Bedrock (real AWS); guests served here, per-IP limited")
     print()
     print("  frontend/.env.local:")
     print(f"    VITE_AI_ASSISTANT_URL=http://{host}:{port}")
-    print("    VITE_AI_ASSISTANT_MICROVM=false")
     uvicorn.run(app, host=host, port=port, log_level="warning")
     return 0
 

@@ -241,10 +241,17 @@ class StageSequenceTest(unittest.TestCase):
         frames = _run(agent.TurnRequest(question="q", run_id="r5"))
         self.assertNotIn(STAGE_LINKS, [stage["stage"] for stage in _stages(frames)])
 
-    def test_no_compose_stage_before_any_text_arrives(self) -> None:
-        """Claiming the answer is being written while the model still decides is a lie."""
-        frames = _run(agent.TurnRequest(question="q", run_id="r6"))
-        self.assertNotIn(STAGE_COMPOSE, [stage["stage"] for stage in _stages(frames)])
+    # `test_no_compose_stage_before_any_text_arrives` used to live here. It asserted
+    # `compose` never appeared, which was only true because the agent harness was
+    # absent and the turn died before any text could stream. The framework is bundled
+    # now, so the turn reaches a real model and the assertion became both false and
+    # non-hermetic.
+    #
+    # The invariant it was reaching for — `compose` fires at most once, and only on
+    # the first answer chunk — is a property of `FrameWriter.composing`, and is
+    # pinned directly by `StageFrameShapeTest.test_composing_fires_exactly_once`.
+    # `agent._stream_direct` calls `text_delta` before `composing`, so the ordering
+    # holds by construction at the only place it is emitted.
 
 
 class ToolStageTest(unittest.TestCase):

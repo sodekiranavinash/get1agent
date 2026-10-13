@@ -1,20 +1,28 @@
 /**
- * AI Assistant's streaming client.
+ * AI Assistant's client.
  *
- * This is the **only** file in the widget that knows the difference between a
- * guest and a signed-in user. Both audiences end up streaming the same SSE frames
- * from the same MicroVM proxy, because both present a signed token:
+ * The widget talks to **one** Lambda through two API Gateway routes, and this is
+ * the only file that knows which one to use:
  *
- *   signed-in  `POST /v1/ai-assistant/session` → session token (the gateway verified the
- *              Auth0 JWT, the control plane resolved the userId and signed it)
- *   guest      `POST /v1/ai-assistant/badge`   → guest badge (same mechanism, guest: true)
+ *   signed-in  `POST /v1/ai-assistant/ask`    → API Gateway verified the Auth0 JWT
+ *   guest      `POST /v1/ai-assistant/guest`  → no authorizer; the Lambda hashes the
+ *                                               caller's IP into a rate-limit bucket
  *
- * Local development streams straight from the agent service
- * (`VITE_AI_ASSISTANT_URL=http://localhost:8091`) so the whole loop runs without a MicroVM.
+ * Identity is never sent in the body — the gateway's verified claims are the only
+ * thing the backend trusts, so there is no session to establish first and no token
+ * to mint. One request per turn.
+ *
+ * The response is **buffered, not streamed**: API Gateway cannot stream and caps an
+ * integration at 30s, so the Lambda returns the whole run as one SSE body. The
+ * frame parser below is therefore reading a complete body rather than a live
+ * socket — the frames are identical, only the arrival time differs.
+ *
+ * `VITE_AI_ASSISTANT_URL` is the local-development override: it points at the
+ * service run directly (`make ai-assistant-local-agent`, port 8091), which keeps
+ * the whole loop working without a deploy.
  */
 
 import type { AgentRunEvent, AgentSource } from './agentRun'
-import { makeFrameParser } from './agentRun'
 import type { ApiClient } from './api'
 import { API_BASE_URL } from './api'
 import { createRunFields, reduceRunEvent, type RunFields } from './runState'
@@ -66,26 +74,23 @@ export function isStageFrame(frame: unknown): frame is AviStageFrame {
   )
 }
 
-const RUN_URL = (import.meta.env.VITE_AI_ASSISTANT_URL ?? '').replace(/\/+$/, '')
-/** Deployed by default; set to 'false' to force the local agent URL. */
-const USE_MICROVM = (import.meta.env.VITE_AI_ASSISTANT_MICROVM ?? '') !== 'false'
+const LOCAL_URL = (import.meta.env.VITE_AI_ASSISTANT_URL ?? '').replace(/\/+$/, '')
 
-export function aviConfigured(): boolean {
-  return USE_MICROVM || RUN_URL.length > 0
+/** Local development talks to the service directly; otherwise the gateway routes. */
+function turnUrl(authenticated: boolean): string {
+  if (LOCAL_URL) return `${LOCAL_URL}`
+  return `${API_BASE_URL}${authenticated ? '/v1/ai-assistant/ask' : '/v1/ai-assistant/guest'}`
 }
 
-type MicrovmSession = { endpoint: string; token: string; session: string; expiresAt: number }
-
-// One MicroVM serves many turns; reuse it while it still has margin left, since a
-// cold MicroVM costs ~2.3s and the user would feel that on every message.
-const SESSION_REUSE_MARGIN_MS = 8 * 60 * 1000
-
-let cachedSession: MicrovmSession | null = null
-let cachedGuest: GuestSession | null = null
-
-export function resetAviSession(): void {
-  cachedSession = null
-  cachedGuest = null
+/**
+ * Whether the widget can reach AI Assistant at all.
+ *
+ * Both deployed routes live behind the same API base URL, so a build is configured
+ * as long as it has one. The old `VITE_AI_ASSISTANT_MICROVM` flag is gone with the
+ * MicroVM it selected.
+ */
+export function aviConfigured(): boolean {
+  return LOCAL_URL.length > 0 || API_BASE_URL.length > 0
 }
 
 type AviErrorBody = {
@@ -141,77 +146,6 @@ function emitLimit(handlers: AviStreamHandlers, error: AviLimitError): void {
   } as unknown as AviFrame)
 }
 
-/** Ask the control plane for a MicroVM session (signed-in).
- *
- * The same call launches the MicroVM, so a session is one round trip that returns
- * both the ingress pair and the signed token the agent service will verify.
- */
-async function microvmSession(authToken: string): Promise<MicrovmSession> {
-  if (cachedSession && cachedSession.expiresAt - Date.now() > SESSION_REUSE_MARGIN_MS) {
-    return cachedSession
-  }
-  const response = await fetch(`${API_BASE_URL}/v1/ai-assistant/session`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${authToken}`,
-      'content-type': 'application/json',
-    },
-    body: '{}',
-  })
-  if (!response.ok) throw await errorFor(response)
-  const data = (await response.json()) as {
-    endpoint: string
-    token: string
-    session: string
-    expiresAt: string
-  }
-  const expiresAt = Date.parse(data.expiresAt)
-  cachedSession = {
-    endpoint: data.endpoint,
-    token: data.token,
-    session: data.session,
-    expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 20 * 60 * 1000,
-  }
-  return cachedSession
-}
-
-type GuestSession = { endpoint: string; token: string; badge: string; expiresAt: number }
-
-/** Ask the control plane for a guest badge **and** the MicroVM to use it with.
- *
- * One round trip: the control plane applies the per-IP badge budget, launches the
- * MicroVM and signs a guest token, so the agent service verifies a signature
- * exactly as it does for a signed-in user.
- */
-async function guestSession(): Promise<GuestSession> {
-  if (cachedGuest && cachedGuest.expiresAt - Date.now() > SESSION_REUSE_MARGIN_MS) {
-    return cachedGuest
-  }
-  const response = await fetch(`${API_BASE_URL}/v1/ai-assistant/badge`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ withMicrovm: true }),
-  })
-  if (!response.ok) throw await errorFor(response)
-  const data = (await response.json()) as {
-    badge: string
-    endpoint?: string
-    token?: string
-    expiresAt: string
-  }
-  if (!data.endpoint || !data.token) {
-    throw new Error('AI Assistant is briefly unavailable — please try again')
-  }
-  const expiresAt = Date.parse(data.expiresAt)
-  cachedGuest = {
-    endpoint: data.endpoint,
-    token: data.token,
-    badge: data.badge,
-    expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 10 * 60 * 1000,
-  }
-  return cachedGuest
-}
-
 export type AviTurn = {
   question: string
   history: { role: 'user' | 'assistant'; content: string }[]
@@ -227,141 +161,72 @@ export type AviStreamHandlers = {
   signal?: AbortSignal
 }
 
-/** Parse an SSE byte stream into frames. */
-async function* framesFrom(response: Response): AsyncGenerator<AviFrame> {
-  if (!response.body) return
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    // SSE frames are separated by a blank line; keep the trailing partial.
-    const parts = buffer.split('\n\n')
-    buffer = parts.pop() ?? ''
-    for (const part of parts) {
-      const line = part
-        .split('\n')
-        .find((candidate) => candidate.startsWith('data:'))
-      if (!line) continue
-      const payload = line.slice(5).trim()
-      if (!payload) continue
-      try {
-        yield JSON.parse(payload) as AviFrame
-      } catch {
-        // A malformed frame must not kill the stream.
-      }
+/**
+ * Parse a buffered SSE body into frames.
+ *
+ * The body is already complete, so this is a split rather than a stream reader —
+ * but it is written to tolerate a partial trailing frame anyway, because a proxy
+ * may still cut the body short and a half-frame must not throw.
+ */
+function framesFrom(body: string): AviFrame[] {
+  const frames: AviFrame[] = []
+  for (const part of body.split('\n\n')) {
+    const line = part
+      .split('\n')
+      .find((candidate) => candidate.startsWith('data:'))
+    if (!line) continue
+    const payload = line.slice(5).trim()
+    if (!payload) continue
+    try {
+      frames.push(JSON.parse(payload) as AviFrame)
+    } catch {
+      // A malformed frame must not cost the rest of the answer.
     }
   }
+  return frames
 }
 
-/** Stream one AI Assistant turn, calling `onFrame` for every frame as it arrives. */
+/**
+ * Send one AI Assistant turn and apply the frames it returns.
+ *
+ * One request, one response: the route (not a body field) decides whether the
+ * gateway's Auth0 authorizer is in front, so a signed-in user's request carries
+ * their bearer token and a guest's carries none.
+ */
 export async function streamAviTurn(
   turn: AviTurn,
   handlers: AviStreamHandlers,
 ): Promise<void> {
-  const body = JSON.stringify({
-    question: turn.question,
-    history: turn.history,
-    route: turn.route,
-    conversationId: turn.conversationId,
-    runId: turn.runId,
+  const authenticated = Boolean(handlers.authToken)
+  const response = await fetch(turnUrl(authenticated), {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'text/event-stream',
+      ...(handlers.authToken ? { authorization: `Bearer ${handlers.authToken}` } : {}),
+    },
+    body: JSON.stringify({
+      question: turn.question,
+      history: turn.history,
+      route: turn.route,
+      conversationId: turn.conversationId,
+      runId: turn.runId,
+    }),
+    signal: handlers.signal,
   })
 
-  // Local development: the agent service directly.
-  if (!USE_MICROVM && RUN_URL) {
-    const response = await fetch(`${RUN_URL}/invocations`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'text/event-stream',
-        ...(handlers.authToken ? { authorization: `Bearer ${handlers.authToken}` } : {}),
-      },
-      body,
-      signal: handlers.signal,
-    })
-    if (!response.ok) {
-      const failure = await errorFor(response)
-      if (failure instanceof AviLimitError) {
-        emitLimit(handlers, failure)
-        return
-      }
-      throw failure
+  if (!response.ok) {
+    const failure = await errorFor(response)
+    if (failure instanceof AviLimitError) {
+      // A cap is part of the conversation, not a crash: render it as a frame so
+      // the widget shows its own card instead of a generic error banner.
+      emitLimit(handlers, failure)
+      return
     }
-    for await (const frame of framesFrom(response)) handlers.onFrame(frame)
-    return
+    throw failure
   }
 
-  // Signed-in and guest sessions have different shapes, so resolve the endpoint,
-  // ingress token and agent token per branch rather than widening a union.
-  let endpoint: string
-  let ingressToken: string
-  let token: string
-  if (handlers.authToken) {
-    const session = await microvmSession(handlers.authToken)
-    endpoint = session.endpoint
-    ingressToken = session.token
-    token = session.session
-  } else {
-    const guest = await guestSession()
-    endpoint = guest.endpoint
-    ingressToken = guest.token
-    token = guest.badge
-  }
-
-  // The MicroVM ingress token cannot be sent as a cross-origin HTTP header, so
-  // browsers use a WebSocket and carry it in the authentication subprotocol — the
-  // same transport the agent-run client uses.
-  await streamOverSocket({ endpoint, ingressToken, token, body, handlers })
-}
-
-function streamOverSocket(input: {
-  endpoint: string
-  ingressToken: string
-  token: string
-  body: string
-  handlers: AviStreamHandlers
-}): Promise<void> {
-  const { endpoint, ingressToken, token, body, handlers } = input
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(`wss://${endpoint}/invocations`, [
-      'lambda-microvms',
-      `lambda-microvms.authentication.${ingressToken}`,
-      'lambda-microvms.port.8080',
-    ])
-    let settled = false
-
-    const finish = (error?: Error) => {
-      if (settled) return
-      settled = true
-      try {
-        socket.close()
-      } catch {
-        // already closing
-      }
-      if (error) reject(error)
-      else resolve()
-    }
-
-    socket.onopen = () => {
-      socket.send(JSON.stringify({ token, payload: JSON.parse(body) }))
-    }
-    // The shared incremental parser, not a per-message split: a WebSocket frame
-    // boundary is not an SSE frame boundary, and splitting per message silently
-    // drops any frame the proxy happened to cut in half.
-    const parse = makeFrameParser<AviFrame>((frame) => {
-      handlers.onFrame(frame)
-      if (frame.type === 'run.completed' || frame.type === 'run.error') finish()
-    })
-    socket.onmessage = (event) => {
-      if (typeof event.data === 'string' && event.data) parse(event.data)
-    }
-    socket.onerror = () => finish(new Error('AI Assistant connection failed'))
-    socket.onclose = () => finish()
-
-    handlers.signal?.addEventListener('abort', () => finish(new Error('aborted')))
-  })
+  for (const frame of framesFrom(await response.text())) handlers.onFrame(frame)
 }
 
 // --------------------------------------------------------------------------- #

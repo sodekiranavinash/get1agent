@@ -1,7 +1,7 @@
 [project]
 name = "get1agent-ai-assistant"
 version = "0.0.0"
-description = "AI Assistant — the in-product assistant: LangChain Deep Agents runtime on Lambda MicroVMs"
+description = "AI Assistant — the in-product assistant: LangChain Deep Agents, one Lambda behind two API Gateway routes"
 requires-python = ">=3.11"
 
 # AI Assistant is deliberately its own service with its own lockfile: it is the platform's
@@ -10,9 +10,6 @@ requires-python = ">=3.11"
 dependencies = [
     # The harness: planning, filesystem-in-state, context management, middleware.
     "deepagents[aws]>=0.7.0",
-    # The HTTP surface the MicroVM proxy forwards to (/invocations, /ping).
-    "fastapi>=0.115",
-    "uvicorn>=0.30",
     # AWS access: DynamoDB, S3, S3 Vectors, Bedrock.
     "boto3>=1.35",
     # The platform's own shared packages need these transitively, and declaring
@@ -25,3 +22,15 @@ dependencies = [
 # dependencies into `.venv` and never tries to build/install the project itself.
 [tool.uv]
 package = false
+
+# Local development only. Production is one Lambda behind API Gateway, which is what
+# removed the container's ASGI server — so `fastapi`/`uvicorn` are deliberately **not**
+# runtime dependencies. They exist so `make ai-assistant-local-agent` can serve the same
+# `handler.lambda_handler` over HTTP on :8091, and the Makefile's RUNTIME_EXCLUDE
+# subtracts them (and everything they pull in) from the Lambda zip, so they cost a
+# deploy nothing.
+[dependency-groups]
+dev = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]

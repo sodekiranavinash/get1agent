@@ -34,17 +34,18 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
   const [draft, setDraft] = useState('')
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
 
-  // One rule: signed in → the signed-in session route; signed out (guest, demo,
-  // not-yet-loaded) → the guest badge route. `lib/ai-assistant.ts` picks between them from
-  // the presence of this token, so there is nothing else to decide here.
+  // One rule: signed in → the JWT-protected `/ask` route; signed out (guest, demo,
+  // not-yet-loaded) → the unauthenticated `/guest` route. `lib/aiAssistant.ts` picks
+  // between them from the presence of this token, so there is nothing else to decide
+  // here.
   const signedIn = isAuthenticated
-  const ai-assistant = useAiAssistant({
+  const assistant = useAiAssistant({
     route: location.pathname,
     authToken: signedIn ? token : undefined,
     open,
     api,
   })
-  // Destructured rather than read off `ai-assistant.*`: the hook's return object also
+  // Destructured rather than read off `assistant.*`: the hook's return object also
   // carries a ref, and property access on it during render trips the React
   // Compiler's ref rule once it declines to optimize this component.
   const {
@@ -59,7 +60,7 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
     reset,
     rate,
     scrollRef,
-  } = ai-assistant
+  } = assistant
 
   useEffect(() => {
     if (!open) return

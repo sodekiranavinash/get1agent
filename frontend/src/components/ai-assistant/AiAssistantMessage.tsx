@@ -6,7 +6,7 @@ import { AiAssistantMark } from './AiAssistantMark'
 
 import { AiAssistantFeedback } from './AiAssistantFeedback'
 import { ChatAnswer } from '../chat/ChatAnswer'
-import type { AiAssistantFeedbackValue, AviStage, AviWidgetTurn } from '../../lib/ai-assistant'
+import type { AiAssistantFeedbackValue, AviStage, AviWidgetTurn } from '../../lib/aiAssistant'
 
 /**
  * One AI Assistant turn: the user's question, then the answer as it streams.

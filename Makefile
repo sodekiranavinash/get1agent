@@ -98,10 +98,14 @@ ai-assistant-status: floci-env
 ai-assistant-local-ingest:
 	backend/ai-assistant/.venv/bin/python tools/ai-assistant-knowledge/local_ingest.py
 
-# Run the AI Assistant agent service against the local stack (:8091). The widget talks to
-# it directly with , which is also how guests reach AI Assistant
-# locally — including on the landing page.
+# Run AI Assistant locally on :8091 against the local stack. This is the local stand-in
+# for API Gateway: it serves the **same** `handler.lambda_handler` production runs, so
+# guests work with no setup and the signed-in path uses the Auth0 token the SPA already
+# holds (`VITE_AI_ASSISTANT_URL` in `frontend/.env.local` points the widget here).
+# Installs/repairs the venv on first run, including the dev-only ASGI server.
 ai-assistant-local-agent:
+	@UV_CACHE_DIR="$(CURDIR)/.uv-cache" uv sync --directory backend/ai-assistant --quiet \
+		|| { echo "uv sync failed — is uv installed? (https://docs.astral.sh/uv/)"; exit 1; }
 	backend/ai-assistant/.venv/bin/python tools/ai-assistant-knowledge/local_agent.py
 
 # Regenerate the README architecture diagrams (docs/assets/*.svg + *.png) from
@@ -128,11 +132,25 @@ test:
 
 # Per-lambda unit tests (stdlib unittest in each app's tests/ dir). No-op for
 # apps that don't have any yet.
+#
+# AI Assistant is deliberately NOT in this loop: it lives in `backend/ai-assistant/`
+# rather than `backend/services/*`, so it has its own `test-ai-assistant` target and
+# its own CI job. Adding it here as well would run it twice.
 test-unit:
 	@for app in $$(find backend/services -maxdepth 3 -name Makefile -exec dirname {} \; | sort); do \
 		[ -f "$$app/Makefile" ] || continue; \
 		$(MAKE) -C "$$app" test || exit 1; \
 	done
+
+# AI Assistant's suite (stdlib unittest). It covers the two API Gateway routes, the
+# rule that identity comes only from the gateway's verified claims, and the
+# local-development auth verifier. It has its own target because the loop above
+# cannot reach it — which is precisely how this suite went un-run for a while.
+test-ai-assistant:
+	@echo "== ai-assistant =="
+	@UV_CACHE_DIR="$(CURDIR)/.uv-cache" uv sync --directory backend/ai-assistant --quiet
+	@cd backend/ai-assistant && PYTHONPATH="$(CURDIR)/backend/packages:$(CURDIR)/backend/ai-assistant" \
+		.venv/bin/python -m unittest discover -s tests -t .
 
 # --- Floci local stack -------------------------------------------------------
 

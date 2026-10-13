@@ -929,10 +929,12 @@ const flowById = (id: string): RequestFlow =>
  * AI Assistant's flows, kept in their own tab so the assistant is documented as a
  * separate subsystem rather than folded into the agent or knowledge diagrams.
  *
- * Two ingress paths answer a question — a stateless guest Lambda and an
- * isolated MicroVM for signed-in users — and both share one engine: a dedicated
- * intent classifier, then hybrid retrieval over a reserved `platform` knowledge
- * scope ingested through the same pipeline as any user knowledge base.
+ * One Lambda serves two API Gateway routes — `/ask` for signed-in callers, where
+ * the gateway's Auth0 authorizer supplies the verified identity, and `/guest` with
+ * no authorizer, where the Lambda hashes the caller's IP into a rate-limit bucket.
+ * Both share one engine: a dedicated intent classifier, then hybrid retrieval over
+ * a reserved `platform` knowledge scope ingested through the same pipeline as any
+ * user knowledge base.
  */
 export const AI_ASSISTANT_FLOWS: RequestFlow[] = [
   flow(
@@ -940,15 +942,14 @@ export const AI_ASSISTANT_FLOWS: RequestFlow[] = [
     'Question lifecycle',
     Sparkles,
     'ai',
-    'Every AI Assistant question — guest or signed-in — takes the same shape: the launcher opens a dialog on any page and posts the full conversation, a dedicated classifier decides whether the question is about the platform, then a LangChain Deep Agents runtime answers from the reserved platform knowledge scope, streams the tokens back with numbered sources and feature links, and the turn is traced, metered and (for signed-in users) persisted.',
+    'Every AI Assistant question — guest or signed-in — takes the same shape: the launcher opens a dialog on any page and posts the full conversation to one of two API Gateway routes, a dedicated classifier decides whether the question is about the platform, then a LangChain Deep Agents runtime answers from the reserved platform knowledge scope and returns the run with numbered sources and feature links. The response is buffered (API Gateway cannot stream), and the turn is traced, metered and — for signed-in users only — persisted.',
     [
       { kind: 'client', title: 'Launcher dialog', subtitle: 'Bottom-right on every page', code: 'POST /v1/ai-assistant/ask · full transcript', env: 'client' },
-      { kind: 'edge', title: 'API Gateway', subtitle: 'Kill switch · route throttle', code: 'guest: NONE auth + IP cap', env: 'edge', aws: 'apiGateway' },
-      { kind: 'lambda', title: 'Session bootstrap', subtitle: 'Signed-in: mint a MicroVM', code: 'POST /v1/ai-assistant/session', env: 'lambda' },
-      { kind: 'runtime', title: 'AI Assistant runtime', subtitle: 'Isolated proxy streams SSE', code: 'deepagents · LangGraph', env: 'runtime', aws: 'agentcore' },
+      { kind: 'edge', title: 'API Gateway', subtitle: 'Auth0 JWT on /ask · throttle', code: 'guest: NONE auth + IP cap', env: 'edge', aws: 'apiGateway' },
+      { kind: 'lambda', title: 'AI Assistant Lambda', subtitle: 'One function, two routes', code: 'handler.py · buffered SSE', env: 'lambda' },
       { kind: 'ai', title: 'Intent classifier', subtitle: 'Own model · rules first', code: 'off-topic → examples', env: 'runtime', aws: 'bedrock' },
       { kind: 'ai', title: 'Hybrid retrieval', subtitle: 'Reserved platform scope', code: 'S3 Vectors + BM25 · RRF', env: 'runtime' },
-      { kind: 'client', title: 'Answer', subtitle: 'Streamed · [n] · route chips', code: 'sources + deep links', env: 'client' },
+      { kind: 'client', title: 'Answer', subtitle: 'Frames · [n] · route chips', code: 'sources + deep links', env: 'client' },
       { kind: 'data', title: 'Trace & feedback', subtitle: 'Spans, cost, thumbs', code: 'AITRACE# · AIFEEDBACK#', env: 'data', aws: 'dynamodb' },
     ],
   ),

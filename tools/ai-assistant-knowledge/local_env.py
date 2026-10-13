@@ -20,6 +20,13 @@ from __future__ import annotations
 
 import os
 
+#: The Auth0 tenant the frontend is built against (`frontend/.env`). The local
+#: server verifies the browser's token with these, so the tenant has to match the
+#: one the SPA signed in to. Overridable per-developer via `AUTH_DOMAIN` /
+#: `AUTH_AUDIENCE` if someone points the SPA at their own tenant.
+AUTH_DOMAIN: str = os.environ.get("AUTH_DOMAIN") or "get1agent.us.auth0.com"
+AUTH_AUDIENCE: str = os.environ.get("AUTH_AUDIENCE") or "https://api.get1agent.com"
+
 #: Loopback endpoints for the containers in `infra/local/floci/docker-compose.yml`.
 LOCAL_ENV: dict[str, str] = {
     "AWS_REGION": "us-east-1",
@@ -48,9 +55,20 @@ LOCAL_ENV: dict[str, str] = {
     # AI Assistant's reserved scope.
     "AI_ASSISTANT_SCOPE": "platform",
     "AI_ASSISTANT_KB_ID": "kb_platform_docs_0001",
-    # Local development has no gateway in front, so the service mints and verifies
-    # with a fixed dev secret.
-    "AI_ASSISTANT_SESSION_SECRET": "local-dev-secret",
+    # Reranking matches production: Bedrock Rerank, cross-region to us-west-2. Real
+    # AWS credentials make it work; without them the shared module logs a warning and
+    # returns the RRF order, so a local turn still answers. To rerank offline
+    # instead, start the TEI container and point at it:
+    #   docker compose -f infra/local/floci/docker-compose.yml --profile local-rerank up -d reranker
+    #   RERANK_MODE=local LOCAL_RERANK_URL=http://localhost:8080/rerank
+    "RERANK_MODE": "bedrock",
+    "RERANK_REGION": "us-west-2",
+    # The local ASGI server stands in for API Gateway, so *it* is what has to
+    # verify the Auth0 JWT the browser sends (`src/local_auth.py`). These are the
+    # same tenant values `frontend/.env` is built with, so a token from the SPA
+    # verifies here unchanged. Override with AI_ASSISTANT_AUTH_* for another tenant.
+    "AI_ASSISTANT_AUTH_ISSUER": "https://" + AUTH_DOMAIN,
+    "AI_ASSISTANT_AUTH_AUDIENCE": AUTH_AUDIENCE,
     "AI_ASSISTANT_MODE": "local",
     "AI_ASSISTANT_PORT": "8091",
 }
