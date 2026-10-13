@@ -45,7 +45,7 @@ help:
 	@echo "    make ai-assistant-upload             Push the corpus through the ingestion pipeline"
 	@echo "    make ai-assistant-status             Per-document ingestion status"
 	@echo "    make ai-assistant-local-ingest       Index the corpus into the local Floci stack"
-	@echo "    make ai-assistant-local-agent        Run the AI Assistant service locally on :8091"
+	@echo "    make ai-assistant-logs               Follow the AI Assistant service logs (:8091)"
 	@echo ""
 	@echo "  Floci stack:"
 	@echo "    make floci          Build + up + provision"
@@ -95,18 +95,26 @@ ai-assistant-status: floci-env
 # Ingest the corpus into the **local** Floci stack from the host. The documented
 # `ai-assistant-bootstrap`/`ai-assistant-upload` targets drive the deployed pipeline; locally the
 # three ingestion stages are called in-process instead (same code, no queue).
+#
+# This is the one AI Assistant step that runs on the host rather than in the
+# `ai-assistant` service, so it provisions the host venv itself — it used to rely
+# on `make ai-assistant-local-agent` having done that, and that target is gone.
 ai-assistant-local-ingest:
-	backend/ai-assistant/.venv/bin/python tools/ai-assistant-knowledge/local_ingest.py
-
-# Run AI Assistant locally on :8091 against the local stack. This is the local stand-in
-# for API Gateway: it serves the **same** `handler.lambda_handler` production runs, so
-# guests work with no setup and the signed-in path uses the Auth0 token the SPA already
-# holds (`VITE_AI_ASSISTANT_URL` in `frontend/.env.local` points the widget here).
-# Installs/repairs the venv on first run, including the dev-only ASGI server.
-ai-assistant-local-agent:
 	@UV_CACHE_DIR="$(CURDIR)/.uv-cache" uv sync --directory backend/ai-assistant --quiet \
 		|| { echo "uv sync failed — is uv installed? (https://docs.astral.sh/uv/)"; exit 1; }
-	backend/ai-assistant/.venv/bin/python tools/ai-assistant-knowledge/local_agent.py
+	backend/ai-assistant/.venv/bin/python tools/ai-assistant-knowledge/local_ingest.py
+
+# AI Assistant runs **in the stack** (the `ai-assistant` compose service), so there
+# is no target to start it and no second terminal to keep open: `make floci` and
+# `make floci-up` start it, `make floci-reload` rebuilds it after code changes,
+# and `make floci-down` stops it. The image is local-only
+# (`backend/ai-assistant/Dockerfile.dev`) and serves the **same**
+# `handler.lambda_handler` production runs through the ASGI bridge in
+# `backend/ai-assistant/main.py`, so guests work with no setup and the signed-in
+# path uses the Auth0 token the SPA already holds. `frontend/.env.local` points
+# the widget at it through `VITE_AI_ASSISTANT_URL`.
+ai-assistant-logs: floci-env
+	$(COMPOSE) logs -f ai-assistant
 
 # Regenerate the README architecture diagrams (docs/assets/*.svg + *.png) from
 # the app's own diagram spec + layout engine.
@@ -298,24 +306,38 @@ floci-up: floci-env
 floci-wait:
 	bash infra/local/floci/wait.sh
 
-# After changing Lambda **or agent** code: rebuild only changed Lambdas,
-# rebuild + restart the agent container, and re-run the init hook in place.
+# After changing Lambda **or container** code: rebuild only changed Lambdas,
+# rebuild + restart the containers that ship code (agent, AI Assistant), and
+# re-run the init hook in place.
 floci-reload: floci-env
 	@touch .floci-last-rebuild-timestamp
 	$(MAKE) floci-rebuild-changed
 	@eval "$$(aws configure export-credentials --format env 2>/dev/null)" 2>/dev/null || true; \
-	# Only rebuild agent if agent code changed
-	if [ "agents/main.py" -nt ".floci-agent-last-built" ] || \
-	   [ "agents/agentflow/" -nt ".floci-agent-last-built" ] || \
-	   [ "agents/workflow/" -nt ".floci-agent-last-built" ] || \
-	   [ "backend/agents/Dockerfile" -nt ".floci-agent-last-built" ] || \
-	   [ ! -f ".floci-agent-last-built" ]; then \
+	# Only rebuild agent if agent code changed. The paths are `backend/agents/…`:
+	# this check used to read `agents/…` (no such path), so `-nt` was false for
+	# ever and an agent edit never rebuilt the image.
+	if [ ! -f ".floci-agent-last-built" ] || \
+	   [ -n "$$(find backend/agents -type f -not -path '*/__pycache__/*' -newer .floci-agent-last-built 2>/dev/null | head -n1)" ]; then \
 		echo "🔄 Agent code changed, rebuilding agent container..."; \
 		$(COMPOSE) up -d --build agent; \
 		touch ".floci-agent-last-built"; \
 	else \
 		echo "✓ Agent unchanged, restarting only..."; \
 		$(COMPOSE) up -d agent; \
+	fi
+	# Same for AI Assistant, whose image bundles `backend/packages` too — a change
+	# there with no app file touched would otherwise leave a stale container, the
+	# same trap the Lambda zip rebuild guards against.
+	@if [ ! -f ".floci-ai-assistant-last-built" ] || \
+	   [ -n "$$(find backend/ai-assistant backend/packages -type f \
+	        -not -path '*/__pycache__/*' -not -path '*/dist/*' -not -path '*/.venv/*' \
+	        -newer .floci-ai-assistant-last-built 2>/dev/null | head -n1)" ]; then \
+		echo "🔄 AI Assistant code changed, rebuilding its container..."; \
+		$(COMPOSE) up -d --build ai-assistant; \
+		touch ".floci-ai-assistant-last-built"; \
+	else \
+		echo "✓ AI Assistant unchanged, restarting only..."; \
+		$(COMPOSE) up -d ai-assistant; \
 	fi
 	# Keep the loopback OAuth proxy up across reloads. Idempotent: compose
 	# leaves an already-running container alone, so this is a no-op unless the
@@ -408,9 +430,8 @@ floci: floci-env
 	@echo "  Point the UI at it (dev server proxies /v1 to Floci):"
 	@echo "    printf 'VITE_API_URL=/\\nVITE_API_PROXY_TARGET=$(FLOCI_API_URL)\\nVITE_AI_ASSISTANT_URL=http://localhost:8091\\n\\n' > frontend/.env.local"
 	@echo ""
-	@echo "  AI Assistant (bottom-right assistant) is NOT in the stack: Lambda MicroVMs and"
-	@echo "  AgentCore are not emulated, so there is no /v1/ai-assistant/session route. Run it"
-	@echo "  from the host instead, which the two VITE_AI_ASSISTANT_* vars above point at:"
-	@echo "    make ai-assistant-local-ingest   # once: platform corpus into Floci"
-	@echo "    make ai-assistant-local-agent    # AI Assistant on :8091 (guest path; answers Bedrock)"
-	@echo "  Logs:  make floci-logs     Stop:  make floci-down"
+	@echo "  AI Assistant (bottom-right assistant) is part of the stack: the 'ai-assistant'"
+	@echo "  service serves the same handler production runs, on http://localhost:8091, which"
+	@echo "  VITE_AI_ASSISTANT_URL above points the widget at. One-time, load its corpus:"
+	@echo "    make ai-assistant-local-ingest   # platform corpus into Floci"
+	@echo "  Logs:  make floci-logs  ·  make ai-assistant-logs     Stop:  make floci-down"

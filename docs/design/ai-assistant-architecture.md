@@ -365,11 +365,22 @@ All routes require the admin role; every mutation records `updatedBy`/
 
 ### 12.1 Local development
 
-`make ai-assistant-local-agent` serves `:8091` from `backend/ai-assistant/main.py`,
-a small ASGI server whose only job is translation: it builds the API Gateway
-payload-format-2.0 event and calls the **same `handler.lambda_handler`** the
-deployed function runs, so the guest route, the IP-hash rate limit and the
-buffered SSE body are the production code paths rather than approximations.
+`make floci` brings AI Assistant up **with the stack**: the `ai-assistant` compose
+service serves `:8091` from `backend/ai-assistant/main.py`, a small ASGI server
+whose only job is translation: it builds the API Gateway payload-format-2.0 event
+and calls the **same `handler.lambda_handler`** the deployed function runs, so the
+guest route, the IP-hash rate limit and the buffered SSE body are the production
+code paths rather than approximations. `make floci-reload` rebuilds it after code
+changes, `make ai-assistant-logs` follows it and `make floci-down` stops it —
+there is no separate command and no second terminal, the same reasoning that put
+the loopback OAuth proxy in the stack.
+
+It is a container rather than a host process for one hard reason: the Lambda zip
+is built from the **host's** wheels, and on a Mac those are macOS binaries
+(`orjson.cpython-313-darwin.so`) that Floci's Linux Lambda containers cannot
+import. `backend/ai-assistant/Dockerfile.dev` builds the ASGI server from the
+committed `uv.lock` on Linux, and the service publishes its port on **127.0.0.1
+only** (`127.0.0.1:8091:8091`), so the machine boundary still holds.
 
 Because it stands in for API Gateway, it also inherits the gateway's one
 responsibility — authorization. It verifies the browser's Auth0 token itself

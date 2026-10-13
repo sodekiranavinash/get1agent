@@ -31,17 +31,27 @@ into the event. An unverifiable token is rejected with 401, and a request with n
 token is served as a guest. The result is that local dev has the same security
 shape as production, with the *location* of the check moved, not removed.
 
-Run it with `make ai-assistant-local-agent` (which points the widget at
-`http://localhost:8091`), or directly:
+Run it as the `ai-assistant` service in the Floci stack — `make floci` starts it,
+`make floci-reload` rebuilds it after code changes, `make ai-assistant-logs`
+follows it — which points the widget at `http://localhost:8091` through
+`VITE_AI_ASSISTANT_URL` in `frontend/.env.local`.
 
-    python tools/ai-assistant-knowledge/local_agent.py
+`make ai-assistant-local-agent` used to run this file from the host. It was
+retired because it was a second command to remember, a second terminal to keep
+open, and a venv built from **the host's** wheels: on a Mac those are macOS
+binaries, so a container is the only place this bridge can run the same code
+Floci's Linux Lambda containers would. That is why the service has an image of
+its own (`Dockerfile.dev`) built from the committed `uv.lock`.
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
+from threading import Thread
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -89,6 +99,54 @@ def _claims_for(token: str) -> dict[str, Any]:
         raise ValueError(str(exc)) from exc
 
 
+#: What the cold path imports, in the order `src/agent.py` reaches for it.
+#:
+#: Importing this framework (`deepagents` → langchain/langgraph) is the whole cost
+#: of a cold start: measured at ~6s in this image, against a 24s
+#: `AI_ASSISTANT_TURN_BUDGET_SECONDS` sized for API Gateway's 30s integration cap.
+#: A first turn that pays it *answers* and then appends a `run.error` frame saying
+#: the turn took too long — which is exactly what a developer saw on their very
+#: first question (the host runner, importing from a macOS venv, was slower still).
+#: Warming these in the background moves the cost to start-up, where nothing is
+#: waiting on it.
+_WARM_IMPORTS = (
+    "src.agent",
+    "langchain_core.tools",
+    "langchain_core.messages",
+    "langchain_aws",
+    "langchain.agents.middleware",
+    "deepagents",
+    "deepagents.backends",
+    "deepagents.middleware.filesystem",
+)
+
+
+def _warm_framework() -> None:
+    """Pre-import the agent framework, off the request path.
+
+    Every failure is swallowed and reported: a warm-up that cannot import is
+    exactly the state the first request would have failed in anyway, and it must
+    not take the server down with it.
+    """
+    for name in _WARM_IMPORTS:
+        try:
+            importlib.import_module(name)
+        except Exception as exc:  # noqa: BLE001 - warming is best-effort
+            print(f"warm-up: {name} failed to import: {exc}", file=sys.stderr)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Warm in a thread: the port opens immediately rather than 20s later.
+
+    A *synchronous* warm-up here would be worse than the problem it solves —
+    uvicorn would not accept connections until it finished, so the widget's first
+    request would be a connection error instead of a slow answer.
+    """
+    Thread(target=_warm_framework, name="ai-assistant-warm", daemon=True).start()
+    yield
+
+
 def _event(request: Request, body: bytes, claims: dict[str, Any] | None) -> dict[str, Any]:
     """Build the API Gateway payload-format-2.0 event the handler expects."""
     headers = {key.lower(): value for key, value in request.headers.items()}
@@ -116,7 +174,7 @@ def _event(request: Request, body: bytes, claims: dict[str, Any] | None) -> dict
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="AI Assistant (local)", docs_url=None, redoc_url=None)
+    app = FastAPI(title="AI Assistant (local)", docs_url=None, redoc_url=None, lifespan=_lifespan)
 
     # The widget may be served from a different origin locally (`:5173`) than this
     # server (`:8091`), and unlike the API Gateway path there is no CORS layer in

@@ -1,17 +1,17 @@
 # AI Assistant — the in-product assistant.
 #
-# Two deployable artifacts live here plus a container:
+# One deployable lives here:
 #
-#   dist/function.zip   the stateless **guest** Lambda (registered in
-#                       backend/registry.json as `ai-assistant`, Python). LangChain is
-#                       deliberately NOT installed for it: the guest path is a
-#                       single direct model call, so the zip and the cold start
-#                       stay small. `ai-assistant/agent.py` imports the framework lazily
-#                       precisely so this works, and tests/test_guest_packaging.py
-#                       fails the build if that ever regresses.
+#   dist/function.zip   the Lambda behind the two API Gateway routes, registered
+#                       in backend/registry.json as `ai-assistant`. It bundles the
+#                       agent framework (LangChain Deep Agents *is* the product)
+#                       and the shared `core`/`data`/`retrieval` packages.
 #   dist/pkg/           the same zip, unpacked, for local handler testing.
-#   ../services/ai-assistant/*   the control-plane Lambda, the MicroVM proxy and the
-#                       container image (see their own Makefiles and Dockerfile).
+#
+# `Dockerfile.dev` is **not** a deployable: it builds the local ASGI bridge
+# (`main.py`) that the Floci stack runs as the `ai-assistant` compose service.
+# It exists because this zip is built from the **host's** wheels, which on a Mac
+# are macOS binaries a Linux Lambda container cannot import.
 #
 # Shared application code is copied in, not layered — the repo rule.
 PACKAGES=core data retrieval
@@ -20,11 +20,11 @@ PACKAGES=core data retrieval
 AI_ASSISTANT_DIR:=$(realpath $(CURDIR)/$(dir $(lastword $(MAKEFILE_LIST))))
 PKG_ROOT:=$(AI_ASSISTANT_DIR)/../packages
 
-# There is one Lambda now, and it runs Deep Agents, so the agent framework is no
-# longer excluded — it is the product. What IS dropped is anything the Lambda
-# runtime already provides: boto3/botocore and their transitive deps are ~28 MB of
-# dead weight in the zip. `fastapi`/`uvicorn`/`starlette` existed only for the
-# container's ASGI server, which no longer exists.
+# The agent framework is **in** the zip: it is what the Lambda runs. What is
+# dropped is anything the Lambda runtime already provides (boto3/botocore and
+# their transitive deps are ~28 MB of dead weight) plus the ASGI server, which
+# only the local development image needs — `Dockerfile.dev` installs it from
+# the dev dependency group, where it costs a deploy nothing.
 RUNTIME_EXCLUDE=boto3 botocore s3transfer jmespath fastapi uvicorn starlette
 
 package:

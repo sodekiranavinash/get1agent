@@ -227,6 +227,97 @@ services:
     networks:
       - get1agent
 
+  # AI Assistant — the bottom-right assistant. Production is one Lambda behind two
+  # API Gateway routes, but its zip is built from the **host's** wheels, and on a
+  # Mac those are macOS binaries that Floci's Linux Lambda containers cannot
+  # import. So locally it runs as this service instead: `main.py` serves the same
+  # `handler.lambda_handler` over HTTP, from the committed uv.lock, on Linux.
+  #
+  # It is part of the stack — `make floci`/`floci-up` starts it, `make
+  # floci-reload` rebuilds it after code changes, and `make floci-logs` /
+  # `make ai-assistant-logs` follow it — so there is no separate terminal to keep
+  # open, the same reasoning that put `oauth-proxy` here.
+  ai-assistant:
+    build:
+      context: ../../../backend
+      # Local-only image: the Lambda zip is the deployable.
+      dockerfile: ai-assistant/Dockerfile.dev
+    depends_on:
+      - dynamodb
+      - floci
+    # All local assistant config starts from the repo-root .env …
+    env_file:
+      - ../../../.env
+    environment:
+      # … with the compose-network endpoints overriding the host-oriented ones.
+      DYNAMODB_ENDPOINT_URL: http://dynamodb:8000
+      DYNAMODB_TABLE: ${DYNAMODB_TABLE:-get1agent-local}
+      AWS_ENDPOINT_URL: http://floci:4566
+      S3_ENDPOINT_URL: http://floci:4566
+      S3_ADDRESSING_STYLE: path
+      S3_BUCKET: ${S3_BUCKET:-get1agent-local}
+      S3_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      # Retrieval, configured exactly as the host-side corpus ingest does it
+      # (tools/ai-assistant-knowledge/local_env.py): local embeddings, local
+      # vector store, and no cache — the DynamoDB cache adds latency locally and
+      # hides whether retrieval actually worked.
+      EMBED_MODE: local
+      LOCAL_EMBED_URL: http://ollama:11434
+      VECTOR_STORE: local
+      CACHE_BACKEND: none
+      # The reserved platform scope the corpus is ingested into.
+      AI_ASSISTANT_SCOPE: platform
+      AI_ASSISTANT_KB_ID: kb_platform_docs_0001
+      # Bedrock stays **real AWS**, like the agent service: Floci rejects
+      # ConverseStream, and the global AWS_ENDPOINT_URL above would otherwise
+      # send every model call to the emulator. A service-specific endpoint wins
+      # over the global one, which is what keeps these off Floci.
+      BEDROCK_REGION: ${BEDROCK_REGION:-ap-south-1}
+      AWS_ENDPOINT_URL_BEDROCK_RUNTIME: https://bedrock-runtime.${BEDROCK_REGION:-ap-south-1}.amazonaws.com
+      AWS_ENDPOINT_URL_BEDROCK_AGENT_RUNTIME: https://bedrock-agent-runtime.us-west-2.amazonaws.com
+      # Reranking follows the stack's own switch (RERANK_MODE in .env), which is
+      # `none` by default — deliberately. Bedrock Rerank is not offered in
+      # ap-south-1, and the cross-region model is throttled for this account, so a
+      # reranking turn pays ~6-26s of boto3 adaptive retries and *then* falls back
+      # to the RRF order anyway: the same ranking, tens of seconds worse. To
+      # exercise real reranking locally, start the cross-encoder the stack ships
+      # (`make floci-rerank`, profile `local-rerank`) and set RERANK_MODE=local —
+      # `LOCAL_RERANK_URL` below is the container's view of that service.
+      RERANK_MODE: ${RERANK_MODE:-none}
+      LOCAL_RERANK_URL: http://reranker:80/rerank
+      # The ASGI server stands in for API Gateway, so *it* verifies the browser's
+      # Auth0 token on `/ask`. Same tenant the SPA signs in to.
+      AI_ASSISTANT_AUTH_ISSUER: ${AUTH_ISSUER:-https://get1agent.us.auth0.com/}
+      AI_ASSISTANT_AUTH_AUDIENCE: ${AUTH_AUDIENCE:-https://api.get1agent.com}
+      # Local development raises the ceilings the deployed caps exist to protect:
+      # a developer would hit the shipped guest allowance (6/hour per IP) within a
+      # few questions and reasonably conclude the assistant was broken. The first
+      # turn also pays the framework's import cost, which the deployed 24s budget
+      # (sized for API Gateway's 30s integration cap) would fail — there is no
+      # gateway here, so the ceiling moves out instead. `main.py` pre-warms the
+      # framework in the background so this is a backstop, not the mechanism.
+      AI_ASSISTANT_TURN_BUDGET_SECONDS: "120"
+      AI_ASSISTANT_GUEST_PER_HOUR: "200"
+      AI_ASSISTANT_GUEST_PER_DAY: "1000"
+      AI_ASSISTANT_PER_HOUR: "500"
+      AI_ASSISTANT_PER_DAY: "5000"
+      # Real AWS credentials (Bedrock). `make floci-up`/`floci-reload` export the
+      # host chain and an explicit export always wins; otherwise the host's
+      # ~/.aws is mounted below, so the container reads *live* credentials.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    volumes:
+      - ${HOME}/.aws:/root/.aws:ro
+    ports:
+      # **Loopback only.** `main.py` is what verifies the JWT on `/ask`, so this
+      # service must never be reachable from another machine — the compose
+      # equivalent of the host runner's refusal to bind a non-loopback address.
+      - "127.0.0.1:${AI_ASSISTANT_PORT:-8091}:8091"
+    networks:
+      - get1agent
+    restart: unless-stopped
+
   # Loopback OAuth callback forwarder for remote MCP servers (GitHub, Linear…).
   # Providers only allow plaintext-HTTP redirects to a loopback address, but
   # Floci serves the API on its own host. This publishes 127.0.0.1:8765 and

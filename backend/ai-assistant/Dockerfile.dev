@@ -1,0 +1,55 @@
+# AI Assistant — the **local development** image. Not a deployable.
+#
+# Production is one Lambda behind two API Gateway routes, packaged by
+# `make -C backend/ai-assistant package`. This image exists because that zip is
+# built from the **host's** wheels, and on a Mac those are macOS binaries
+# (`orjson.cpython-313-darwin.so`), which Floci's Linux Lambda containers cannot
+# import. So locally the service runs from the committed `uv.lock` on Linux
+# instead, serving the **same** `handler.lambda_handler` through the ASGI bridge
+# in `main.py` — the handler is not reimplemented, only transported.
+#
+# It is a service in the Floci stack (`infra/local/floci/docker-compose.yml`), so
+# `make floci` starts it, `make floci-reload` rebuilds it after code changes and
+# `make floci-down` stops it. There is no separate command to run.
+#
+# Build context is `backend/`, like `agents/Dockerfile`, so the shared packages
+# land inside it.
+FROM python:3.13-slim
+
+# uv, copied from the official image and pinned to match the committed uv.lock.
+COPY --from=ghcr.io/astral-sh/uv:0.12.12 /uv /uvx /bin/
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app:/app/packages \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+
+WORKDIR /app
+
+# **Both** dependency groups, deliberately: the runtime group is the agent
+# framework (the product), and `dev` is where `fastapi`/`uvicorn` live — the ASGI
+# bridge is exactly what this image is for. `--frozen` holds it to the lockfile,
+# and `package = false` in pyproject.toml keeps uv from installing the project.
+COPY ai-assistant/pyproject.toml ai-assistant/uv.lock ./
+RUN uv sync --frozen
+
+# Shared application code (bundled, not a layer — the repo rule).
+COPY packages ./packages
+
+COPY ai-assistant/main.py ./main.py
+COPY ai-assistant/handler.py ./handler.py
+COPY ai-assistant/src ./src
+
+# The uv-managed virtualenv is where uvicorn and the framework live.
+ENV PATH="/app/.venv/bin:$PATH"
+
+# `main.py` stands in for API Gateway, which is what verifies the Auth0 token on
+# the `/ask` route. The compose service therefore publishes this port on
+# **127.0.0.1 only** — the same guarantee the host runner enforced by refusing to
+# bind anything but loopback. `0.0.0.0` here is inside the container's own
+# network namespace, which is unreachable except through that loopback publish.
+EXPOSE 8091
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8091", "--log-level", "warning"]

@@ -18,8 +18,8 @@
  * socket — the frames are identical, only the arrival time differs.
  *
  * `VITE_AI_ASSISTANT_URL` is the local-development override: it points at the
- * service run directly (`make ai-assistant-local-agent`, port 8091), which keeps
- * the whole loop working without a deploy.
+ * `ai-assistant` service in the Floci stack (port 8091, started by `make floci`),
+ * which keeps the whole loop working without a deploy.
  */
 
 import type { AgentRunEvent, AgentSource } from './agentRun'

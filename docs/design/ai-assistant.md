@@ -488,16 +488,24 @@ shows the wait plus a **sign-in to keep asking** button — the natural upsell.
   `ai-assistant-knowledge` drift check runs on
   PRs touching `frontend/src/content/docs.ts`, `README.md`, `AGENTS.md`,
   `docs/design/**` or `frontend/src/navigation/**`.
-- Local (Floci): `make ai-assistant-local-agent` serves `:8091` from
-  `backend/ai-assistant/main.py`, a small ASGI server that synthesises the API
-  Gateway event and calls the **same** `handler.lambda_handler` production runs.
-  It stands in for the gateway, so it also verifies the Auth0 token itself
-  (`src/local_auth.py`, stdlib-only RS256 + JWKS) and answers `401` for anything
-  it cannot verify — the check moves, it is never dropped. Guests need no setup.
+- Local (Floci): the `ai-assistant` service in the stack — brought up by
+  `make floci`/`floci-up`, rebuilt by `make floci-reload`, stopped by
+  `make floci-down` — serves `:8091` from `backend/ai-assistant/main.py`, a small
+  ASGI server that synthesises the API Gateway event and calls the **same**
+  `handler.lambda_handler` production runs. It stands in for the gateway, so it
+  also verifies the Auth0 token itself (`src/local_auth.py`, stdlib-only RS256 +
+  JWKS) and answers `401` for anything it cannot verify — the check moves, it is
+  never dropped. Guests need no setup. It runs in a container
+  (`backend/ai-assistant/Dockerfile.dev`, built on Linux from the committed
+  `uv.lock`) because the Lambda zip is built from the host's macOS wheels, which a
+  Linux Lambda container cannot import; its port is published on loopback only.
   `fastapi`/`uvicorn` are a dev dependency group, excluded from the Lambda zip, and
-  `frontend/.env.local` points `VITE_AI_ASSISTANT_URL` at this server.
-  `VECTOR_STORE=local` + `EMBED_MODE=ollama` keep retrieval offline; reranking
-  defaults to Bedrock (real credentials) and degrades to the RRF order without them.
+  `frontend/.env.local` points `VITE_AI_ASSISTANT_URL` at this service.
+  `VECTOR_STORE=local` + `EMBED_MODE=local` keep retrieval offline; reranking
+  follows `RERANK_MODE` from `.env` — `none` locally, because the account's
+  cross-region Bedrock Rerank throttles and costs 6–26s of retries per turn for
+  the same RRF order it falls back to. `make floci-rerank` + `RERANK_MODE=local`
+  runs the real cross-encoder instead.
 
 ---
 

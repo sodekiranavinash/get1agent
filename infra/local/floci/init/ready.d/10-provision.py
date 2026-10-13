@@ -90,11 +90,14 @@ ROUTES = {
         ("GET", "/v1/user/network"),
         # AI Assistant feedback. The browser cannot reach the agent service's own
         # `POST /feedback` (it would need the MicroVM ingress token), so a thumb
-        # is recorded through the ordinary user API. AI Assistant's *turns* never come
-        # through here: locally the widget streams straight from
-        # `make ai-assistant-local-agent` (VITE_AI_ASSISTANT_URL + VITE_AI_ASSISTANT_MICROVM=false), which is
-        # why there are no /v1/ai-assistant/badge or /v1/ai-assistant/session routes below — the
-        # control-plane Lambda and Lambda MicroVMs are not emulated in Floci.
+        # is recorded through the ordinary user API. AI Assistant's *turns* never
+        # come through here either, but for a different reason: its Lambda is not
+        # provisioned into the emulator like the others, because the zip is built
+        # from the **host's** wheels and those are macOS binaries on a Mac, which a
+        # Linux Lambda container cannot import. They are served instead by the
+        # `ai-assistant` compose service (`backend/ai-assistant/Dockerfile.dev`),
+        # which the widget reaches directly through VITE_AI_ASSISTANT_URL — so there
+        # are no /v1/ai-assistant/ask or /v1/ai-assistant/guest routes below.
         ("POST", "/v1/ai-assistant/feedback"),
         # DPDP data-principal routes (consent, access, erasure, grievance).
         ("GET", "/v1/user/consent"),

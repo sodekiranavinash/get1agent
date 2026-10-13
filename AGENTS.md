@@ -876,18 +876,31 @@ docs** — it has its own space on purpose.
   `ai-assistant` registered in `backend/registry.json` under the `ai-assistant`
   group. There is **no Function URL, no session secret, no control plane and no
   MicroVM/ECR module**. Build the zip with `make -C backend/ai-assistant package`.
-- **Local**: `make ai-assistant-local-agent` runs `backend/ai-assistant/main.py` —
-  a small ASGI server on `:8091` that **calls the same `handler.lambda_handler`**
-  production runs, by synthesising the API Gateway payload-format-2.0 event the
-  handler already expects. It is the local stand-in for API Gateway, so it also
-  owns the authorizer: it verifies the browser's Auth0 token itself
-  (`src/local_auth.py`, stdlib-only RS256 + JWKS) and rejects an unverifiable one
-  with a `401` — the check moves, it is never removed, and a `userId` in the body
-  is still ignored. Guests need no setup. `fastapi`/`uvicorn` are a **dev
-  dependency group**, excluded from the Lambda zip by the Makefile's
-  `RUNTIME_EXCLUDE`. `frontend/.env.local` sets
-  `VITE_AI_ASSISTANT_URL=http://localhost:8091` and the server allows the `:5173`
-  origin, so the widget can talk to it directly.
+- **Local**: AI Assistant runs **in the Floci stack** as the `ai-assistant` compose
+  service — `make floci`/`floci-up` starts it, `make floci-reload` rebuilds it
+  after code changes, `make ai-assistant-logs` follows it, `make floci-down` stops
+  it — serving `backend/ai-assistant/main.py` on `:8091`. That is a small ASGI
+  server that **calls the same `handler.lambda_handler`** production runs, by
+  synthesising the API Gateway payload-format-2.0 event the handler already
+  expects. It is the local stand-in for API Gateway, so it also owns the
+  authorizer: it verifies the browser's Auth0 token itself (`src/local_auth.py`,
+  stdlib-only RS256 + JWKS) and rejects an unverifiable one with a `401` — the
+  check moves, it is never removed, and a `userId` in the body is still ignored.
+  Guests need no setup. It is containerised (`Dockerfile.dev`, Linux, from the
+  committed `uv.lock`) because the Lambda zip is built from the host's wheels and
+  a Mac's are macOS binaries that a Linux Lambda container cannot import; its port
+  is published on loopback only. `fastapi`/`uvicorn` are a **dev dependency
+  group**, excluded from the Lambda zip by the Makefile's `RUNTIME_EXCLUDE`.
+  `frontend/.env.local` sets `VITE_AI_ASSISTANT_URL=http://localhost:8091` and the
+  server allows the `:5173` origin, so the widget can talk to it directly. Locally
+  `RERANK_MODE=none` (the account throttles the cross-region Bedrock reranker,
+  which cost 6–26s of retries per turn for the RRF order it fell back to anyway);
+  `make floci-rerank` + `RERANK_MODE=local` runs the real cross-encoder instead.
+  `main.py` also **pre-warms the agent framework in a background thread** at
+  start-up and the service raises the turn budget to 120s: a cold first turn
+  imports ~6s of framework, which against the deployed 24s budget (sized for API
+  Gateway's 30s cap) answered *and* appended a `run.error` — the first thing a
+  developer saw.
 - **Tests are in CI.** `make test-ai-assistant` is a **named job** in
   `backend-tests.yml`, not part of `make test-unit` (that loop only walks
   `backend/services/*`, which is exactly how this suite went un-run).
