@@ -1,4 +1,4 @@
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { ShieldCheck, UserRound } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useTheme } from '../theme/ThemeProvider'
@@ -22,18 +22,24 @@ export function SelectViewPage() {
   const { view, available, chooseView } = useView()
   const { theme } = useTheme()
   const demo = useDemoMode()
+  const location = useLocation()
   const logoSrc = theme === 'light' ? '/white_logo.png' : '/dark_logo.png'
+
+  // Where the visitor was headed before the picker interrupted them (a citation
+  // opened while signed out, a bookmark). A fresh login always lands here, so
+  // without this a deep link is lost at the last hop.
+  const returnTo = (location.state as { returnTo?: string } | null)?.returnTo
 
   // The demo has no view picker.
   if (demo) return <Navigate to="/dashboard" replace />
 
   if (view !== null) {
-    return (
-      <Navigate
-        to={view === 'admin' ? '/admin/mcp-tools' : '/dashboard'}
-        replace
-      />
-    )
+    const home = view === 'admin' ? '/admin/mcp-tools' : '/dashboard'
+    // Only into the console they chose: sending an admin view to a user page (or
+    // the reverse) would bounce straight back out again.
+    const target =
+      returnTo && returnTo.startsWith('/admin') === (view === 'admin') ? returnTo : home
+    return <Navigate to={target} replace />
   }
 
   const options = OPTIONS.filter((option) => available.includes(option.id))

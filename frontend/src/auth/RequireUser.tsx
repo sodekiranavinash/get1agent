@@ -1,4 +1,4 @@
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useView } from './ViewProvider'
 import { useDemoMode } from './useDemoMode'
 
@@ -10,8 +10,21 @@ import { useDemoMode } from './useDemoMode'
 export function RequireUser() {
   const { view } = useView()
   const demo = useDemoMode()
+  const location = useLocation()
   if (demo) return <Outlet />
-  if (view === null) return <Navigate to="/select-view" replace />
+  if (view === null) {
+    // Carry the page they wanted through the picker: a fresh login always lands
+    // on it, so this is the last place a deep link can be lost.
+    return (
+      <Navigate
+        to="/select-view"
+        replace
+        state={{
+          returnTo: `${location.pathname}${location.search}${location.hash}`,
+        }}
+      />
+    )
+  }
   if (view !== 'user') return <Navigate to="/admin/mcp-tools" replace />
   return <Outlet />
 }

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { useEffect } from 'react'
 import { useAuth0 } from '@auth0/auth0-react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   BookOpen,
   Boxes,
@@ -214,14 +214,23 @@ export function LoginPage() {
   const { isLoading, isAuthenticated, loginWithRedirect, error } = useAuth0()
   const demo = useDemoMode()
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // A route that needs a session sends the page it refused here (see
+  // `RequireAuth`), so a citation opened while signed out still lands on the
+  // cited page once the visitor is through Auth0.
+  const returnTo = (location.state as { returnTo?: string } | null)?.returnTo
 
   // A signed-in visitor should never be stranded on the marketing landing —
   // send them straight to their workspace (admin vs user is resolved per role).
+  // Unless a guarded route sent them here: then the page they asked for wins, and
+  // that also covers the case where auth was still renewing when they clicked a
+  // citation and it resolved a moment later.
   useEffect(() => {
     if (!isLoading && !demo && isAuthenticated) {
-      navigate('/administration', { replace: true })
+      navigate(returnTo || '/administration', { replace: true })
     }
-  }, [isLoading, demo, isAuthenticated, navigate])
+  }, [isLoading, demo, isAuthenticated, navigate, returnTo])
 
   if (error) {
     return <AuthStatusScreen tone="error">{error.message}</AuthStatusScreen>
@@ -231,7 +240,9 @@ export function LoginPage() {
   // workspace, demo visitors can keep exploring, and everyone can sign in.
   const signIn = () => {
     exitDemoMode()
-    void loginWithRedirect(googleLoginOptions('/dashboard'))
+    // Signing in from the landing page itself carries nothing, and the workspace
+    // is the right default.
+    void loginWithRedirect(googleLoginOptions(returnTo || '/dashboard'))
   }
 
   const viewDemo = () => {
