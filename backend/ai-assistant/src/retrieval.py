@@ -34,6 +34,7 @@ from core.storage import Storage
 from retrieval.embedding.config import load_config
 from retrieval.embedding.embeddings import embed_texts
 from retrieval.layout import parent_key, query_terms
+from retrieval.rerank import rerank_candidates, rerank_mode
 from retrieval.s3_vectors import VectorMatch, vector_store
 from retrieval.term_index import expand_prefix, read_stats, read_term
 
@@ -52,6 +53,28 @@ BM25_K1 = float(os.environ.get("AI_ASSISTANT_BM25_K1", "1.2") or "1.2")
 BM25_B = float(os.environ.get("AI_ASSISTANT_BM25_B", "0.75") or "0.75")
 CACHE_TTL_SECONDS = int(os.environ.get("AI_ASSISTANT_RETRIEVAL_CACHE_TTL_SECONDS", "300") or "300")
 
+#: How many fused candidates reach the reranker. Reranking only reorders what it
+#: is given, so this is the recall ceiling: too small and the right passage never
+#: gets a chance to be promoted. One Bedrock Rerank call scores all of them.
+RERANK_CANDIDATES = int(os.environ.get("AI_ASSISTANT_RERANK_CANDIDATES", "24") or "24")
+
+
+def rerank_enabled() -> bool:
+    """Whether to rerank, on by default.
+
+    RRF produces a *fusion* score, not a relevance score, so the head of a fused
+    list is routinely not the best passage — the reranker is what fixes the
+    ordering the answer is actually built from. It is therefore on unless explicitly
+    disabled, and a reranker failure falls back to the RRF order rather than
+    changing what is retrieved.
+
+    Set ``AI_ASSISTANT_RERANK=0`` to skip it (offline work, or a reranker outage you
+    want to stop paying a timeout for). ``RERANK_MODE=none`` does the same at the
+    shared-module level.
+    """
+    raw = str(os.environ.get("AI_ASSISTANT_RERANK", "1") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
 
 class RetrievalError(RuntimeError):
     """Retrieval could not run (reported as a warning, never a hard failure)."""
@@ -68,6 +91,9 @@ class Passage:
     matched: str
     snippet: str
     score: float
+    #: The reranker's relevance score, when reranking ran. `None` means the order is
+    #: the RRF fusion order, which is worth being able to tell apart in a trace.
+    rerank_score: float | None = None
     doc_id: str = ""
     kb_id: str = ""
     page: int | None = None
@@ -75,7 +101,7 @@ class Passage:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "index": self.index,
             "title": self.title,
             "route": self.route,
@@ -89,6 +115,9 @@ class Passage:
             "kind": self.source,
             "contentType": "text/markdown",
         }
+        if self.rerank_score is not None:
+            payload["rerankScore"] = round(self.rerank_score, 6)
+        return payload
 
     def to_source(self) -> dict[str, Any]:
         """The ``sources[]`` entry the chat UI already knows how to render."""
@@ -267,14 +296,24 @@ def _fuse(
     return ordered[:limit]
 
 
-def _to_passages(
+def _hydrate(
     storage: Storage,
     scope: str,
     ordered: list[dict[str, Any]],
     query: str,
     *,
     allow_admin: bool = False,
+    limit: int | None = None,
 ) -> list[Passage]:
+    """Turn fused candidates into passages, in the order given.
+
+    ``limit`` bounds how many candidates are hydrated. Reranking needs the real
+    parent text to score, so a reranked search hydrates more than it returns — that
+    is the recall the reranker gets to work with, and it costs one batched parent
+    read rather than one per candidate.
+    """
+    if limit is not None:
+        ordered = ordered[: max(0, limit)]
     parent_ids = [
         entry["parentId"] for entry in ordered if entry.get("parentId")
     ][:MAX_PARENTS]
@@ -358,10 +397,63 @@ def _to_passages(
     return passages
 
 
-def _cache_key(query: str, top_k: int, audience: str) -> str:
+def rerank_passages(
+    query: str, passages: list[Passage], top_k: int
+) -> tuple[list[Passage], bool]:
+    """Reorder hydrated passages with the shared cross-encoder reranker.
+
+    Why this exists: RRF scores *rank agreement between two legs*, not relevance, so
+    a passage at the top of the fused list is frequently not the one that answers
+    the question. The reranker scores `(query, passage)` directly and is what the
+    answer's ordering — and therefore its citations — is actually built from.
+
+    Returns `(passages, applied)`. `applied` is False when reranking is off or the
+    reranker is unreachable, and the RRF order is returned untouched: the reranker
+    can reorder a search but must never break one.
+    """
+    if not rerank_enabled() or not passages:
+        return passages[:top_k], False
+
+    candidates = [
+        {
+            "content": passage.content,
+            # Carried through the shared reranker and read back out below; the
+            # module is deliberately generic and knows nothing about `Passage`.
+            "passage": passage,
+        }
+        for passage in passages
+    ]
+    ranked, applied = rerank_candidates(query, candidates, top_k)
+    if not applied:
+        return passages[:top_k], False
+
+    reordered: list[Passage] = []
+    for candidate in ranked:
+        passage = candidate.get("passage")
+        if passage is None:
+            continue
+        score = candidate.get("rerankScore")
+        if score is not None:
+            passage.rerank_score = float(score)
+        reordered.append(passage)
+    if not reordered:
+        # The reranker reported success but returned nothing usable; the safe move is
+        # the order we already trust.
+        return passages[:top_k], False
+
+    for position, passage in enumerate(reordered, start=1):
+        passage.index = position
+    return reordered, True
+
+
+def _cache_key(query: str, top_k: int, audience: str, *, rerank: bool = True) -> str:
     # The audience is part of the key: without it an admin-scoped answer could be
-    # served to a non-admin asking the same question.
-    return cache.cache_key("ai-assistant-search", query.strip().lower(), top_k, audience)
+    # served to a non-admin asking the same question. Reranking is part of it too,
+    # so turning the reranker off (or running with it on) never serves the other
+    # configuration's ordering from cache.
+    return cache.cache_key(
+        "ai-assistant-search", query.strip().lower(), top_k, audience, bool(rerank)
+    )
 
 
 def search(
@@ -385,7 +477,8 @@ def search(
         return [], {**diagnostic, "stage": "empty-query"}
 
     scope = settings.retrieval_scope()
-    key = _cache_key(text, top_k, audience)
+    wants_rerank = rerank_enabled()
+    key = _cache_key(text, top_k, audience, rerank=wants_rerank)
     if use_cache:
         cached = cache.get(key)
         if isinstance(cached, list) and cached:
@@ -453,9 +546,23 @@ def search(
             diagnostic["legErrors"] = errors
 
     fused = _fuse(semantic, lexical, max(top_k * 3, top_k))
-    passages = _to_passages(
-        storage, scope, fused, text, allow_admin=allow_admin
-    )[: max(1, top_k)]
+
+    # Reranking reorders candidates, so it needs more hydrated passages than the
+    # caller asked for: the best answer is often ranked below `top_k` by RRF and
+    # would otherwise never be considered. Without reranking, hydrate exactly what
+    # is returned and skip the extra parent reads.
+    hydrate = max(top_k, RERANK_CANDIDATES) if wants_rerank else top_k
+    candidates = _hydrate(
+        storage, scope, fused, text, allow_admin=allow_admin, limit=hydrate
+    )
+    # How much recall the reranker actually got to work with, which is what explains
+    # "the right page was in the index but not in the answer".
+    hydrated = len(candidates)
+    rerank_applied = False
+    if wants_rerank:
+        passages, rerank_applied = rerank_passages(text, candidates, top_k)
+    else:
+        passages = candidates[: max(1, top_k)]
 
     diagnostic.update(
         {
@@ -463,7 +570,13 @@ def search(
             "semantic": len(semantic),
             "lexical": len(lexical),
             "fused": len(fused),
+            "hydrated": hydrated,
             "returned": len(passages),
+            "rerank": {
+                "requested": wants_rerank,
+                "applied": rerank_applied,
+                "mode": rerank_mode(),
+            },
             "latencyMs": int((time.perf_counter() - started) * 1000),
             "scope": scope,
         }
