@@ -44,15 +44,46 @@ RULE_NAME = "get1agent-local-ingestion-s3-object-created"
 WATCHDOG_RULE_NAME = "get1agent-local-ingestion-watchdog"
 SCHEDULER_RULE_NAME = "get1agent-local-scheduler"
 STATE_MACHINE_NAME = "get1agent-local-ingestion"
-# Local embedding backend (real vectors, no Bedrock).
+# Local embedding backend. `bedrock` calls Amazon Titan through **real AWS** —
+# the same model production uses — and `local` calls the Ollama container, which
+# is the offline fallback. Floci's bedrock-runtime is a stub that rejects the
+# embedding APIs, so `bedrock` mode needs real credentials (the ~/.aws mount the
+# compose stack already provides) exactly like the Labs do.
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 LOCAL_EMBED_MODEL = os.environ.get("LOCAL_EMBED_MODEL", "mxbai-embed-large")
-# Embedding backend: local (Ollama) | bedrock. Floci defaults to local vectors.
-EMBED_MODE = os.environ.get("EMBED_MODE", "local").strip().lower()
+EMBED_MODE = os.environ.get("EMBED_MODE", "bedrock").strip().lower()
+BEDROCK_REGION = os.environ.get("BEDROCK_REGION", "ap-south-1")
+BEDROCK_EMBED_MODEL = os.environ.get("TEXT_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 # Rerank backend: local (TEI) | none | bedrock. Rerank is opt-in per request.
 RERANK_MODE = os.environ.get("RERANK_MODE", "none").strip().lower()
 # Local cross-encoder reranker (TEI), mirrors Bedrock Rerank.
 RERANK_URL = os.environ.get("LOCAL_RERANK_URL", "http://reranker:80/rerank")
+
+
+def embedding_env() -> dict[str, str]:
+    """The embedding environment for one Lambda, per ``EMBED_MODE``.
+
+    One place, because the two modes need **different** variables and the wrong
+    pairing fails at the first call: handing `mxbai-embed-large` to Bedrock is a
+    "model not found", and a Titan id to Ollama is the same. Bedrock also needs its
+    own endpoint pin — Floci sets a global `AWS_ENDPOINT_URL` on every Lambda
+    container, and only a service-specific override keeps model calls off the stub.
+    """
+    if EMBED_MODE == "local":
+        return {
+            "EMBED_MODE": "local",
+            "LOCAL_EMBED_URL": OLLAMA_URL,
+            "LOCAL_EMBED_MODEL": LOCAL_EMBED_MODEL,
+            "TEXT_EMBED_MODEL": LOCAL_EMBED_MODEL,
+        }
+    endpoint = os.environ.get("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "").strip()
+    return {
+        "EMBED_MODE": "bedrock",
+        "TEXT_EMBED_MODEL": BEDROCK_EMBED_MODEL,
+        "BEDROCK_REGION": BEDROCK_REGION,
+        "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": endpoint
+        or f"https://bedrock-runtime.{BEDROCK_REGION}.amazonaws.com",
+    }
 
 AUTH_ISSUER = os.environ.get("AUTH_ISSUER", "https://get1agent.us.auth0.com/")
 AUTH_AUDIENCE = os.environ.get("AUTH_AUDIENCE", "https://api.get1agent.com")
@@ -891,10 +922,7 @@ def main() -> int:
         **ddb_env,
         "S3_BUCKET": BUCKET,
         "S3_REGION": REGION,
-        "EMBED_MODE": EMBED_MODE,
-        "LOCAL_EMBED_URL": OLLAMA_URL,
-        "LOCAL_EMBED_MODEL": LOCAL_EMBED_MODEL,
-        "TEXT_EMBED_MODEL": LOCAL_EMBED_MODEL,
+        **embedding_env(),
         "VECTOR_STORE": "local",
         # Best-effort cache for embeddings + search (DynamoDB TTL).
         "CACHE_BACKEND": os.environ.get("CACHE_BACKEND", "dynamodb"),
@@ -1002,7 +1030,9 @@ def main() -> int:
         "S3_BUCKET": BUCKET,
         "S3_REGION": REGION,
         "VECTOR_STORE": "local",
-        "EMBED_MODE": EMBED_MODE,
+        # The **query** embedder: it has to match whatever wrote the corpus, so it
+        # comes from the same helper the ingestion workers use.
+        **embedding_env(),
         "TRACE_LINK_SECRET": os.environ.get("TRACE_LINK_SECRET", ""),
         # Evaluation lab: run agents server-side via service auth. Locally the
         # AgentCore runtime is not emulated, so agent-task runs are unavailable.

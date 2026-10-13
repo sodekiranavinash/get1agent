@@ -258,10 +258,14 @@ services:
       S3_BUCKET: ${S3_BUCKET:-get1agent-local}
       S3_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
       # Retrieval, configured exactly as the host-side corpus ingest does it
-      # (tools/ai-assistant-knowledge/local_env.py): local embeddings, local
-      # vector store, and no cache — the DynamoDB cache adds latency locally and
-      # hides whether retrieval actually worked.
-      EMBED_MODE: local
+      # (tools/ai-assistant-knowledge/local_env.py): the local vector store, and no
+      # cache — the DynamoDB cache adds latency locally and hides whether retrieval
+      # actually worked. The embedding mode follows the stack's switch (`EMBED_MODE`
+      # in .env: `bedrock` = Titan on real AWS, `local` = the Ollama container), so
+      # this service and the ingestion workers cannot disagree about which model
+      # wrote the vectors.
+      EMBED_MODE: ${EMBED_MODE:-bedrock}
+      # Read only when EMBED_MODE=local.
       LOCAL_EMBED_URL: http://ollama:11434
       VECTOR_STORE: local
       CACHE_BACKEND: none

@@ -39,9 +39,17 @@ LOCAL_ENV: dict[str, str] = {
     "S3_ENDPOINT_URL": "http://localhost.floci.io:4566",
     # Docker cannot resolve virtual-host bucket names, so use path style.
     "S3_ADDRESSING_STYLE": "path",
-    # Embeddings run on the local Ollama container (`EMBED_MODE=local`).
-    "EMBED_MODE": "local",
+    # Embeddings: **the same mode the stack is configured with** (`EMBED_MODE` in
+    # .env), because the corpus ingest and the assistant have to agree on which
+    # model wrote the vectors — a Titan query against Ollama vectors (or the
+    # reverse) retrieves nothing, with no error to explain it. `bedrock` is the
+    # default here: it is the production model, it is faster than a local model on
+    # a small machine, and the credentials are already required for the answer's
+    # own Bedrock calls. Set EMBED_MODE=local in the environment to ingest offline.
+    "EMBED_MODE": os.environ.get("EMBED_MODE") or "bedrock",
+    "TEXT_EMBED_MODEL": os.environ.get("TEXT_EMBED_MODEL") or "amazon.titan-embed-text-v2:0",
     "VECTOR_STORE": "local",
+    # Read only when EMBED_MODE=local.
     "LOCAL_EMBED_URL": "http://localhost:11434",
     # The DynamoDB cache adds latency locally and hides whether retrieval works.
     "CACHE_BACKEND": "none",
