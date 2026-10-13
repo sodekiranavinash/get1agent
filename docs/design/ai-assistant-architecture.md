@@ -41,29 +41,24 @@ does not appear in the agent-runtime, knowledge or data diagrams.
               ┌──────────────────────── Browser (any page) ─────────────────────────┐
               │  <AiAssistantLauncher/>  fixed bottom-right · opens <AiAssistantDialog/> (not a page) │
               └───────────────┬───────────────────────────────────┬───────────────────┘
-                              │ guest                             │ signed in
-                              │ POST /v1/ai-assistant/ask                  │ POST /v1/ai-assistant/session
+                              │ signed out (guest)                │ signed in
+                              │ POST /v1/ai-assistant/guest        │ POST /v1/ai-assistant/ask
                               ▼                                   ▼
                   ┌───────────────────────┐            ┌───────────────────────────┐
                   │ API Gateway (HTTP)    │            │ API Gateway (HTTP)        │
                   │ NONE auth · IP throttle│            │ Auth0 JWT · route throttle│
                   └───────────┬───────────┘            └─────────────┬─────────────┘
-                              ▼                                      ▼
-                  ┌───────────────────────┐            ┌───────────────────────────┐
-                  │ ai-assistant Lambda      │            │ ai-assistant control plane │
-                  │ Function URL          │            │ RunMicrovm + auth token   │
-                  │ RESPONSE_STREAM       │            └─────────────┬─────────────┘
-                  │ stateless · no tools  │                          ▼
-                  └───────────┬───────────┘            ┌───────────────────────────┐
-                              │                        │ ai-assistant-agent (Lambda MicroVM)│
-                              │                        │ FastAPI · :8080 · SSE     │
-                              │                        │ LangGraph Deep Agent      │
-                              │                        └─────────────┬─────────────┘
                               └──────────────┬───────────────────────┘
                                              ▼
-                        backend/ai-assistant/ai-assistant/  — the shared package
+                              ┌───────────────────────────────┐
+                              │ ai-assistant Lambda (one zip) │
+                              │ handler.py · buffered SSE     │
+                              │ identity from verified claims │
+                              └───────────────┬───────────────┘
+                                              ▼
+                        backend/ai-assistant/src/  — the shared package
         classifier · retrieval · deep_links · frames · prompts · conversations
-        metrics · settings · resolve
+        traces · metrics · settings · limits · identity
                                              │
         ┌────────────────┬───────────────────┼──────────────────┬─────────────────┐
         ▼                ▼                   ▼                  ▼                 ▼
@@ -74,6 +69,16 @@ does not appear in the agent-runtime, knowledge or data diagrams.
                                                            AIEVAL# · RATE#
 ```
 
+The two routes reach the **same function**. The only difference between them is
+whether API Gateway ran the Auth0 authorizer first: on `/ask` the handler reads
+`requestContext.authorizer.jwt.claims`, and on `/guest` there are no claims, so the
+handler hashes the caller's IP into a rate-limit bucket instead. A `userId` in the
+request body is ignored on both.
+
+The response is **buffered**. API Gateway HTTP APIs cannot stream and cap an
+integration at 30s, so the Lambda assembles the run and returns it as one SSE body;
+the widget parses it frame by frame exactly as it parsed a live stream.
+
 ---
 
 ## 3. Components
@@ -82,14 +87,12 @@ does not appear in the agent-runtime, knowledge or data diagrams.
 |---|---|---|---|
 | Widget | `frontend/src/components/ai-assistant/` | browser | Launcher, dialog, transcript, example chips, feedback, route chips |
 | Widget client | `frontend/src/lib/ai-assistant.ts` | browser | The only place that branches guest vs signed-in; SSE consumption |
-| Shared package | `backend/ai-assistant/ai-assistant/` | imported by both backends | Classifier, retrieval, deep links, prompts, frames, persistence, metrics, settings |
-| Agent service | `backend/ai-assistant/main.py` | Lambda MicroVM (ARM64, :8080) | FastAPI: `POST /invocations` (SSE), `GET /ping`, `POST /feedback` |
-| Control plane | `backend/services/ai-assistant/control-plane/` | Lambda (Node, API Gateway) | Launches the MicroVM and mints its ingress token |
-| MicroVM proxy | `backend/services/ai-assistant/microvm/` | Lambda MicroVM | Verifies the token, forwards SSE (mirrors `agent-run/microvm`) |
-| Guest service | `backend/services/ai-assistant/guest/` | Lambda + Function URL (`RESPONSE_STREAM`) | Stateless guest answers |
+| Shared package | `backend/ai-assistant/src/` | bundled into the Lambda | Classifier, retrieval, deep links, prompts, frames, persistence, metrics, settings, identity, limits |
+| Lambda | `backend/ai-assistant/handler.py` | Lambda (Python 3.13, API Gateway) | Both routes: gateway claims for `/ask`, IP hash for `/guest`; runs the turn and returns buffered SSE |
+| Local server | `backend/ai-assistant/main.py` + `src/local_auth.py` | developer machine (`:8091`) | Dev-only ASGI shim: builds the gateway event, verifies the Auth0 JWT (JWKS), calls the same `lambda_handler` |
 | Admin API | `backend/services/admin/admin-console/src/ai-assistant.py` | Lambda (admin-console) | `/v1/admin/ai-assistant/*` |
 | Corpus tools | `tools/ai-assistant-knowledge/` | CI / developer | Generate, validate, upload, drift-check |
-| Infra | `infra/terraform/modules/ai_assistant_runtime/` | Terraform | ECR, MicroVM image, control plane, guest Lambda + URL, routes |
+| Infra | `infra/terraform/envs/prod/backend.tf` (`module "ai_assistant"`) | Terraform | One Lambda zip and its two API Gateway routes |
 
 ---
 
@@ -98,54 +101,54 @@ does not appear in the agent-runtime, knowledge or data diagrams.
 ### 4.1 Guest
 
 1. The dialog POSTs the **full conversation** plus the entry route to
-   `/v1/ai-assistant/ask`.
+   `/v1/ai-assistant/guest`.
 2. API Gateway applies the route throttle and forwards without authorizing (the
    guest route is deliberately `NONE`).
-3. The Lambda hashes the caller IP (`sha256(salt + ip)`) and checks a fixed-window
-   counter in DynamoDB (`RATE#ai-assistant` / `W#<window>`), returning `429` with
-   `Retry-After` when the cap is hit.
+3. With no verified claims, the Lambda hashes the caller IP
+   (`sha256(salt + ip)`) and checks a fixed-window counter in DynamoDB
+   (`RATE#ai-assistant` / `W#<window>`), returning `429` with `Retry-After` when
+   the cap is hit.
 4. The classifier runs. An off-topic or unsafe question returns the nudge plus
    tappable examples — **no retrieval and no answer model call**.
-5. On-topic questions run a trimmed Deep Agents loop: **no tools**, retrieval from
-   the platform scope only, answer from the retrieved passages.
-6. SSE frames stream straight back through the Function URL. **Nothing is
-   persisted** — no transcript, no trace, no feedback. Only aggregate metrics are
-   emitted.
+5. On-topic questions answer from the platform scope with the **direct** path: no
+   tools and no agent graph, because a guest has no tools to call and nothing to
+   plan against.
+6. The frames are returned as one buffered SSE body. **Nothing is persisted** — no
+   transcript, no trace, no feedback. Only aggregate metrics are emitted.
 
 ### 4.2 Signed-in
 
-1. The dialog POSTs `/v1/ai-assistant/session`. The Auth0 JWT authorizer validates at the
-   gateway; the control-plane Lambda resolves the verified `sub` to the internal
-   `userId` and passes it to the MicroVM when booting it, so identity never comes
-   from the browser body.
-2. The control plane returns `{ endpoint, token, expiresAt }`; the browser caches
-   it and reuses it while it has margin left (the same pattern as agent runs), so
-   the measured **2.28 s** cold start is paid once per session, not per message.
-3. The browser POSTs the full transcript to the MicroVM's `/invocations`, which
-   verifies its own ingress token, resolves the user, and proxies to
-   `POST /invocations` on the FastAPI app.
-4. The full run executes: classifier → retrieval → tools → answer, streamed.
-5. After the answer: the turn is appended to the S3 transcript, the conversation
+1. The dialog POSTs `/v1/ai-assistant/ask`. API Gateway's Auth0 JWT authorizer
+   validates the token and passes the **verified claims** to the Lambda in
+   `requestContext.authorizer.jwt.claims`, so identity never comes from the
+   browser body. There is no session to establish first: the handler resolves the
+   `sub` to the internal `userId` on the request itself.
+2. The full run executes: classifier → retrieval → tools → answer.
+3. A conversation is created up front (when the turn did not carry one) so the
+   answer has somewhere to land, and `run.started.sessionId` carries its id back
+   to the widget.
+4. After the answer: the turn is appended to the S3 transcript, the conversation
    metadata item is touched, and one trace object plus a small index item are
-   written. All three are best-effort — a persistence failure never costs the
-   user an answer.
+   written. All of it is best-effort — a persistence failure never costs the user
+   an answer.
 
 ### 4.3 Turn sequence (both paths)
 
 ```
-browser ─ POST (full transcript) ─▶ ingress
-ingress ─ settings read (30s cache) ─▶ AI Assistant settings item
-ingress ─ kill switch / rate limit
-ingress ─ run.started ─▶ browser
-ingress ─ classifier (rules → model) ─▶ Bedrock
-   ├ off_topic ─ ai-assistant.intent + examples ─▶ browser   (turn ends, ~300 ms, no model answer)
+browser ─ POST (full transcript) ─▶ API Gateway (authorizer on /ask only)
+gateway ─ verified claims (or none) ─▶ handler.lambda_handler
+handler ─ settings read (30s cache) ─▶ AI Assistant settings item
+handler ─ kill switch / rate limit
+handler ─ run.started ─▶ (buffered)
+handler ─ classifier (rules → model) ─▶ Bedrock
+   ├ off_topic ─ ai-assistant.intent + examples ─▶ buffered   (turn ends, ~300 ms, no model answer)
    └ platform
-        ingress ─ tool.start(search_platform_docs) ─▶ browser
-        ingress ─ hybrid search: S3 Vectors ∥ BM25 → RRF → (rerank) → parents
-        ingress ─ tool.result + sources[n] ─▶ browser
-        ingress ─ text… (streamed tokens) ─▶ browser
-ingress ─ run.completed + usage ─▶ browser
-ingress ─ trace + transcript + EMF metrics   (signed-in only: persisted)
+        handler ─ hybrid search: S3 Vectors ∥ BM25 → RRF → rerank → parents
+        handler ─ tool.start / tool.result + sources[n]
+        handler ─ text… (streamed tokens from the model, accumulated)
+handler ─ run.completed + usage
+handler ─ transcript + trace + EMF metrics   (signed-in only)
+handler ─ one SSE body ─▶ browser            (buffered: the gateway cannot stream)
 ```
 
 ---
@@ -246,8 +249,13 @@ AI Assistant-specific UI code:
 | `tool.result.sources` | Numbered passages with `route`, `docUrl`, `title` |
 | `run.completed` / `run.error` | Terminal frames, with usage |
 
-Streaming is the default on both paths. A non-streaming Lambda fallback exists as
-a degraded mode if MicroVM capacity is unavailable.
+Frames are identical on both paths and **delivered buffered**: the model still
+streams into the Lambda token by token (so `ttftMs` is real), but API Gateway
+cannot stream, so the run is assembled and returned as one SSE body that the
+widget parses frame by frame. The trade is deliberate — a 30s integration cap with
+no streaming is the price of removing the MicroVM, and `AI_ASSISTANT_TURN_BUDGET_SECONDS`
+(default 24) turns a near-miss into a renderable `run.error` frame instead of a 504
+with no frames at all.
 
 ---
 
@@ -324,7 +332,7 @@ from `/admin/ai-assistant`.
 | Feedback | The feedback table (question, answer, sources, verdict, model, latency, cost) with filters and export |
 | Evaluations | Run the AI Assistant set, run history, per-metric trends, per-case judge reasoning |
 | Traces | Latest runs, latency and cost distributions, full trace drill-down |
-| Knowledge | Corpus documents, last ingest time, per-document status, re-index trigger |
+| Knowledge | Corpus documents, last ingest time, per-document status, **Re-ingest** |
 
 All routes require the admin role; every mutation records `updatedBy`/
 `updatedAt`, and the kill switch is audited.
@@ -333,21 +341,48 @@ All routes require the admin role; every mutation records `updatedBy`/
 
 ## 12. Deployment
 
-- **Image**: `backend/ai-assistant/` builds an ARM64 container from a frozen lockfile
-  (LangChain Deep Agents + LangGraph + `langchain-aws`). It is a container, not a
-  Lambda zip, so the dependency size is not a constraint.
-- **Infra**: `infra/terraform/modules/ai_assistant_runtime/` creates the ECR repository
-  (with the same retention policy as the agent runtime), the MicroVM image, the
-  control-plane Lambda, the guest Lambda and its `RESPONSE_STREAM` Function URL,
-  and both API Gateway routes.
-- **Registry**: `ai-assistant` and `ai-assistant` are registered in
-  `backend/registry.json` under the `ai-assistant` group, so the existing deploy script and
-  Backend workflow pick them up with no new tooling.
-- **Local**: `AI_ASSISTANT_MODE=local` runs the agent on `:8091`; the guest path runs as a
-  plain local Lambda handler; `VECTOR_STORE=local` and `EMBED_MODE=ollama` keep
-  the whole loop offline.
-- **CI**: a new `ai-assistant` group checkbox for Lambda code, a corpus drift check on
-  docs/navigation changes, and the AI Assistant evaluation set as a deploy gate.
+- **Artifact**: `backend/ai-assistant/` builds a **Lambda zip** (`make -C
+  backend/ai-assistant package`). The agent framework is bundled — it is the
+  product — while what the Lambda runtime already provides is dropped: `boto3`,
+  `botocore`, `s3transfer`, `jmespath` (~28 MB of dead weight), plus
+  `fastapi`/`uvicorn`/`starlette`, which existed only for the container's ASGI
+  server. Measured: **~21 MB zipped / 81 MB unzipped**, against Lambda's 50 MB /
+  250 MB limits.
+- **Infra**: one `module "ai_assistant"` in `infra/terraform/envs/prod/backend.tf`
+  plus two routes in `api_gateway.tf`: `/ask` (`JWT`, throttle 20/10) and `/guest`
+  (`NONE`, throttle 4/2). There is **no Function URL** and therefore no session
+  secret to mint or verify, and no MicroVM/ECR module.
+- **Timeout**: the Lambda's 30 s matches the API Gateway integration ceiling
+  exactly. A mismatch is the worst case — the gateway returns 504 while the Lambda
+  keeps running, so you pay for an answer nobody receives.
+- **Registry**: `ai-assistant` is registered in `backend/registry.json` under the
+  `ai-assistant` group, so the existing deploy script and Backend workflow pick it up
+  with no new tooling.
+- **CI**: `make test-ai-assistant` runs as a **named job** in
+  `backend-tests.yml` (it is not under `backend/services/*`, so the per-lambda loop
+  in `make test-unit` cannot reach it — which is how it previously went un-run), plus a
+  corpus drift check on docs/navigation changes and the evaluation set as a deploy gate.
+
+### 12.1 Local development
+
+`make ai-assistant-local-agent` serves `:8091` from `backend/ai-assistant/main.py`,
+a small ASGI server whose only job is translation: it builds the API Gateway
+payload-format-2.0 event and calls the **same `handler.lambda_handler`** the
+deployed function runs, so the guest route, the IP-hash rate limit and the
+buffered SSE body are the production code paths rather than approximations.
+
+Because it stands in for API Gateway, it also inherits the gateway's one
+responsibility — authorization. It verifies the browser's Auth0 token itself
+(`src/local_auth.py`: RS256 signature against the tenant JWKS, then `iss`, `aud`
+and `exp`), and an unverifiable or missing token on `/ask` gets a `401`. The
+check **moves** for local development; it is never removed, and a `userId` in the
+request body is still ignored. Guests need no setup at all.
+
+`fastapi`/`uvicorn` are a dev dependency group and the Makefile's
+`RUNTIME_EXCLUDE` subtracts them from the Lambda zip, so local tooling costs the
+deploy nothing. `frontend/.env.local` sets
+`VITE_AI_ASSISTANT_URL=http://localhost:8091`; the server allows the `:5173`
+origin, so the widget talks to it directly.
 
 ---
 
@@ -356,7 +391,8 @@ All routes require the admin role; every mutation records `updatedBy`/
 | Choice | Reason |
 |---|---|
 | Separate service, not a package inside the agent runtime | Isolates a second framework (LangChain/LangGraph) from Strands, so neither can break the other; the integration surface is only the SSE frames, the DynamoDB keys and the retrieval package |
-| Lambda MicroVM for signed-in, plain Lambda for guests | API Gateway HTTP APIs **cannot stream** and cap an integration at 30 s; a guest needs no tools or state, so a streaming Function URL is simpler and cheaper, while a signed-in session benefits from a reused, isolated MicroVM |
+| One Lambda behind two API Gateway routes | Identity is the gateway's job, so there is no session token to mint, forward or verify and nothing to keep in sync between two components. A guest is the same engine with `is_guest=True`, which makes "nothing is persisted for a guest" structural rather than a conditional |
+| Buffered response instead of streaming | API Gateway HTTP APIs cannot stream and cap an integration at 30 s. Removing the MicroVM costs the live token-by-token display; the frames, `ttftMs` and the work log are unchanged, and a soft turn budget keeps a slow run renderable |
 | Reserved `platform` scope instead of a new vector store | Reuses hybrid search, rerank, small-to-big hydration, the exact cache, the semantic cache and single-flight — no new retrieval code to maintain |
 | Generated, committed corpus instead of a crawler | Deterministic, reviewable in a PR, drift-checked in CI, and no authenticated crawl harness to operate |
 | Read-only agent, no shell, no subagents | A support widget must answer in seconds; the harness's planning and context middleware are used, its delegation and filesystem-write middleware are deliberately declined |

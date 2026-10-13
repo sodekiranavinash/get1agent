@@ -17,10 +17,9 @@ backend/
   services/ingestion/  ingestion-{dispatcher,extract,embed,index,mark-failed,watchdog}
   services/scheduler/  scheduled agent/workflow runs
   services/agent-run/  AgentCore control-plane Lambda + MicroVM proxy
-  services/ai-assistant/       AI Assistant control-plane Lambda + MicroVM proxy
   services/integration-tests/   moto + in-memory S3 integration tests
   agents/              AgentCore runtime (agentflow: single-agent; workflow: multi-agent)
-  ai-assistant/                 AI Assistant agent service (LangChain Deep Agents) + its guest Lambda
+  ai-assistant/                 AI Assistant Lambda (LangChain Deep Agents) + src/* — one zip, two routes
   packages/            shared modules: core, data, retrieval, ingestion
 infra/                 Terraform, deploy scripts, local Floci stack
 ```
@@ -276,12 +275,21 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   Parents are deduplicated per document/page.
 - Default child size is **512 tokens** with 64 overlap (config default in
   `packages/retrieval/.../embedding/config.py`), so children fit every embedder window.
-- **Rerank is opt-in** (`rerank: true`) and never runs unless requested.
-  `RERANK_MODE=bedrock` (the default) calls **Bedrock Rerank**
+- **Rerank is one shared implementation** (`retrieval/rerank.py`), used by both
+  `knowledge-mcp` and AI Assistant so the two cannot rank differently. In
+  `knowledge-mcp` it is **opt-in** (`rerank: true`) and never runs unless
+  requested; AI Assistant reranks **by default** (`AI_ASSISTANT_RERANK=0` to turn
+  it off), because there the fused order is what the answer and its citations are
+  built from. `RERANK_MODE=bedrock` (the default) calls **Bedrock Rerank**
   (`amazon.rerank-v1:0` in `us-west-2` — it is not offered in ap-south-1, so the
   call is cross-region); `RERANK_MODE=local` calls a HuggingFace TEI cross-encoder
-  (`reranker` container, `POST /rerank`); `none` skips it. If the reranker is
-  unreachable the RRF order is returned instead of failing.
+  (`reranker` container, `POST /rerank`, `--profile local-rerank` in the local
+  stack); `none` skips it. If the reranker is unreachable the RRF order is
+  returned instead of failing.
+  - The inline-document enum is **`INLINE`**, not `INLINE_DOCUMENT`. The wrong
+    value fails validation on every call, and because a reranker failure must
+    degrade rather than raise, the only symptom is that ranking is never applied —
+    `tests/test_rerank_bedrock.py` and the integration `test_rerank.py` pin it.
 - **Identity is passed in the event** (`userId`, the internal UUID) for direct
   invokes, or resolved from the JWT `sub` for HTTP (via the `SUB#<sub>` item).
 - **Each MCP server is its own Lambda** (`awslabs.mcp-lambda-handler`,
@@ -768,22 +776,30 @@ docs** — it has its own space on purpose.
   integration surface is only the SSE frame contract, the DynamoDB keys and the
   shared `retrieval` package. LangChain is imported **inside functions**, never at
   module scope, so one shared package serves both the container and a slim Lambda.
-- **Two ingress paths, one engine.**
-  - **Signed-in** — `POST /v1/ai-assistant/session` (Auth0 JWT at the gateway) → the
-    `ai-assistant` control plane resolves `sub` → `userId` and **signs a session
-    token** (HMAC) → launches the **AI Assistant MicroVM** → the browser streams SSE from
-    it. Sessions are reused, so the ~2.3 s MicroVM start is paid once.
-  - **Guest** — `POST /v1/ai-assistant/badge` (NONE auth, throttled hard) → the same
-    control plane applies a per-IP counter, signs a **guest badge** (the same
-    token with `guest: true`) and returns the MicroVM ingress, in one round trip.
-    Nothing a guest does is stored.
-  - `backend/ai-assistant/handler.py` is also a **standalone guest Lambda** (a Function URL
-    in `RESPONSE_STREAM` mode) for a deployment that wants guests served without a
-    MicroVM. Its zip excludes the agent framework; `tests/test_guest_packaging.py`
-    fails the build if that regresses.
-- **Identity is never taken from the request.** The agent service verifies the
-  HMAC on the token the control plane minted (cross-language contract, pinned by
-  `test_ai_assistant_token_contract.py`). A `userId` in a request body is ignored.
+- **One Lambda, two API Gateway routes.**
+  - **Signed-in** — `POST /v1/ai-assistant/ask` (Auth0 JWT at the gateway). The
+    handler reads the gateway's **verified claims** from
+    `requestContext.authorizer.jwt.claims`, resolves `sub` → `userId` and runs the
+    turn. There is no session token to mint or verify and no second component to
+    keep in sync; a `userId` in the body is ignored.
+  - **Guest** — `POST /v1/ai-assistant/guest` (NONE auth, throttled 4/2). With no
+    claims, the handler hashes the caller's IP (`sha256(salt + ip)`) into a
+    rate-limit bucket. Same engine with `is_guest=True`, **nothing persisted** —
+    which is what makes the guest path stateless.
+  - **The response is buffered.** API Gateway HTTP APIs cannot stream and cap an
+    integration at 30 s, so the Lambda assembles the run and returns it as one SSE
+    body; the widget parses it frame by frame. The Lambda's timeout matches the
+    gateway ceiling exactly, and `AI_ASSISTANT_TURN_BUDGET_SECONDS` (24) turns a
+    near-miss into a renderable `run.error` frame rather than a 504 with no frames.
+  - The zip **bundles** the agent framework (it is the product) and drops what the
+    runtime provides (`boto3`/`botocore`/`s3transfer`/`jmespath`, plus
+    `fastapi`/`uvicorn`/`starlette`): ~21 MB zipped / 81 MB unzipped.
+    `tests/test_lambda_imports.py` pins that `handler` and the guest modules never
+    import the framework at module scope, so a guest turn keeps a short cold start.
+- **Identity is never taken from the request.** The only trusted identity is the
+  gateway's verified claims; `src/identity.py` derives a guest bucket from a hashed
+  IP and nothing else. A `userId` in a request body is ignored on both routes
+  (`tests/test_handler_routes.py` pins this).
 - **Intent classification is its own component with its own model**
   (`ai-assistant/classifier.py`, default `zai.glm-4.7-flash`): a rules stage that costs
   nothing, then one strict-JSON call. It **fails open** to `platform`, so a
@@ -794,6 +810,14 @@ docs** — it has its own space on purpose.
   the `idx-platform` S3 Vectors index. AI Assistant implements RRF fusion over
   `retrieval.s3_vectors` + `retrieval.term_index` and hydrates parents, so the
   exact cache, semantic cache and BM25 behave as they do for a user's KB.
+  - **Reranking is on by default** (`AI_ASSISTANT_RERANK=0` disables it), using the
+    shared `retrieval.rerank`. After fusion it hydrates up to
+    `AI_ASSISTANT_RERANK_CANDIDATES` (24) parents so the reranker has real recall to
+    work with, then reorders and renumbers — because RRF scores agreement between
+    two legs, not relevance, and the ordering is what the answer and its `[n]`
+    citations are built from. `rerank.applied` and the per-passage `rerankScore`
+    ride on the diagnostic, so a trace shows whether ranking was actually applied.
+    A reranker failure returns the RRF order (availability over precision).
 - **The corpus is generated from the repository** and ingested through the normal
   pipeline — `tools/ai-assistant-knowledge/` reads `frontend/src/content/docs.ts`, the real
   route table (nested routes included), the sidebar registries and the **enforced
@@ -820,30 +844,53 @@ docs** — it has its own space on purpose.
   trace list or the agent feedback table. Transcripts and trace trees are S3
   objects; only small metadata items are in DynamoDB. Guests are never persisted.
 - **Rate limiting is layered**, cheapest first: API Gateway route throttles
-  (`/v1/ai-assistant/badge` burst 4/rate 2, `/v1/ai-assistant/session` 10/5), then a per-caller
+  (`/v1/ai-assistant/guest` burst 4/rate 2, `/v1/ai-assistant/ask` 20/10), then a per-caller
   fixed-window counter (`core.ratelimit`, kind `ai-assistant-hour`/`ai-assistant-day`), then the
-  in-agent turn cap. Every model call also passes `core.ratelimit_bedrock`.
+  in-agent turn cap and the 24 s soft turn budget. Every model call also passes
+  `core.ratelimit_bedrock`.
 - **Admin page** `/admin/ai-assistant` (routes `GET|POST /v1/admin/ai-assistant`, plus owner-scoped
-  `/feedback`, `/traces`, `/conversations`, `/evaluations`, `/knowledge` in
-  `backend/services/admin/admin-console/src/ai-assistant.py`): the kill switch, the four
+  `/feedback`, `/traces`, `/conversations`, `/evaluations` and
+  `GET|POST /knowledge` + `POST /knowledge/reingest` in
+  `backend/services/admin/admin-console/src/ai_assistant.py`): the kill switch, the four
   model pickers with their measured latency, the limits, feedback, traces and the
   corpus status. Settings live on `PLATFORM#SETTINGS` / `#AI_ASSISTANT`, cached 30 s, so a
   change applies without a redeploy.
+  - **Re-ingest** starts the **same ingestion state machine** the S3 → EventBridge →
+    SQS dispatcher starts, with the same input shape (`userId`/`knowledgeBaseId`/
+    `documentId`/`fileName`/`s3Key`/`contentHash`), so the button and a real
+    re-upload run identical code. The console gets `states:StartExecution` via the
+    module's `step_functions_arns` and reads the ARN from
+    `INGESTION_STATE_MACHINE_ARN`; unset means a clear `503` rather than a crash.
+    Execution names carry a fresh token per click, because a STANDARD state machine
+    **ignores a repeated name for 90 days** — reusing one would silently no-op.
+    `{documentId}` targets a single document; omitting it re-ingests the corpus.
 - **Evaluations** are a committed set of 81 cases
   (`tools/ai-assistant-knowledge/eval/ai-assistant-eval.jsonl`) across six kinds — answerable, find,
   refuse, boundary, unknown, multiturn — each naming the page a correct answer must
   cite, and validated against the real route table at generation time.
 - **Metrics** use CloudWatch EMF under `get1agent/ai-assistant` (`ai-assistant/metrics.py`), and cost
   is attributed through `core.usage` so AI Assistant's numbers match billing.
-- **Infra**: `infra/terraform/modules/ai_assistant_runtime/` (ECR + MicroVM image + build
-  and runtime roles), `ai-assistant` and `ai-assistant` registered in
-  `backend/registry.json` under the `ai-assistant` group, and
-  `bash infra/aws/deploy-ai-assistant.sh` to build/push/apply. The Lambda module gained
-  optional **Function URL** support (`create_function_url`,
-  `function_url_invoke_mode`) for the guest streaming ingress.
-- **Local**: `AI_ASSISTANT_MODE=local` runs the agent on `:8091`
-  (`VITE_AI_ASSISTANT_URL=http://localhost:8091`), and `VITE_AI_ASSISTANT_MICROVM=false` makes the
-  widget stream straight from it.
+- **Infra**: one `module "ai_assistant"` in
+  `infra/terraform/envs/prod/backend.tf` (the Lambda zip, 1024 MB, 30 s timeout
+  matched to the gateway ceiling) plus its two routes in `api_gateway.tf`;
+  `ai-assistant` registered in `backend/registry.json` under the `ai-assistant`
+  group. There is **no Function URL, no session secret, no control plane and no
+  MicroVM/ECR module**. Build the zip with `make -C backend/ai-assistant package`.
+- **Local**: `make ai-assistant-local-agent` runs `backend/ai-assistant/main.py` —
+  a small ASGI server on `:8091` that **calls the same `handler.lambda_handler`**
+  production runs, by synthesising the API Gateway payload-format-2.0 event the
+  handler already expects. It is the local stand-in for API Gateway, so it also
+  owns the authorizer: it verifies the browser's Auth0 token itself
+  (`src/local_auth.py`, stdlib-only RS256 + JWKS) and rejects an unverifiable one
+  with a `401` — the check moves, it is never removed, and a `userId` in the body
+  is still ignored. Guests need no setup. `fastapi`/`uvicorn` are a **dev
+  dependency group**, excluded from the Lambda zip by the Makefile's
+  `RUNTIME_EXCLUDE`. `frontend/.env.local` sets
+  `VITE_AI_ASSISTANT_URL=http://localhost:8091` and the server allows the `:5173`
+  origin, so the widget can talk to it directly.
+- **Tests are in CI.** `make test-ai-assistant` is a **named job** in
+  `backend-tests.yml`, not part of `make test-unit` (that loop only walks
+  `backend/services/*`, which is exactly how this suite went un-run).
 
 ### Agent runtime (AgentCore + Strands)
 

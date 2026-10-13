@@ -1299,6 +1299,16 @@ locals {
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
+    # Re-running ingestion for the platform corpus. Starts the same state machine the
+    # S3 → EventBridge → SQS dispatcher starts, so an operator's button and a real
+    # re-upload run identical code.
+    admin_ai_assistant_reingest = {
+      method               = "POST"
+      path                 = "/v1/admin/ai-assistant/knowledge/reingest"
+      lambda_invoke_arn    = module.admin_console[0].invoke_arn
+      lambda_function_name = module.admin_console[0].function_name
+      authorization_type   = "JWT"
+    }
     mcp_catalog = {
       method               = "GET"
       path                 = "/v1/mcp/catalog"

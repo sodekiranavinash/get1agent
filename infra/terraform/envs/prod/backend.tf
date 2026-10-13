@@ -1094,8 +1094,17 @@ module "admin_console" {
     module.storage[0].function_arn,
   ]
 
+  # Admin → AI Assistant re-ingest starts the ingestion state machine directly. This
+  # is the same state machine `ingestion-dispatcher` starts from its SQS event, so
+  # the admin button and a real re-upload converge on one code path.
+  step_functions_arns = [module.ingestion[0].state_machine_arn]
+
   environment = {
     DYNAMODB_TABLE = module.database[0].table_name
+    # Admin → AI Assistant re-ingest (`POST /v1/admin/ai-assistant/knowledge/reingest`).
+    INGESTION_STATE_MACHINE_ARN = module.ingestion[0].state_machine_arn
+    AI_ASSISTANT_SCOPE          = "platform"
+    AI_ASSISTANT_KB_ID          = "kb_platform_docs_0001"
     MCP_FUNCTIONS = join(",", [
       module.knowledge_mcp[0].function_name,
       module.code_interpreter[0].function_name,
@@ -1137,6 +1146,9 @@ module "admin_console" {
     module.code_interpreter,
     module.http_fetch,
     module.storage,
+    # Re-ingest reads the state machine ARN from `module.ingestion` on every request,
+    # so the console must come up after it.
+    module.ingestion,
   ]
 }
 
@@ -1669,12 +1681,28 @@ module "ai_assistant" {
   dynamodb_table_arns   = [module.database[0].table_arn]
   s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
   s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
-  bedrock_model_arns    = local.bedrock_llm_model_arns
+  # AI Assistant needs BOTH model families, and getting this wrong fails silently
+  # in one direction and hard in the other:
+  #   * `bedrock_rerank_arns` — the query reranker (on by default);
+  #   * `bedrock_embed_model_arns` — Titan, to embed the *query* for the semantic
+  #     leg (`EMBED_MODE=bedrock`), which is why retrieval is granted here at all;
+  #   * `bedrock_llm_model_arns` — the answer model, the classifier, the reasoning
+  #     escalation and the eval judge. These were dropped when this module was
+  #     rewritten from the MicroVM shape, so every answer call would have failed
+  #     with AccessDenied while the code looked correct.
+  bedrock_model_arns = distinct(concat(
+    local.bedrock_embed_model_arns,
+    local.bedrock_llm_model_arns,
+  ))
+  bedrock_rerank_arns = local.bedrock_rerank_model_arns
 
   environment = {
     DYNAMODB_TABLE             = module.database[0].table_name
     S3_BUCKET                  = module.knowledge_storage[0].bucket_name
     BEDROCK_REGION             = "ap-south-1"
+    RERANK_MODE                = "bedrock"
+    RERANK_REGION              = var.rerank_region
+    RERANK_MODEL_ARN           = "arn:aws:bedrock:${var.rerank_region}::foundation-model/${var.rerank_model}"
     AI_ASSISTANT_SCOPE         = "platform"
     AI_ASSISTANT_KB_ID         = "kb_platform_docs_0001"
     AI_ASSISTANT_GUEST_SALT    = var.ai_assistant_guest_salt

@@ -71,18 +71,20 @@ defaults.
 ```
         GUEST (no token)                              SIGNED IN (Auth0 JWT)
               │                                                │
-              │  POST /v1/ai-assistant/ask                              │  POST /v1/ai-assistant/session
-              │  (API GW, NONE auth, throttle 2/s)             │  (API GW, JWT, throttle 10/5)
+              │  POST /v1/ai-assistant/guest                   │  POST /v1/ai-assistant/ask
+              │  (API GW, NONE auth, throttle 4/2)             │  (API GW, JWT, throttle 20/10)
               ▼                                                ▼
-   ai-assistant Lambda ───────────────────────┐        ai-assistant control-plane Lambda
-   (Function URL, RESPONSE_STREAM)         │        (launches MicroVM, mints token)
-   stateless, no tools, no storage         │                    │
-              │                            │                    ▼
-              │                     shared package        ai-assistant-agent (MicroVM :8080)
-              │                  backend/ai-assistant/ai-assistant/*        FastAPI + LangGraph Deep Agent
-              │                  classifier · retrieval    tools · subagents-free · persistence
-              │                  frames · deep_links                │
-              ▼                            ▼                      ▼
+              └───────────────────────┬────────────────────────┘
+                                      ▼
+                    ai-assistant Lambda (one zip, API Gateway)
+                    handler.py · buffered SSE · no session token
+                    identity: verified claims (/ask) | IP hash (/guest)
+                                      │
+                              shared package
+                       backend/ai-assistant/src/*
+                    classifier · retrieval · frames · deep_links
+                    conversations · traces · limits · identity
+                                      ▼
         ┌────────────────────────────────────────────────────────────────────┐
         │ platform KB (idx-platform) · Bedrock · S3 conversations · DynamoDB  │
         └────────────────────────────────────────────────────────────────────┘
@@ -90,17 +92,19 @@ defaults.
                     admin → AI Assistant  (/admin/ai-assistant)  ·  evals  ·  EMF metrics  ·  traces
 ```
 
-**Two ingress paths, on purpose:**
+**One function, two routes, on purpose:**
 
-- **Guest** — a plain Lambda with a **Function URL in `RESPONSE_STREAM` mode**, so
-  it streams without a MicroVM (no warm-up, no per-user state, no session to
-  manage). It answers from the platform KB with **no tools** and **stores
-  nothing**. This is what makes guests "smooth and seamless": one POST, tokens
-  immediately.
-- **Signed-in** — the existing `agent-run` pattern: `/v1/ai-assistant/session` mints a
-  MicroVM endpoint, the browser streams from it directly. Sessions are reused
-  (`autoResumeEnabled`, idle 900 s / suspended 300 s), so AI Assistant's 2.3 s cold start
-  is paid once per session, not per message.
+- **Guest** — the `/guest` route has **no authorizer**, so the Lambda hashes the
+  caller's IP into a rate-limit bucket instead. It answers from the platform KB
+  with **no tools** and **stores nothing**. One POST, no session to manage.
+- **Signed-in** — the `/ask` route runs the Auth0 JWT authorizer, and the Lambda
+  reads the **verified claims** out of the event. There is no session to bootstrap
+  and no token to mint, forward or verify, so nothing has to stay in sync between
+  two components.
+
+Both responses are **buffered**: API Gateway HTTP APIs cannot stream and cap an
+integration at 30 s, so the run is assembled and returned as one SSE body. The
+frames are identical to a live stream, so the widget does not branch.
 
 The browser uses one reducer for both (`lib/runState.ts`), so the widget code
 does not branch on identity — only the URL does.
@@ -142,14 +146,17 @@ frontend/src/
   components/ai-assistant/                       ← the widget (self-contained)
     AiAssistantLauncher.tsx  AiAssistantDialog.tsx  AiAssistantMessage.tsx  AviComposer.tsx
     AviExampleChips.tsx  AiAssistantFeedback.tsx  useAiAssistantRun.ts
-  lib/ai-assistant.ts                            ← one API surface for both paths
+  lib/aiAssistant.ts                             ← one API surface for both paths
   content/aiAssistantStarters.ts                ← route-aware example questions
   admin/pages/AdminAiAssistantPage.tsx          ← the admin page
   admin/lib/adminAiAssistant.ts                 ← admin API client
 
+backend/ai-assistant/                            ← the Lambda: handler.py + src/*
+  handler.py                                       both routes, buffered SSE, claims → userId
+  src/                                             classifier · retrieval · frames · conversations
+                                                   traces · limits · identity · metrics · settings
 tools/ai-assistant-knowledge/                    ← generators + validator (make ai-assistant-knowledge)
 knowledge/ai-assistant/                          ← generated, committed markdown (the corpus)
-infra/terraform/modules/ai_assistant_runtime/    ← ECR + MicroVM image + control plane + guest Lambda/URL
 ```
 
 Reuse is by **import**, never by copy: `retrieval.*` (hybrid search, s3_vectors,
@@ -312,11 +319,19 @@ AI Assistant can never silently answer from stale docs.
 
 ### 7.3 Retrieval at answer time
 
-`retrieval.py` calls the same path `knowledge-mcp` uses (`search_candidates` →
-RRF → Bedrock rerank opt-in → parent hydration) with the `platform` scope, so
+`retrieval.py` calls the same path `knowledge-mcp` uses (both legs → RRF → the
+shared cross-encoder rerank → parent hydration) with the `platform` scope, so
 **exact cache + semantic cache + single-flight come for free** (`core.cache`,
 `core.semantic_cache`) — a repeated question costs zero Bedrock calls, the single
 largest cost lever for a widget.
+
+Reranking is **on by default** here (unlike `knowledge-mcp`, where it is
+opt-in), because RRF scores agreement between the two legs rather than relevance
+and the resulting order is what the answer and its `[n]` citations are built
+from. It hydrates up to `AI_ASSISTANT_RERANK_CANDIDATES` (24) parents so the
+reranker has real recall to work with, records `rerankScore` per passage and
+`rerank.applied` on the diagnostic, and falls back to the RRF order if the
+reranker is unreachable. `AI_ASSISTANT_RERANK=0` turns it off.
 
 ---
 
@@ -324,11 +339,11 @@ largest cost lever for a widget.
 
 | Layer | Guest | Signed-in |
 |---|---|---|
-| API Gateway route throttle | `/v1/ai-assistant/ask`: burst **4** / rate **2** | `/v1/ai-assistant/session`: burst **10** / rate **5** |
+| API Gateway route throttle | `/v1/ai-assistant/guest`: burst **4** / rate **2** | `/v1/ai-assistant/ask`: burst **20** / rate **10** |
 | Per-caller window (`core.ratelimit`, atomic DynamoDB) | per **IP hash**: `AI_ASSISTANT_GUEST_PER_HOUR=6`, `AI_ASSISTANT_GUEST_PER_DAY=20` | per **userId**: `AI_ASSISTANT_PER_HOUR=120`, `AI_ASSISTANT_PER_DAY=1000` ("effectively unlimited", but bounded) |
 | Per-conversation turns | n/a (stateless, capped history) | `AI_ASSISTANT_MAX_AGENT_STEPS=6` per turn, `AI_ASSISTANT_MAX_TURNS=40` per conversation |
 | Input caps | question ≤ 2 000 chars, history ≤ 8 turns / 24 000 chars | same |
-| Flow control | classifier-first (off-topic never generates) + 1 in-flight request per IP | bounded MicroVM sessions, auto-resume, 25-min hard cap |
+| Flow control | classifier-first (off-topic never generates) + 1 in-flight request per IP | classifier-first + agent-step cap + a 24 s soft turn budget under the 30 s gateway ceiling |
 | Storage | **nothing persisted** | transcript + feedback persisted |
 | Kill switch | `aviEnabled` flag → launcher hides, both routes `503` | same |
 
@@ -434,7 +449,7 @@ check), every mutation is written to the settings item with `updatedBy`/
 | `components/ai-assistant/AiAssistantMessage.tsx` | Reuses `ChatAnswer` + round `[n]` badges; adds a **route chip** ("Open Agent builder →") that navigates the SPA; a collapsed run timeline while working. |
 | `components/ai-assistant/AviExampleChips.tsx` | The tappable examples from the off-topic nudge and the route-aware starters. |
 | `components/ai-assistant/AiAssistantFeedback.tsx` | Thumbs + comment + categories for signed-in users. |
-| `lib/ai-assistant.ts` | `POST /v1/ai-assistant/ask` (guest) / `POST /v1/ai-assistant/session` + MicroVM (signed-in) / feedback — the only place that branches on identity. |
+| `lib/aiAssistant.ts` | `POST /v1/ai-assistant/ask` (signed-in, JWT) / `POST /v1/ai-assistant/guest` (no authorizer) / feedback — the only place that branches on identity, and the only SSE parser. |
 
 **Mount list — 4 shells, so no page can be missed:**
 
@@ -457,23 +472,32 @@ shows the wait plus a **sign-in to keep asking** button — the natural upsell.
 
 ## 13. Infrastructure
 
-- `infra/terraform/modules/ai_assistant_runtime/` — ECR repo (same lifecycle policy as
-  `agent_runtime`), the MicroVM image, the control-plane Lambda, the **guest
-  Lambda + its `RESPONSE_STREAM` Function URL**, and both API Gateway routes.
-- `backend/registry.json` — register `ai-assistant` and `ai-assistant` under a new
-  `ai-assistant` group, so `deploy-backend.sh` and the Backend workflow pick them up with
-  no new tooling.
-- `infra/aws/deploy-ai-assistant.sh` — build/push the ARM64 image, apply
-  `module.ai_assistant_runtime` (mirrors `deploy-agent-runtime.sh`).
-- Makefile: `ai-assistant-build`, `ai-assistant-knowledge`, `ai-assistant-bootstrap`, `ai-assistant-deploy`,
+- `infra/terraform/envs/prod/backend.tf` — one `module "ai_assistant"` (the Lambda
+  zip, 1024 MB, 30 s timeout matched to the gateway ceiling), plus its two routes in
+  `api_gateway.tf`: `/ask` (`JWT`, throttle 20/10) and `/guest` (`NONE`, 4/2). No
+  ECR, no MicroVM image, no control plane and no Function URL.
+- `backend/ai-assistant/Makefile` — `make -C backend/ai-assistant package` builds
+  `dist/function.zip` (~21 MB zipped / 81 MB unzipped), bundling the agent
+  framework and dropping what the Lambda runtime already provides.
+- `backend/registry.json` — `ai-assistant` registered under the `ai-assistant`
+  group, so the deploy script and Backend workflow pick it up with no new tooling.
+- Makefile: `ai-assistant-knowledge`, `ai-assistant-bootstrap`, `ai-assistant-upload`,
+  `ai-assistant-status`,
   `ai-assistant-eval`, `ai-assistant-test`.
-- GitHub: new `ai-assistant` group checkbox for Lambda code; `ai-assistant-knowledge` drift check on
+- GitHub: a named **AI Assistant** job runs `make test-ai-assistant`; the
+  `ai-assistant-knowledge` drift check runs on
   PRs touching `frontend/src/content/docs.ts`, `README.md`, `AGENTS.md`,
   `docs/design/**` or `frontend/src/navigation/**`.
-- Local (Floci): `AI_ASSISTANT_MODE=local` runs the agent on `:8091`
-  (`VITE_AI_ASSISTANT_URL=http://localhost:8091`), `VECTOR_STORE=local` +
-  `EMBED_MODE=ollama` keep the whole loop offline; the guest path runs as a plain
-  local Lambda handler.
+- Local (Floci): `make ai-assistant-local-agent` serves `:8091` from
+  `backend/ai-assistant/main.py`, a small ASGI server that synthesises the API
+  Gateway event and calls the **same** `handler.lambda_handler` production runs.
+  It stands in for the gateway, so it also verifies the Auth0 token itself
+  (`src/local_auth.py`, stdlib-only RS256 + JWKS) and answers `401` for anything
+  it cannot verify — the check moves, it is never dropped. Guests need no setup.
+  `fastapi`/`uvicorn` are a dev dependency group, excluded from the Lambda zip, and
+  `frontend/.env.local` points `VITE_AI_ASSISTANT_URL` at this server.
+  `VECTOR_STORE=local` + `EMBED_MODE=ollama` keep retrieval offline; reranking
+  defaults to Bedrock (real credentials) and degrades to the RRF order without them.
 
 ---
 
