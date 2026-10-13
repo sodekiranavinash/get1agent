@@ -124,7 +124,12 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
         role="dialog"
         aria-modal="true"
         aria-label="Avi, the get1agent assistant"
-        className="fixed inset-x-0 bottom-0 z-[61] flex h-[min(80vh,600px)] flex-col overflow-hidden rounded-t-xl border border-border bg-canvas shadow-2xl sm:inset-x-auto sm:right-5 sm:bottom-24 sm:h-[min(540px,72vh)] sm:w-[380px] sm:rounded-xl"
+        // On desktop the panel is anchored **above** the launcher (`sm:bottom-40`),
+        // not over it: the launcher stays visible and turns into an X, so the
+        // control that opened the dialog is the one that closes it. That offset
+        // must stay clear of the launcher's `5.5rem` resting height; below `sm` the
+        // dialog is a bottom sheet and simply covers the button.
+        className="fixed inset-x-0 bottom-0 z-[61] flex h-[min(80vh,600px)] flex-col overflow-hidden rounded-t-xl border border-border bg-canvas shadow-2xl sm:inset-x-auto sm:right-5 sm:bottom-40 sm:h-[min(540px,72vh)] sm:w-[380px] sm:rounded-xl"
       >
         {/* Grab handle: the phone sheet reads as draggable even though it is not. */}
         <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-border-strong sm:hidden" aria-hidden />

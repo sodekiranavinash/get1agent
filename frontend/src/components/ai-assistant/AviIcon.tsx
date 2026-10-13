@@ -1,70 +1,47 @@
 /**
- * Avi's icon — the conversational entry point, and deliberately not the product
- * logo.
+ * Avi's icon — a solid four-point sparkle.
  *
- * The launcher used to render `AiAssistantMark` (the platform logo), which reads
- * as branding rather than as a button: it says "this is get1agent", not "there is
- * something here, click me". The obvious replacements are all taken — a sparkle, a
- * speech bubble, a sparkle *inside* a speech bubble — and each one says "generic
- * chat widget".
+ * Replaced twice before landing here, for reasons worth recording:
  *
- * So this is an **orbit**: a luminous core with a ring and a satellite travelling
- * around it. It reads as an active intelligence rather than as a conversation, it
- * is not a shape any other icon in the product uses, and — importantly — it stays
- * legible at 20px inside the composer.
+ *   - the **product logo** said "this is get1agent", not "there is something here,
+ *     click me";
+ *   - a **glowing orbit** (core + ring + satellite) looked soft and blurry at the
+ *     32px it actually renders at, and its animation read as dated. Thin strokes
+ *     and a radial gradient cannot survive that size — the gradient *is* the blur.
  *
- * Two details do the work:
- *   - **the ring is open**, broken at the top-right where the satellite passes, so
- *     it reads as a path something is travelling along rather than as a halo;
- *   - **the ring counter-rotates**, at half speed, so the mark has two independent
- *     motions. It is deliberately slow (~16s): visible if you look at it, never a
- *     distraction while you read.
+ * So this is the opposite approach: one **solid, single-colour** shape with no
+ * gradient, no glow and no animation. At 32px a filled four-point star is
+ * unmistakable, and it is what the rest of the industry settled on for AI entry
+ * points — a convention worth following precisely because it needs no explanation.
  *
- * Motion is opt-out — `prefers-reduced-motion` freezes both, leaving the same
- * composition as a still frame, because an endlessly moving control is a real
- * problem for some people.
+ * Deliberately **not** lucide's `Sparkles`: that icon is already used across the
+ * platform (chat, playground, landing, architecture), so reusing it for Avi would
+ * make the launcher look like decoration that belongs to whatever is on the page.
+ * This one is Avi's alone.
  *
- * The product logo keeps its own uses (favicon, admin page).
+ * `currentColor` throughout, so it takes the contrast its surface already sets.
  */
 
 /** Identifies this icon in the DOM and in tests, independent of size. */
 export const AVI_ICON_TESTID = 'avi-icon'
 
 /**
- * Scoped styles, injected once per document even if the icon renders twice.
+ * A four-point star with concave sides, drawn as one closed path.
  *
- * Kept here rather than in the global stylesheet so the animation ships with the
- * component that needs it: the icon has exactly one home today, and a global
- * keyframe would be dead weight on every other page.
+ * The control points sit at ~26% of the way from each tip to the centre, which is
+ * what gives the crisp "sparkle" pinch. Too close to the centre and it turns into
+ * a thin cross (which is what an earlier attempt produced, and it read as an X —
+ * the same shape as the close control). Too far and it rounds off into a diamond.
+ *
+ * Solid rather than stroked on purpose: a stroke at 32px is 1px of anti-aliased
+ * grey, which is the washed-out look this is replacing.
  */
-const STYLES = `
-@keyframes avi-orbit { to { transform: rotate(360deg); } }
-@keyframes avi-orbit-slow { to { transform: rotate(-360deg); } }
-.avi-orbit, .avi-orbit-slow { transform-origin: 12px 12px; }
-.avi-orbit { animation: avi-orbit 16s linear infinite; }
-.avi-orbit-slow { animation: avi-orbit-slow 32s linear infinite; }
-@media (prefers-reduced-motion: reduce) {
-  .avi-orbit, .avi-orbit-slow { animation: none; }
-}
-`
-
-let stylesInjected = false
-
-function ensureStyles() {
-  if (stylesInjected || typeof document === 'undefined') return
-  stylesInjected = true
-  const style = document.createElement('style')
-  style.setAttribute('data-avi-icon', '')
-  style.textContent = STYLES
-  document.head.appendChild(style)
-}
+const D =
+  'M12 1.4c.62 4.4 1.6 6.86 3.28 8.18C16.8 10.74 19.3 11.4 22.6 12c-3.3.6-5.8 1.26-7.32 2.42' +
+  'C13.6 15.74 12.62 18.2 12 22.6c-.62-4.4-1.6-6.86-3.28-8.18C7.2 13.26 4.7 12.6 1.4 12' +
+  'c3.3-.6 5.8-1.26 7.32-2.42C10.4 8.26 11.38 5.8 12 1.4Z'
 
 export function AviIcon({ className = '' }: { className?: string }) {
-  ensureStyles()
-
-  const glow = 'avi-glow'
-  const core = 'avi-core'
-
   return (
     <svg
       viewBox="0 0 24 24"
@@ -73,50 +50,7 @@ export function AviIcon({ className = '' }: { className?: string }) {
       data-testid={AVI_ICON_TESTID}
       className={`shrink-0 ${className}`}
     >
-      <defs>
-        {/* Light falls off well before the edge, so the core looks lit from within. */}
-        <radialGradient id={glow} cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="currentColor" stopOpacity="0.55" />
-          <stop offset="60%" stopColor="currentColor" stopOpacity="0.14" />
-          <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-        </radialGradient>
-        {/* Offset highlight: what gives the core a front and a back. */}
-        <radialGradient id={core} cx="36%" cy="30%" r="78%">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
-          <stop offset="68%" stopColor="#ffffff" stopOpacity="0.9" />
-          <stop offset="100%" stopColor="#ffffff" stopOpacity="0.62" />
-        </radialGradient>
-      </defs>
-
-      <circle cx="12" cy="12" r="11" fill={`url(#${glow})`} />
-
-      {/*
-       * The ring, drawn as an arc rather than a full circle: a closed ring around a
-       * dot reads as a bullseye, and the gap is where the satellite travels.
-       * `strokeDasharray` is circumference * (fraction left open) so the break is a
-       * fixed proportion of the ring at any size.
-       */}
-      <g className="avi-orbit-slow">
-        <circle
-          cx="12"
-          cy="12"
-          r="8.2"
-          fill="none"
-          stroke="currentColor"
-          strokeOpacity="0.45"
-          strokeWidth="1.1"
-          strokeLinecap="round"
-          strokeDasharray="42 9.5"
-          transform="rotate(-58 12 12)"
-        />
-      </g>
-
-      <circle cx="12" cy="12" r="4.1" fill={`url(#${core})`} />
-
-      {/* The satellite, riding the ring just past the gap. */}
-      <g className="avi-orbit">
-        <circle cx="19.5" cy="9.6" r="1.85" fill="#ffffff" />
-      </g>
+      <path d={D} fill="currentColor" />
     </svg>
   )
 }
