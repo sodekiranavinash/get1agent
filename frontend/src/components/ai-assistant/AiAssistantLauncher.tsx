@@ -20,14 +20,16 @@ const AiAssistantDialog = lazy(() =>
 )
 
 /**
- * The launcher's resting offset from the viewport bottom, in px (`4.5rem`).
+ * The launcher's resting offset from the viewport bottom, in px (`1.75rem`).
  *
- * The dialog is anchored above this — `AiAssistantDialog`'s `sm:bottom-32` — so the
- * button stays visible and clickable while the dialog is open and the icon simply
- * becomes an X. **These two numbers move together**: the launcher's height plus a
+ * Must equal `--avi-launcher-bottom` in `index.css`: it is passed to
+ * `useFooterClearance` so the footer measurement is taken against the offset the
+ * button actually rests at, and the dialog is anchored off the same variable. It
+ * is deliberately a small gap — the button belongs near the corner, not floating
+ * above it. **These two numbers move together**: the launcher's height plus a
  * little air is the dialog's floor.
  */
-const LAUNCHER_REST_PX = 72
+const LAUNCHER_REST_PX = 28
 
 /** Matches the `avi-dialog-out` duration in `index.css`. */
 const DIALOG_EXIT_MS = 140
@@ -106,11 +108,12 @@ export function AiAssistantLauncher() {
         // in `index.css`, which the dialog reads too — the two must agree, or the
         // dialog covers the button that is meant to close it.
         style={{ bottom: `calc(var(--avi-launcher-bottom) + ${clearance}px)` }}
-        // `rounded-2xl`, not a full pill: softer than the old square, without
-        // reading as a generic chat widget. `avi-launcher-in` is the entrance only
-        // — it is `both`-filled, so it settles at scale(1) and then the hover
-        // transform takes over.
-        className="avi-launcher-in fixed right-5 z-[62] grid size-14 place-items-center rounded-2xl border border-accent/30 bg-accent text-white shadow-lg transition-[bottom,scale] duration-200 ease-out hover:scale-105 focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas focus-visible:outline-none"
+        // `right-4`, not `right-5`: the button hugs the right edge (and the dialog
+        // uses the same gutter, so the two stay aligned). `rounded-2xl`, not a full
+        // pill: softer than the old square, without reading as a generic chat
+        // widget. `avi-launcher-in` is the entrance only — it is `both`-filled, so
+        // it settles at scale(1) and then the hover transform takes over.
+        className="avi-launcher-in fixed right-4 z-[62] grid size-14 place-items-center rounded-2xl border border-accent/30 bg-accent text-white shadow-lg transition-[bottom,scale] duration-200 ease-out hover:scale-105 focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas focus-visible:outline-none"
         // NOTE: no `relative` here. `fixed` already establishes the containing block
         // for the X badge, and adding `relative` silently overrode `fixed` — Tailwind
         // emits `.relative` after `.fixed`, so the button dropped out of fixed
