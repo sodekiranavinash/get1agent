@@ -174,6 +174,15 @@ jobs:
         run: make package
         working-directory: backend/services/mcp/browser
 
+      # AI Assistant is a Lambda under `backend/ai-assistant/`, not
+      # `backend/services/*`, so it needs its own packaging step — the other 17 are
+      # all services. `apply-prod.sh` requires this zip whenever lambdas are
+      # targeted, and without this step the apply fails before touching anything.
+      - name: Package ai-assistant zip
+        if: inputs.api_gateway || inputs.lambdas
+        run: make package
+        working-directory: backend/ai-assistant
+
       - name: Verify Lambda zips
         if: inputs.api_gateway || inputs.lambdas
         run: |
@@ -214,6 +223,8 @@ jobs:
           unzip -l backend/services/scheduler/dist/function.zip | grep handler.py
           test -s backend/services/mcp/browser/dist/function.zip
           unzip -l backend/services/mcp/browser/dist/function.zip | grep handler.py
+          test -s backend/ai-assistant/dist/function.zip
+          unzip -l backend/ai-assistant/dist/function.zip | grep handler.py
 
       - name: Terraform validate
         if: inputs.api_gateway || inputs.lambdas
