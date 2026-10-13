@@ -21,7 +21,7 @@ from retrieval.embedding.config import load_config
 from retrieval.embedding.embeddings import embed_texts
 from core.json_utils import dumps as json_dumps
 from src.search.errors import RetrievalError
-from src.search.rerank import rerank_candidates, rerank_mode
+from retrieval.rerank import rerank_candidates, rerank_mode
 from src.search.service import (
     cap_per_document,
     group_sources,

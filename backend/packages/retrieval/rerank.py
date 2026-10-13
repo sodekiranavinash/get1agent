@@ -1,3 +1,28 @@
+"""Cross-encoder reranking, shared by every retrieval caller.
+
+Two callers rerank the same way and for the same reason — RRF is a *fusion* score,
+not a relevance score, so the top of a fused list is often not the best answer:
+
+* `knowledge-mcp` reranks a user's knowledge-base search;
+* AI Assistant reranks the platform-docs corpus.
+
+They must agree, because a reranker that behaves differently in the two places
+would make AI Assistant's answers inconsistent with the product's own search. So this
+lives in the shared `retrieval` package rather than being copied into each service.
+
+Two backends, selected by `RERANK_MODE`:
+
+* **`bedrock`** (the default) — **Bedrock Rerank** (`amazon.rerank-v1:0`). That model
+  is not offered in `ap-south-1`, so the call is **cross-region** to `us-west-2`
+  (`RERANK_REGION` overrides).
+* **`local`** — a HuggingFace TEI cross-encoder container (`POST /rerank`), used by
+  the Floci stack, which does not emulate Bedrock Rerank.
+* **`none`** — skip reranking entirely.
+
+Every failure path returns the input order with `applied=False`. A search must never
+fail, and must never silently reorder, because the reranker is unreachable.
+"""
+
 from __future__ import annotations
 
 import json
@@ -104,7 +129,12 @@ def _rerank_bedrock(
     )
     sources = [
         {
-            "type": "INLINE_DOCUMENT",
+            # The API's enum for an inline document is `INLINE`. `INLINE_DOCUMENT`
+            # reads as the obvious name and is what this used to send — the call then
+            # failed validation, the `except` below returned the input order, and
+            # reranking was silently **never applied** in either caller. Pinned by
+            # `tests/test_rerank.py::BedrockRequestShapeTests`.
+            "type": "INLINE",
             "inlineDocumentSource": {
                 "type": "TEXT",
                 "textDocument": {"text": candidate["content"]},

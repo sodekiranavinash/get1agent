@@ -1,8 +1,13 @@
-"""Reranker: the Bedrock backend (default), local TEI, and graceful fallback."""
+"""Reranker: the Bedrock backend (default), local TEI, and graceful fallback.
+
+The implementation lives in the shared `retrieval` package because both
+`knowledge-mcp` and AI Assistant rerank through it — a copy in one service would
+drift from the other.
+"""
 
 from __future__ import annotations
 
-from src.search import rerank
+from retrieval import rerank
 
 
 def _candidates() -> list[dict]:
@@ -45,6 +50,10 @@ def test_rerank_bedrock_maps_scores(monkeypatch) -> None:
     assert fake.calls[0]["rerankingConfiguration"]["bedrockRerankingConfiguration"][
         "modelConfiguration"
     ]["modelArn"].endswith("amazon.rerank-v1:0")
+    # The API's enum is `INLINE`. This used to send `INLINE_DOCUMENT`, which failed
+    # validation on every call — and because reranking must degrade rather than fail,
+    # the only symptom was that results were never actually reranked.
+    assert [source["type"] for source in fake.calls[0]["sources"]] == ["INLINE", "INLINE"]
 
 
 def test_rerank_candidates_applies_bedrock(monkeypatch) -> None:
