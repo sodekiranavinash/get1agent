@@ -285,10 +285,6 @@ jobs:
           # identity on account deletion. Optional; blank = manual step.
           TF_VAR_auth_mgmt_client_id: ${{ secrets.AUTH_MGMT_CLIENT_ID }}
           TF_VAR_auth_mgmt_client_secret: ${{ secrets.AUTH_MGMT_CLIENT_SECRET }}
-          # AI Assistant session tokens. Must be the SAME value on every deploy — the control
-          # plane mints with it and the agent verifies — so it lives in the prod
-          # environment and is never generated here. The image URI and artifact path
-          # arrive from the step above via $GITHUB_ENV.
         run: bash infra/aws/apply-prod.sh
 
       - name: Agent runtime (build + push image, deploy)
