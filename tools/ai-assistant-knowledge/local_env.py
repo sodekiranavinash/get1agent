@@ -52,6 +52,13 @@ LOCAL_ENV: dict[str, str] = {
     # override the local stack injects into every Lambda (see docker-compose).
     "BEDROCK_REGION": "ap-south-1",
     "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "https://bedrock-runtime.ap-south-1.amazonaws.com",
+    # Bedrock **Rerank** goes through `bedrock-agent-runtime`, a DIFFERENT service
+    # name, so the pin above does not cover it. Without this the reranker is sent to
+    # Floci, which answers with an S3 error ("POST on bucket requires ?delete
+    # parameter") — and because a reranker failure must degrade rather than raise,
+    # the only symptom is `applied: false` on every search. That is the same silent
+    # failure mode as the INLINE_DOCUMENT bug, so it is worth being explicit here.
+    "AWS_ENDPOINT_URL_BEDROCK_AGENT_RUNTIME": "https://bedrock-agent-runtime.us-west-2.amazonaws.com",
     # AI Assistant's reserved scope.
     "AI_ASSISTANT_SCOPE": "platform",
     "AI_ASSISTANT_KB_ID": "kb_platform_docs_0001",
