@@ -67,7 +67,7 @@ export type AgentSource = {
   image?: string
   /**
    * In-app page this source documents, when the source is platform knowledge.
-   * Avi links it; the agent chat carousel does not use it.
+   * AI Assistant links it; the agent chat carousel does not use it.
    */
   route?: string
 }
@@ -130,14 +130,14 @@ export type AgentRunEvent =
       stopReason?: string
       usage?: AgentUsage
       /**
-       * Avi's final answer text. The agent runtime does not send it (its answer
-       * arrives as `text` frames), but Avi's `FrameWriter` does — and the widget
+       * AI Assistant's final answer text. The agent runtime does not send it (its answer
+       * arrives as `text` frames), but AI Assistant's `FrameWriter` does — and the widget
        * needs it: the reducer blanks the accumulated answer when a tool call
        * starts, so a turn that streamed its text *before* its last tool call
        * would otherwise render as "No answer."
        */
       text?: string
-      /** Avi's run-global citations, including ones gathered before any tool call. */
+      /** AI Assistant's run-global citations, including ones gathered before any tool call. */
       sources?: AgentSource[]
     }
   | { type: 'trace'; traceId?: string | null; traceUrl?: string | null }

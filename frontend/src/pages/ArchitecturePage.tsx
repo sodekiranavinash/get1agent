@@ -21,7 +21,7 @@ import { PipelinesTab } from '../components/architecture/views/PipelinesTab'
 import {
   ARCHITECTURE,
   ARCHITECTURE_LEGEND,
-  AVI_FLOWS,
+  AI_ASSISTANT_FLOWS,
   DATA_LEGEND,
   DATA_STORAGE,
   DEPLOYMENT,
@@ -41,7 +41,7 @@ type TabId =
   | 'flows'
   | 'runtime'
   | 'knowledge'
-  | 'avi'
+  | 'ai-assistant'
   | 'data'
   | 'identity'
   | 'observability'
@@ -51,7 +51,7 @@ const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: 'architecture', label: 'Architecture', icon: Boxes },
   { id: 'flows', label: 'Request flows', icon: Route },
   { id: 'runtime', label: 'Agent runtime', icon: Bot },
-  { id: 'avi', label: 'Avi', icon: Sparkles },
+  { id: 'ai-assistant', label: 'AI Assistant', icon: Sparkles },
   { id: 'knowledge', label: 'Knowledge', icon: Search },
   { id: 'data', label: 'Data', icon: Database },
   { id: 'identity', label: 'Identity', icon: KeyRound },
@@ -102,12 +102,12 @@ function TabContent({ tab }: { tab: TabId }) {
           flows={[AGENT_LIFECYCLE]}
         />
       )
-    case 'avi':
+    case 'ai-assistant':
       return (
         <PipelinesTab
-          title="Avi — the in-product assistant"
-          blurb="Avi is a separate subsystem, not part of the agent runtime: a bottom-right dialog on every page, two ingress paths (a stateless guest Lambda and an isolated MicroVM for signed-in users), a dedicated intent classifier, its own LangChain Deep Agents loop, and a reserved platform knowledge scope ingested through the standard pipeline. Grounded only in the repository — no crawling."
-          flows={AVI_FLOWS}
+          title="AI Assistant — the in-product assistant"
+          blurb="AI Assistant is a separate subsystem, not part of the agent runtime: a bottom-right dialog on every page, two ingress paths (a stateless guest Lambda and an isolated MicroVM for signed-in users), a dedicated intent classifier, its own LangChain Deep Agents loop, and a reserved platform knowledge scope ingested through the standard pipeline. Grounded only in the repository — no crawling."
+          flows={AI_ASSISTANT_FLOWS}
         />
       )
     case 'knowledge':

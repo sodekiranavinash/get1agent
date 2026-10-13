@@ -21,8 +21,8 @@ export type DocSection = {
   blocks: DocBlock[]
   /**
    * Who the section is written for. Sections that document an **admin-console**
-   * page are tagged `'admin'`, which excludes them from Avi's knowledge corpus
-   * (`tools/avi-knowledge/generator.py`) — the assistant is opened by ordinary
+   * page are tagged `'admin'`, which excludes them from AI Assistant's knowledge corpus
+   * (`tools/ai-assistant-knowledge/generator.py`) — the assistant is opened by ordinary
    * users and guests, so it must never answer with, or link to, a page they
    * cannot open. Defaults to `'user'`.
    */
@@ -889,7 +889,7 @@ export const DOCS: DocGroup[] = [
       {
         id: 'platform',
         title: 'Platform status',
-        // Documents an admin-console page, so Avi must not learn it: see the
+        // Documents an admin-console page, so AI Assistant must not learn it: see the
         // `audience` note on `DocSection`.
         audience: 'admin',
         summary:

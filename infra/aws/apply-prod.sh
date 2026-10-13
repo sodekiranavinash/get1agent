@@ -42,30 +42,24 @@ TARGETS=()
   TARGETS+=(-target='module.ingestion_mark_failed[0]')
   TARGETS+=(-target='module.ingestion_watchdog[0]')
 
-  # --- Avi (the in-product assistant) -----------------------------------------
-  # Included so Avi deploys as part of a normal prod apply instead of needing
-  # `deploy-avi.sh` run by hand.
-  #
-  # avi_guest / avi_session are gated only on enable_avi. avi_runtime is ALSO
-  # gated on `avi_microvm_zip != ""`, and that gate is destructive: targeting it
-  # with an empty value collapses count to 0 and plans the entire module (ECR
-  # repo, MicroVM image, both IAM roles, the artifact) for DELETION. So it is
-  # targeted only when the artifact is genuinely present on this runner, which
-  # infra.yml arranges by building it in the step before this one.
-  if [[ -z "${TF_VAR_avi_microvm_zip:-}" || ! -f "${TF_VAR_avi_microvm_zip}" ]]; then
-    echo "TF_VAR_avi_microvm_zip is not set to an existing file." >&2
-    echo "The Avi agent image + MicroVM artifact must be built first (infra.yml does" >&2
-    echo "this in the step before this apply). Refusing to skip it silently, because" >&2
-    echo "targeting module.avi_runtime without it would DELETE the deployed runtime." >&2
-    exit 1
-  fi
-  TARGETS+=(-target='module.avi_guest[0]')
-  TARGETS+=(-target='module.avi_session[0]')
-  TARGETS+=(-target='module.avi_runtime[0]')
+  # --- AI Assistant (the in-product assistant) -----------------------------------------
+  # AI Assistant is gated on `enable_ai_assistant` alone, exactly like module.agent_runtime is gated
+  # on `enable_agent_runtime` — intent, not "does a file happen to exist". So these
+  # targets are unconditional and a plain apply can no longer plan the runtime for
+  # deletion.
+  TARGETS+=(-target='module.ai_assistant[0]')
+  TARGETS+=(-target='module.ai_assistant_session[0]')
+  TARGETS+=(-target='module.ai_assistant_runtime[0]')
 
-  if [[ -z "${TF_VAR_avi_session_secret:-}" ]]; then
-    echo "WARNING: TF_VAR_avi_session_secret is empty; Avi would be deployed unable" >&2
-    echo "         to mint session tokens. Set AVI_SESSION_SECRET in the prod env." >&2
+  # The module reads the artifact from a fixed path (deploy-ai-assistant.sh writes it there),
+  # so it must be built before this apply. Checked here only to give a clear error
+  # instead of a confusing failure inside the module.
+  AI_ASSISTANT_ARTIFACT="$ROOT/backend/services/ai-assistant/microvm/dist/microvm.zip"
+  if [[ ! -f "$AI_ASSISTANT_ARTIFACT" ]]; then
+    echo "AI Assistant MicroVM artifact missing: $AI_ASSISTANT_ARTIFACT" >&2
+    echo "Build it first: bash infra/aws/deploy-ai-assistant.sh artifact" >&2
+    echo "(infra.yml does this in the step before this apply.)" >&2
+    exit 1
   fi
 }
 

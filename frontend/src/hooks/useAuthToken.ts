@@ -4,7 +4,7 @@ import { useAuth0 } from '@auth0/auth0-react'
 /**
  * The signed-in user's access token, refreshed for a streaming chat.
  *
- * Avi streams over a WebSocket whose first message carries the token, so the
+ * AI Assistant streams over a WebSocket whose first message carries the token, so the
  * token must be a *current* string at send time rather than a stable callback.
  * Fetching it once per mount and refreshing shortly before a typical Auth0
  * expiry keeps the send path synchronous without handing the widget a stale

@@ -17,10 +17,10 @@ backend/
   services/ingestion/  ingestion-{dispatcher,extract,embed,index,mark-failed,watchdog}
   services/scheduler/  scheduled agent/workflow runs
   services/agent-run/  AgentCore control-plane Lambda + MicroVM proxy
-  services/avi/       Avi control-plane Lambda + MicroVM proxy
+  services/ai-assistant/       AI Assistant control-plane Lambda + MicroVM proxy
   services/integration-tests/   moto + in-memory S3 integration tests
   agents/              AgentCore runtime (agentflow: single-agent; workflow: multi-agent)
-  avi/                 Avi agent service (LangChain Deep Agents) + its guest Lambda
+  ai-assistant/                 AI Assistant agent service (LangChain Deep Agents) + its guest Lambda
   packages/            shared modules: core, data, retrieval, ingestion
 infra/                 Terraform, deploy scripts, local Floci stack
 ```
@@ -130,15 +130,15 @@ chunks or postings in DynamoDB.
 | Security report | `USER#<userId>` | `SREPORT#<reportId>` | `byStatus` (`SREPORT#all`) |
 | Notification | `USER#<userId>` | `NOTIF#<id>` | — (TTL 90d) |
 | User memory (local fallback) | `USER#<userId>` | `MEM#<memId>` | — (prod uses AgentCore Memory) |
-| Avi conversation | `USER#<userId>` | `AVICHAT#<id>` | `byUser` (`AVICHAT#<updatedAt>#<id>`) |
-| Avi feedback | `USER#<userId>` | `AVIFEEDBACK#<runId>` | — |
-| Avi trace index | `USER#<userId>` | `AVITRACE#<traceId>` | `byUser`; TTL 90d |
-| Avi eval run | `USER#<userId>` | `AVIEVAL#<runId>` | `byUser` |
-| Avi guest rate window | `RATE#avi-guest` | `W#<window>` | — (TTL; per-IP-hash counter) |
-| Avi settings | `PLATFORM#SETTINGS` | `#AVI` | — (kill switch, models, limits) |
+| AI Assistant conversation | `USER#<userId>` | `AICHAT#<id>` | `byUser` (`AICHAT#<updatedAt>#<id>`) |
+| AI Assistant feedback | `USER#<userId>` | `AIFEEDBACK#<runId>` | — |
+| AI Assistant trace index | `USER#<userId>` | `AITRACE#<traceId>` | `byUser`; TTL 90d |
+| AI Assistant eval run | `USER#<userId>` | `AIEVAL#<runId>` | `byUser` |
+| AI Assistant guest rate window | `RATE#ai-assistant` | `W#<window>` | — (TTL; per-IP-hash counter) |
+| AI Assistant settings | `PLATFORM#SETTINGS` | `#AI_ASSISTANT` | — (kill switch, models, limits) |
 
-Avi (the in-product assistant, `docs/design/avi-architecture.md`) owns the
-`AVI*`/`RATE#avi-guest` prefixes so nothing it writes can surface in the agent
+AI Assistant (the in-product assistant, `docs/design/ai-assistant-architecture.md`) owns the
+`AI_ASSISTANT*`/`RATE#ai-assistant` prefixes so nothing it writes can surface in the agent
 chat sidebar (`CHAT#`), the agent trace list (`TRACE#`) or the agent feedback
 table (`FEEDBACK#`). Its transcripts and trace trees live in S3
 (`conversations/…`, `traces/…`); only small metadata items are in DynamoDB. The
@@ -752,97 +752,97 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
 - A scheduled run is one synchronous Lambda invocation (15-minute cap); a run
   longer than that keeps going in AgentCore but its Lambda wait is cut short.
 
-### Avi (in-product assistant) — a separate runtime
+### AI Assistant (in-product assistant) — a separate runtime
 
-Avi is the assistant behind the button in the bottom-right of every page. It is a
+AI Assistant is the assistant behind the button in the bottom-right of every page. It is a
 **separate subsystem**, not part of the agent runtime: its own service, image,
 lockfile, data prefixes and admin page. Design:
-[`docs/design/avi-architecture.md`](docs/design/avi-architecture.md); product plan
-[`docs/design/avi-assistant.md`](docs/design/avi-assistant.md); interactive
-diagrams at `/architecture?tab=avi`. **Do not fold Avi into the agent or knowledge
+[`docs/design/ai-assistant-architecture.md`](docs/design/ai-assistant-architecture.md); product plan
+[`docs/design/ai-assistant.md`](docs/design/ai-assistant.md); interactive
+diagrams at `/architecture?tab=ai-assistant`. **Do not fold AI Assistant into the agent or knowledge
 docs** — it has its own space on purpose.
 
-- **Deliberately not Strands.** Avi runs on **LangChain Deep Agents** (LangGraph
+- **Deliberately not Strands.** AI Assistant runs on **LangChain Deep Agents** (LangGraph
   under the hood) so the platform demonstrates a second framework. The isolation
-  is the point: `backend/avi/` is its own image with its own `uv.lock`, and the
+  is the point: `backend/ai-assistant/` is its own image with its own `uv.lock`, and the
   integration surface is only the SSE frame contract, the DynamoDB keys and the
   shared `retrieval` package. LangChain is imported **inside functions**, never at
   module scope, so one shared package serves both the container and a slim Lambda.
 - **Two ingress paths, one engine.**
-  - **Signed-in** — `POST /v1/avi/session` (Auth0 JWT at the gateway) → the
-    `avi-session` control plane resolves `sub` → `userId` and **signs a session
-    token** (HMAC) → launches the **Avi MicroVM** → the browser streams SSE from
+  - **Signed-in** — `POST /v1/ai-assistant/session` (Auth0 JWT at the gateway) → the
+    `ai-assistant` control plane resolves `sub` → `userId` and **signs a session
+    token** (HMAC) → launches the **AI Assistant MicroVM** → the browser streams SSE from
     it. Sessions are reused, so the ~2.3 s MicroVM start is paid once.
-  - **Guest** — `POST /v1/avi/badge` (NONE auth, throttled hard) → the same
+  - **Guest** — `POST /v1/ai-assistant/badge` (NONE auth, throttled hard) → the same
     control plane applies a per-IP counter, signs a **guest badge** (the same
     token with `guest: true`) and returns the MicroVM ingress, in one round trip.
     Nothing a guest does is stored.
-  - `backend/avi/handler.py` is also a **standalone guest Lambda** (a Function URL
+  - `backend/ai-assistant/handler.py` is also a **standalone guest Lambda** (a Function URL
     in `RESPONSE_STREAM` mode) for a deployment that wants guests served without a
     MicroVM. Its zip excludes the agent framework; `tests/test_guest_packaging.py`
     fails the build if that regresses.
 - **Identity is never taken from the request.** The agent service verifies the
   HMAC on the token the control plane minted (cross-language contract, pinned by
-  `test_avi_token_contract.py`). A `userId` in a request body is ignored.
+  `test_ai_assistant_token_contract.py`). A `userId` in a request body is ignored.
 - **Intent classification is its own component with its own model**
-  (`avi/classifier.py`, default `zai.glm-4.7-flash`): a rules stage that costs
+  (`ai-assistant/classifier.py`, default `zai.glm-4.7-flash`): a rules stage that costs
   nothing, then one strict-JSON call. It **fails open** to `platform`, so a
   classifier outage can never block a real user, and an off-topic reply ships
   tappable example questions instead of a dead end.
 - **Retrieval reuses the platform's own stack** under a reserved `platform`
   scope: `USER#platform` / `KB#platform-docs` (id `kb_platform_docs_0001`) with
-  the `idx-platform` S3 Vectors index. Avi implements RRF fusion over
+  the `idx-platform` S3 Vectors index. AI Assistant implements RRF fusion over
   `retrieval.s3_vectors` + `retrieval.term_index` and hydrates parents, so the
   exact cache, semantic cache and BM25 behave as they do for a user's KB.
 - **The corpus is generated from the repository** and ingested through the normal
-  pipeline — `tools/avi-knowledge/` reads `frontend/src/content/docs.ts`, the real
+  pipeline — `tools/ai-assistant-knowledge/` reads `frontend/src/content/docs.ts`, the real
   route table (nested routes included), the sidebar registries and the **enforced
-  limit constants**, then writes 48 documents to `knowledge/avi/`. `make
-  avi-knowledge` regenerates; `make avi-knowledge-verify` fails CI when the
-  committed corpus is stale. It also emits `backend/avi/avi/features.json` (the
-  deep-link allow-list) and `frontend/src/content/aviStarters.ts` (the widget's
+  limit constants**, then writes 48 documents to `knowledge/ai-assistant/`. `make
+  ai-assistant-knowledge` regenerates; `make ai-assistant-knowledge-verify` fails CI when the
+  committed corpus is stale. It also emits `backend/ai-assistant/src/features.json` (the
+  deep-link allow-list) and `frontend/src/content/aiAssistantStarters.ts` (the widget's
   example questions), so those three can never drift from their sources.
 - **Limits are stated from code, not prose.** The limits document is generated
   from `quotas.py` and the `user-api` constants, and points at `/usage` for
-  per-user overrides — `docs.ts` and this file still carry older figures, so Avi
+  per-user overrides — `docs.ts` and this file still carry older figures, so AI Assistant
   deliberately does not trust them.
 - **Agent shape.** A turn is a plan frame, then a tool-using loop
   (`search_platform_docs`, `find_page`, `escalate_to_support`) with a read-only
   filesystem (`StateBackend` + a read permission), **no subagents**, and a
   `TurnCap` middleware bounding model calls per turn. Greetings and refusals use a
-  single direct model call instead of the graph, via `avi/llm.py` (raw Bedrock
+  single direct model call instead of the graph, via `ai-assistant/llm.py` (raw Bedrock
   streaming), which is also what keeps the guest zip small.
-- **Frames** (`avi/frames.py`) are the platform's existing agent-run contract plus
-  one new `avi.intent` frame, so `lib/runState.ts`, `RunTimeline` and `ChatAnswer`
-  render an Avi answer with no Avi-specific renderer.
-- **Persistence** is Avi-prefixed (`AVICHAT#`, `AVIFEEDBACK#`, `AVITRACE#`,
-  `AVIEVAL#`) so nothing it writes can surface in the agent chat sidebar, the agent
+- **Frames** (`ai-assistant/frames.py`) are the platform's existing agent-run contract plus
+  one new `ai-assistant.intent` frame, so `lib/runState.ts`, `RunTimeline` and `ChatAnswer`
+  render an AI Assistant answer with no AI Assistant-specific renderer.
+- **Persistence** is AI Assistant-prefixed (`AICHAT#`, `AIFEEDBACK#`, `AITRACE#`,
+  `AIEVAL#`) so nothing it writes can surface in the agent chat sidebar, the agent
   trace list or the agent feedback table. Transcripts and trace trees are S3
   objects; only small metadata items are in DynamoDB. Guests are never persisted.
 - **Rate limiting is layered**, cheapest first: API Gateway route throttles
-  (`/v1/avi/badge` burst 4/rate 2, `/v1/avi/session` 10/5), then a per-caller
-  fixed-window counter (`core.ratelimit`, kind `avi-hour`/`avi-day`), then the
+  (`/v1/ai-assistant/badge` burst 4/rate 2, `/v1/ai-assistant/session` 10/5), then a per-caller
+  fixed-window counter (`core.ratelimit`, kind `ai-assistant-hour`/`ai-assistant-day`), then the
   in-agent turn cap. Every model call also passes `core.ratelimit_bedrock`.
-- **Admin page** `/admin/avi` (routes `GET|POST /v1/admin/avi`, plus owner-scoped
+- **Admin page** `/admin/ai-assistant` (routes `GET|POST /v1/admin/ai-assistant`, plus owner-scoped
   `/feedback`, `/traces`, `/conversations`, `/evaluations`, `/knowledge` in
-  `backend/services/admin/admin-console/src/avi.py`): the kill switch, the four
+  `backend/services/admin/admin-console/src/ai-assistant.py`): the kill switch, the four
   model pickers with their measured latency, the limits, feedback, traces and the
-  corpus status. Settings live on `PLATFORM#SETTINGS` / `#AVI`, cached 30 s, so a
+  corpus status. Settings live on `PLATFORM#SETTINGS` / `#AI_ASSISTANT`, cached 30 s, so a
   change applies without a redeploy.
 - **Evaluations** are a committed set of 81 cases
-  (`tools/avi-knowledge/eval/avi-eval.jsonl`) across six kinds — answerable, find,
+  (`tools/ai-assistant-knowledge/eval/ai-assistant-eval.jsonl`) across six kinds — answerable, find,
   refuse, boundary, unknown, multiturn — each naming the page a correct answer must
   cite, and validated against the real route table at generation time.
-- **Metrics** use CloudWatch EMF under `get1agent/avi` (`avi/metrics.py`), and cost
-  is attributed through `core.usage` so Avi's numbers match billing.
-- **Infra**: `infra/terraform/modules/avi_runtime/` (ECR + MicroVM image + build
-  and runtime roles), `avi-guest` and `avi-session` registered in
-  `backend/registry.json` under the `avi` group, and
-  `bash infra/aws/deploy-avi.sh` to build/push/apply. The Lambda module gained
+- **Metrics** use CloudWatch EMF under `get1agent/ai-assistant` (`ai-assistant/metrics.py`), and cost
+  is attributed through `core.usage` so AI Assistant's numbers match billing.
+- **Infra**: `infra/terraform/modules/ai_assistant_runtime/` (ECR + MicroVM image + build
+  and runtime roles), `ai-assistant` and `ai-assistant` registered in
+  `backend/registry.json` under the `ai-assistant` group, and
+  `bash infra/aws/deploy-ai-assistant.sh` to build/push/apply. The Lambda module gained
   optional **Function URL** support (`create_function_url`,
   `function_url_invoke_mode`) for the guest streaming ingress.
-- **Local**: `AVI_MODE=local` runs the agent on `:8091`
-  (`VITE_AVI_URL=http://localhost:8091`), and `VITE_AVI_MICROVM=false` makes the
+- **Local**: `AI_ASSISTANT_MODE=local` runs the agent on `:8091`
+  (`VITE_AI_ASSISTANT_URL=http://localhost:8091`), and `VITE_AI_ASSISTANT_MICROVM=false` makes the
   widget stream straight from it.
 
 ### Agent runtime (AgentCore + Strands)

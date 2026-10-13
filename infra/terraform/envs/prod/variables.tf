@@ -374,38 +374,41 @@ variable "agent_run_allowed_origins" {
   description = "Origins allowed to call the agent-run endpoints (control plane + MicroVM)"
 }
 
-# --- Avi (the in-product assistant) ------------------------------------------
-# Avi is a separate subsystem: its own microVM image, its own Lambdas, its own
-# reserved knowledge scope. These variables are what `infra/aws/deploy-avi.sh`
+# --- AI Assistant (the in-product assistant) ------------------------------------------
+# AI Assistant is a separate subsystem: its own microVM image, its own Lambdas, its own
+# reserved knowledge scope. These variables are what `infra/aws/deploy-ai-assistant.sh`
 # sets after it pushes the agent container.
 
-variable "enable_avi" {
+variable "enable_ai_assistant" {
   type        = bool
   default     = true
-  description = "Deploy Avi (the in-product assistant): guest Lambda, control plane and MicroVM image"
+  description = "Deploy AI Assistant (the in-product assistant): guest Lambda, control plane and MicroVM image"
 }
 
-variable "avi_agent_image_uri" {
-  type        = string
-  default     = ""
-  description = "ARM64 ECR image URI for the Avi agent container (push it before apply)"
-}
+# `ai_assistant_agent_image_uri` and `ai_assistant_microvm_zip` used to live here and are gone.
+#
+# Neither was ever read: the AI Assistant agent image URI is baked into the MicroVM artifact
+# by deploy-ai-assistant.sh (which templates the Dockerfile), and the artifact path is
+# `local.ai_assistant_microvm_zip`, a fixed location that deploy-ai-assistant.sh writes to. Both were
+# pure configuration you had to supply for nothing.
+#
+# Worse, ai_assistant_microvm_zip sat in the module `count` expressions, so "the artifact
+# path is empty" silently became "delete the whole AI Assistant runtime". Intent
+# (enable_ai_assistant) and artifact-presence are now separate concerns, as they are for
+# module.agent_runtime.
 
-variable "avi_microvm_zip" {
-  type        = string
-  default     = ""
-  description = "Path to the Avi MicroVM artifact zip (Dockerfile + Node streaming proxy)"
-}
-
-variable "avi_session_secret" {
-  type        = string
-  default     = ""
+variable "ai_assistant_session_secret" {
+  type = string
+  # No default on purpose. With `default = ""` a missing value did not fail — it
+  # applied an empty string over the live one, leaving AI Assistant unable to mint a token
+  # the agent would verify, silently. Required means a missing value is a plan
+  # error naming the variable.
   sensitive   = true
-  description = "HMAC secret for Avi session tokens. Generate with: openssl rand -hex 32. The control plane mints with it; the agent verifies."
+  description = "HMAC secret for AI Assistant session tokens. openssl rand -hex 32. The control plane mints with it; the agent verifies. Must be the same value on every deploy."
 }
 
-variable "avi_guest_salt" {
+variable "ai_assistant_guest_salt" {
   type        = string
-  default     = "get1agent-avi"
+  default     = "get1agent-ai-assistant"
   description = "Salt for the per-IP guest rate-limit bucket hash (raw IPs are never stored)"
 }

@@ -88,14 +88,14 @@ ROUTES = {
         ("GET", "/v1/user/settings"),
         ("POST", "/v1/user/settings"),
         ("GET", "/v1/user/network"),
-        # Avi feedback. The browser cannot reach the agent service's own
+        # AI Assistant feedback. The browser cannot reach the agent service's own
         # `POST /feedback` (it would need the MicroVM ingress token), so a thumb
-        # is recorded through the ordinary user API. Avi's *turns* never come
+        # is recorded through the ordinary user API. AI Assistant's *turns* never come
         # through here: locally the widget streams straight from
-        # `make avi-local-agent` (VITE_AVI_URL + VITE_AVI_MICROVM=false), which is
-        # why there are no /v1/avi/badge or /v1/avi/session routes below — the
+        # `make ai-assistant-local-agent` (VITE_AI_ASSISTANT_URL + VITE_AI_ASSISTANT_MICROVM=false), which is
+        # why there are no /v1/ai-assistant/badge or /v1/ai-assistant/session routes below — the
         # control-plane Lambda and Lambda MicroVMs are not emulated in Floci.
-        ("POST", "/v1/avi/feedback"),
+        ("POST", "/v1/ai-assistant/feedback"),
         # DPDP data-principal routes (consent, access, erasure, grievance).
         ("GET", "/v1/user/consent"),
         ("POST", "/v1/user/consent"),
@@ -284,19 +284,19 @@ ROUTES = {
         ("GET", "/v1/admin/platform/bedrock-features"),
         ("GET", "/v1/admin/platform/network"),
         ("POST", "/v1/admin/platform/network"),
-        # Admin → Avi. The page is reachable locally only if these exist, because
+        # Admin → AI Assistant. The page is reachable locally only if these exist, because
         # the local stack builds its own route table from this dict (it never reads
         # the Terraform routes) — a route added only to api_gateway.tf 404s here.
-        ("GET", "/v1/admin/avi"),
-        ("POST", "/v1/admin/avi"),
-        ("GET", "/v1/admin/avi/feedback"),
-        ("DELETE", "/v1/admin/avi/feedback/{userId}/{runId}"),
-        ("GET", "/v1/admin/avi/traces"),
-        ("GET", "/v1/admin/avi/traces/{userId}/{traceId}"),
-        ("GET", "/v1/admin/avi/conversations"),
-        ("GET", "/v1/admin/avi/conversations/{userId}/{conversationId}"),
-        ("GET", "/v1/admin/avi/evaluations"),
-        ("GET", "/v1/admin/avi/knowledge"),
+        ("GET", "/v1/admin/ai-assistant"),
+        ("POST", "/v1/admin/ai-assistant"),
+        ("GET", "/v1/admin/ai-assistant/feedback"),
+        ("DELETE", "/v1/admin/ai-assistant/feedback/{userId}/{runId}"),
+        ("GET", "/v1/admin/ai-assistant/traces"),
+        ("GET", "/v1/admin/ai-assistant/traces/{userId}/{traceId}"),
+        ("GET", "/v1/admin/ai-assistant/conversations"),
+        ("GET", "/v1/admin/ai-assistant/conversations/{userId}/{conversationId}"),
+        ("GET", "/v1/admin/ai-assistant/evaluations"),
+        ("GET", "/v1/admin/ai-assistant/knowledge"),
     ],
     "mcp_connections": [
         ("GET", "/v1/mcp/catalog"),

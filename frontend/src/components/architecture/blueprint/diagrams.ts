@@ -922,11 +922,11 @@ const flowById = (id: string): RequestFlow =>
   REQUEST_FLOWS.find((f) => f.id === id) as RequestFlow
 
 /* -------------------------------------------------------------------------- */
-/* 4b · Avi (the in-product assistant)                                         */
+/* 4b · AI Assistant (the in-product assistant)                                         */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Avi's flows, kept in their own tab so the assistant is documented as a
+ * AI Assistant's flows, kept in their own tab so the assistant is documented as a
  * separate subsystem rather than folded into the agent or knowledge diagrams.
  *
  * Two ingress paths answer a question — a stateless guest Lambda and an
@@ -934,51 +934,51 @@ const flowById = (id: string): RequestFlow =>
  * intent classifier, then hybrid retrieval over a reserved `platform` knowledge
  * scope ingested through the same pipeline as any user knowledge base.
  */
-export const AVI_FLOWS: RequestFlow[] = [
+export const AI_ASSISTANT_FLOWS: RequestFlow[] = [
   flow(
-    'avi-question',
+    'ai-assistant-question',
     'Question lifecycle',
     Sparkles,
     'ai',
-    'Every Avi question — guest or signed-in — takes the same shape: the launcher opens a dialog on any page and posts the full conversation, a dedicated classifier decides whether the question is about the platform, then a LangChain Deep Agents runtime answers from the reserved platform knowledge scope, streams the tokens back with numbered sources and feature links, and the turn is traced, metered and (for signed-in users) persisted.',
+    'Every AI Assistant question — guest or signed-in — takes the same shape: the launcher opens a dialog on any page and posts the full conversation, a dedicated classifier decides whether the question is about the platform, then a LangChain Deep Agents runtime answers from the reserved platform knowledge scope, streams the tokens back with numbered sources and feature links, and the turn is traced, metered and (for signed-in users) persisted.',
     [
-      { kind: 'client', title: 'Launcher dialog', subtitle: 'Bottom-right on every page', code: 'POST /v1/avi/ask · full transcript', env: 'client' },
+      { kind: 'client', title: 'Launcher dialog', subtitle: 'Bottom-right on every page', code: 'POST /v1/ai-assistant/ask · full transcript', env: 'client' },
       { kind: 'edge', title: 'API Gateway', subtitle: 'Kill switch · route throttle', code: 'guest: NONE auth + IP cap', env: 'edge', aws: 'apiGateway' },
-      { kind: 'lambda', title: 'Session bootstrap', subtitle: 'Signed-in: mint a MicroVM', code: 'POST /v1/avi/session', env: 'lambda' },
-      { kind: 'runtime', title: 'Avi runtime', subtitle: 'Isolated proxy streams SSE', code: 'deepagents · LangGraph', env: 'runtime', aws: 'agentcore' },
+      { kind: 'lambda', title: 'Session bootstrap', subtitle: 'Signed-in: mint a MicroVM', code: 'POST /v1/ai-assistant/session', env: 'lambda' },
+      { kind: 'runtime', title: 'AI Assistant runtime', subtitle: 'Isolated proxy streams SSE', code: 'deepagents · LangGraph', env: 'runtime', aws: 'agentcore' },
       { kind: 'ai', title: 'Intent classifier', subtitle: 'Own model · rules first', code: 'off-topic → examples', env: 'runtime', aws: 'bedrock' },
       { kind: 'ai', title: 'Hybrid retrieval', subtitle: 'Reserved platform scope', code: 'S3 Vectors + BM25 · RRF', env: 'runtime' },
       { kind: 'client', title: 'Answer', subtitle: 'Streamed · [n] · route chips', code: 'sources + deep links', env: 'client' },
-      { kind: 'data', title: 'Trace & feedback', subtitle: 'Spans, cost, thumbs', code: 'AVITRACE# · AVIFEEDBACK#', env: 'data', aws: 'dynamodb' },
+      { kind: 'data', title: 'Trace & feedback', subtitle: 'Spans, cost, thumbs', code: 'AITRACE# · AIFEEDBACK#', env: 'data', aws: 'dynamodb' },
     ],
   ),
   flow(
-    'avi-knowledge',
+    'ai-assistant-knowledge',
     'Corpus ingestion',
     Sparkles,
     'async',
-    'Avi is grounded in the repository, never in a crawl: generators turn the in-app docs, the route and navigation registries, the README/AGENTS design notes and the enforced platform limits into validated markdown, which is pushed through the existing ingestion state machine under a reserved `platform` scope. Because the index stage is delete-then-write per document, a re-run is idempotent — and a CI drift check fails if the committed corpus no longer matches the repo.',
+    'AI Assistant is grounded in the repository, never in a crawl: generators turn the in-app docs, the route and navigation registries, the README/AGENTS design notes and the enforced platform limits into validated markdown, which is pushed through the existing ingestion state machine under a reserved `platform` scope. Because the index stage is delete-then-write per document, a re-run is idempotent — and a CI drift check fails if the committed corpus no longer matches the repo.',
     [
-      { kind: 'lambda', title: 'Corpus generator', subtitle: 'Docs · routes · limits', code: 'make avi-knowledge', env: 'lambda' },
-      { kind: 'data', title: 'Canonical markdown', subtitle: 'Reviewed in git', code: 'knowledge/avi/*.md', env: 'data' },
+      { kind: 'lambda', title: 'Corpus generator', subtitle: 'Docs · routes · limits', code: 'make ai-assistant-knowledge', env: 'lambda' },
+      { kind: 'data', title: 'Canonical markdown', subtitle: 'Reviewed in git', code: 'knowledge/ai-assistant/*.md', env: 'data' },
       { kind: 'data', title: 'raw/platform/', subtitle: 'Reserved scope upload', code: 'ObjectCreated', env: 'data', aws: 's3' },
       { kind: 'lambda', title: 'Ingestion state machine', subtitle: 'Extract → embed → index', code: 'Titan · heading-aware chunks', env: 'lambda', aws: 'stepFunctions' },
       { kind: 'runtime', title: 'Platform index', subtitle: 'Same code as user KBs', code: 'idx-platform · BM25 · parents', env: 'runtime' },
     ],
   ),
   flow(
-    'avi-evaluation',
+    'ai-assistant-evaluation',
     'Quality & control loop',
     Sparkles,
     'cache',
-    'Avi is measured, not assumed. A dedicated model judges a committed question set for correctness, groundedness, citation precision, retrieval hit-rate, link validity and hallucination on unknown topics; a separate scoreboard watches the classifier and the request path. Every turn also emits latency, token and cost metrics and one observation tree, and the resulting numbers drive the admin → Avi controls — so tuning is a config change, not a redeploy.',
+    'AI Assistant is measured, not assumed. A dedicated model judges a committed question set for correctness, groundedness, citation precision, retrieval hit-rate, link validity and hallucination on unknown topics; a separate scoreboard watches the classifier and the request path. Every turn also emits latency, token and cost metrics and one observation tree, and the resulting numbers drive the admin → AI Assistant controls — so tuning is a config change, not a redeploy.',
     [
-      { kind: 'lambda', title: 'Avi eval dataset', subtitle: 'Answerable · refuse · unknown', code: 'avi-eval.jsonl · multi-turn', env: 'lambda' },
-      { kind: 'runtime', title: 'Target under test', subtitle: 'The live Avi runtime', code: 'answer + sources + route', env: 'runtime' },
+      { kind: 'lambda', title: 'AI Assistant eval dataset', subtitle: 'Answerable · refuse · unknown', code: 'ai-assistant-eval.jsonl · multi-turn', env: 'lambda' },
+      { kind: 'runtime', title: 'Target under test', subtitle: 'The live AI Assistant runtime', code: 'answer + sources + route', env: 'runtime' },
       { kind: 'ai', title: 'Judge model', subtitle: 'Never the model under test', code: 'Nova 2 Lite · rubric', env: 'runtime', aws: 'bedrock' },
       { kind: 'lambda', title: 'Scoreboard', subtitle: 'Correctness · links · refusal', code: 'hit@1 · groundedness', env: 'lambda' },
-      { kind: 'data', title: 'Metrics & traces', subtitle: 'Latency, tokens, cost', code: 'EMF get1agent/avi', env: 'data', aws: 'cloudwatch' },
-      { kind: 'client', title: 'Admin controls', subtitle: 'Tune without a redeploy', code: '/admin/avi', env: 'client' },
+      { kind: 'data', title: 'Metrics & traces', subtitle: 'Latency, tokens, cost', code: 'EMF get1agent/ai-assistant', env: 'data', aws: 'cloudwatch' },
+      { kind: 'client', title: 'Admin controls', subtitle: 'Tune without a redeploy', code: '/admin/ai-assistant', env: 'client' },
     ],
   ),
 ]

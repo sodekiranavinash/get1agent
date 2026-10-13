@@ -178,7 +178,7 @@ export function DocumentationPage() {
 
   // Arriving at `/docs#faq` from somewhere else must actually land on the FAQ.
   // React Router restores no scroll on navigation, so without this an incoming
-  // deep link — every Avi citation that points at documentation — opened the top
+  // deep link — every AI Assistant citation that points at documentation — opened the top
   // of the page and looked broken. Polled across frames rather than delayed on a
   // timer: `/docs` is a lazy route, so on a cold load the section genuinely does
   // not exist yet. `scrollIntoView` honours the section's `scroll-margin-top` and

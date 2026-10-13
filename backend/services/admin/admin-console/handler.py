@@ -986,13 +986,13 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
             return inbox
         if segments[:3] == ["v1", "admin", "platform"]:
             return _route_platform(event, claims, method, segments, _body(event))
-        # Avi (the in-product assistant): config, and the owner-scoped reads the
-        # admin page needs. Its routes live in their own module so Avi's surface
+        # AI Assistant (the in-product assistant): config, and the owner-scoped reads the
+        # admin page needs. Its routes live in their own module so AI Assistant's surface
         # stays separate from the platform's.
-        if segments[:3] == ["v1", "admin", "avi"]:
-            from src import avi as avi_admin
+        if segments[:3] == ["v1", "admin", "ai-assistant"]:
+            from src import ai_assistant as ai_assistant_admin
 
-            return avi_admin.route(
+            return ai_assistant_admin.route(
                 claims, method, segments, _body(event), _query(event)
             )
         if method == "GET" and path.endswith("/admin/users"):

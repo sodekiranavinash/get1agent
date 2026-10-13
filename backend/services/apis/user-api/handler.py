@@ -6883,7 +6883,7 @@ def _route(
         return _route_memory(claims, method, segments[2:], body, query)
     if segments[:2] == ["v1", "user"]:
         return _route_user(claims, method, segments[2:], body)
-    if segments[:2] == ["v1", "avi"]:
+    if segments[:2] == ["v1", "ai-assistant"]:
         return _route_avi(claims, method, segments[2:], body)
     raise ApiError(404, "Not found")
 
@@ -6894,9 +6894,9 @@ def _route_avi(
     rest: list[str],
     body: dict[str, Any],
 ):
-    """Avi's browser-facing write routes.
+    """AI Assistant's browser-facing write routes.
 
-    An Avi **turn** is served by the control-plane Lambda and the MicroVM, not by
+    An AI Assistant **turn** is served by the control-plane Lambda and the MicroVM, not by
     this API. Feedback is the exception: the agent service exposes
     ``POST /feedback``, but reaching it would require the MicroVM ingress token the
     browser cannot mint, so the thumb is posted to the ordinary JWT-protected API
@@ -6910,11 +6910,11 @@ def _route_avi(
 
 
 def _handle_avi_feedback(claims: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
-    """Record one Avi thumb for the signed-in caller (owner-scoped)."""
-    from data.repositories import avi as avi_repo
+    """Record one AI Assistant thumb for the signed-in caller (owner-scoped)."""
+    from data.repositories import ai_assistant as ai_assistant_repo
 
     profile = get_or_create_user(claims)
-    item = avi_repo.record_feedback(profile["userId"], body)
+    item = ai_assistant_repo.record_feedback(profile["userId"], body)
     return _json(200, {"stored": True, "runId": item.get("runId")})
 
 

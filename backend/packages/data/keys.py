@@ -100,16 +100,16 @@ NOTIFICATION_PREFIX = "NOTIF#"
 # Sort-key prefix for per-case run results under an ``EVALRUN#<runId>`` partition.
 # (Curated datasets/cases live in the LAB# DynamoDB partition.)
 EVAL_CASE_PREFIX = "CASE#"
-# --- Avi (the in-product assistant) ------------------------------------------
-# Avi owns its own prefixes so its conversations, feedback, traces and eval runs
+# --- AI Assistant (the in-product assistant) ------------------------------------------
+# AI Assistant owns its own prefixes so its conversations, feedback, traces and eval runs
 # never mix with the agent equivalents in the sidebar, the trace list or the
 # admin feedback table.
-AVI_CHAT_PREFIX = "AVICHAT#"
-AVI_FEEDBACK_PREFIX = "AVIFEEDBACK#"
-AVI_TRACE_PREFIX = "AVITRACE#"
-AVI_EVAL_RUN_PREFIX = "AVIEVAL#"
+AI_ASSISTANT_CHAT_PREFIX = "AICHAT#"
+AI_ASSISTANT_FEEDBACK_PREFIX = "AIFEEDBACK#"
+AI_ASSISTANT_TRACE_PREFIX = "AITRACE#"
+AI_ASSISTANT_EVAL_RUN_PREFIX = "AIEVAL#"
 # Fixed-window guest counter partition (keyed by a hash of the caller's IP).
-AVI_GUEST_RATE_PK = "RATE#avi-guest"
+AI_ASSISTANT_GUEST_RATE_PK = "RATE#ai-assistant"
 USER_PREFIX = "USER#"
 SUB_PREFIX = "SUB#"
 
@@ -361,44 +361,44 @@ def security_all_sk(created_at: str, report_id: str) -> str:
     return f"{created_at}#{report_id}"
 
 
-# --- Avi (the in-product assistant) ------------------------------------------
+# --- AI Assistant (the in-product assistant) ------------------------------------------
 #
-# Avi keeps its own entity prefixes so nothing it writes can appear in the
+# AI Assistant keeps its own entity prefixes so nothing it writes can appear in the
 # agent chat sidebar (``CHAT#``), the agent trace list (``TRACE#``) or the
-# agent run-feedback list (``FEEDBACK#``). Avi conversations and traces are
-# surfaced only on the admin → Avi page.
+# agent run-feedback list (``FEEDBACK#``). AI Assistant conversations and traces are
+# surfaced only on the admin → AI Assistant page.
 
 
-def avi_chat_sk(conversation_id: str) -> str:
-    """One Avi conversation's metadata (transcript lives in S3)."""
-    return f"{AVI_CHAT_PREFIX}{conversation_id}"
+def ai_assistant_chat_sk(conversation_id: str) -> str:
+    """One AI Assistant conversation's metadata (transcript lives in S3)."""
+    return f"{AI_ASSISTANT_CHAT_PREFIX}{conversation_id}"
 
 
-def avi_chat_by_user_sk(updated_at: str, conversation_id: str) -> str:
+def ai_assistant_chat_by_user_sk(updated_at: str, conversation_id: str) -> str:
     """GSI2 ``byUser`` sort key: the admin conversation list, newest first."""
-    return f"{AVI_CHAT_PREFIX}{updated_at}#{conversation_id}"
+    return f"{AI_ASSISTANT_CHAT_PREFIX}{updated_at}#{conversation_id}"
 
 
-def avi_feedback_sk(run_id: str) -> str:
-    """One Avi answer's feedback (thumbs + comment + the question it answered)."""
-    return f"{AVI_FEEDBACK_PREFIX}{run_id}"
+def ai_assistant_feedback_sk(run_id: str) -> str:
+    """One AI Assistant answer's feedback (thumbs + comment + the question it answered)."""
+    return f"{AI_ASSISTANT_FEEDBACK_PREFIX}{run_id}"
 
 
-def avi_trace_sk(trace_id: str) -> str:
-    """One Avi run's trace index item (the tree itself lives in S3)."""
-    return f"{AVI_TRACE_PREFIX}{trace_id}"
+def ai_assistant_trace_sk(trace_id: str) -> str:
+    """One AI Assistant run's trace index item (the tree itself lives in S3)."""
+    return f"{AI_ASSISTANT_TRACE_PREFIX}{trace_id}"
 
 
 def avi_trace_by_user_sk(started_at: str, trace_id: str) -> str:
-    """GSI2 ``byUser`` sort key: the admin Avi trace list, newest first."""
-    return f"{AVI_TRACE_PREFIX}{started_at}#{trace_id}"
+    """GSI2 ``byUser`` sort key: the admin AI Assistant trace list, newest first."""
+    return f"{AI_ASSISTANT_TRACE_PREFIX}{started_at}#{trace_id}"
 
 
-def avi_eval_run_sk(run_id: str) -> str:
-    """GSI2 ``byUser`` sort key for an Avi evaluation run (admin-owned)."""
-    return f"{AVI_EVAL_RUN_PREFIX}{run_id}"
+def ai_assistant_eval_run_sk(run_id: str) -> str:
+    """GSI2 ``byUser`` sort key for an AI Assistant evaluation run (admin-owned)."""
+    return f"{AI_ASSISTANT_EVAL_RUN_PREFIX}{run_id}"
 
 
-def avi_guest_rate_sk(window: str) -> str:
-    """A per-IP guest counter for one fixed window (under ``RATE#avi-guest``)."""
+def ai_assistant_rate_sk(window: str) -> str:
+    """A per-IP guest counter for one fixed window (under ``RATE#ai-assistant``)."""
     return f"W#{window}"

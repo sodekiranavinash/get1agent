@@ -1,0 +1,27 @@
+[project]
+name = "get1agent-ai-assistant"
+version = "0.0.0"
+description = "AI Assistant — the in-product assistant: LangChain Deep Agents runtime on Lambda MicroVMs"
+requires-python = ">=3.11"
+
+# AI Assistant is deliberately its own service with its own lockfile: it is the platform's
+# one non-Strands agent, so keeping LangChain/LangGraph out of the agent-runtime
+# image means neither framework can break the other.
+dependencies = [
+    # The harness: planning, filesystem-in-state, context management, middleware.
+    "deepagents[aws]>=0.7.0",
+    # The HTTP surface the MicroVM proxy forwards to (/invocations, /ping).
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    # AWS access: DynamoDB, S3, S3 Vectors, Bedrock.
+    "boto3>=1.35",
+    # The platform's own shared packages need these transitively, and declaring
+    # them keeps the lockfile honest for the Lambda zip build too.
+    "python-dateutil>=2.9",
+    "tzdata>=2024.1",
+]
+
+# This is an application, not an installable library: uv installs only the
+# dependencies into `.venv` and never tries to build/install the project itself.
+[tool.uv]
+package = false

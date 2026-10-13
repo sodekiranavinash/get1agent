@@ -221,10 +221,10 @@
       "layers": []
     },
     {
-      "name": "avi-guest",
-      "group": "avi",
-      "dir": "backend/avi",
-      "function_name": "get1agent-prod-avi-guest",
+      "name": "ai-assistant",
+      "group": "ai-assistant",
+      "dir": "backend/ai-assistant",
+      "function_name": "get1agent-prod-ai-assistant",
       "handler": "handler.lambda_handler",
       "runtime": "python3.13",
       "packages": [
@@ -235,10 +235,10 @@
       "layers": []
     },
     {
-      "name": "avi-session",
-      "group": "avi",
-      "dir": "backend/services/avi/control-plane",
-      "function_name": "get1agent-prod-avi-session",
+      "name": "ai-assistant",
+      "group": "ai-assistant",
+      "dir": "backend/services/ai-assistant/control-plane",
+      "function_name": "get1agent-prod-ai-assistant",
       "handler": "index.handler",
       "runtime": "nodejs22.x",
       "packages": [],

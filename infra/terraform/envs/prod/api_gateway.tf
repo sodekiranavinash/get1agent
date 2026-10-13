@@ -21,12 +21,12 @@ locals {
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
-    # Avi feedback. The browser cannot reach the agent service's own
+    # AI Assistant feedback. The browser cannot reach the agent service's own
     # `POST /feedback` (it would need the MicroVM ingress token), so a thumb is
-    # recorded through the ordinary user API into the same AVIFEEDBACK# item.
+    # recorded through the ordinary user API into the same AIFEEDBACK# item.
     avi_feedback = {
       method               = "POST"
-      path                 = "/v1/avi/feedback"
+      path                 = "/v1/ai-assistant/feedback"
       lambda_invoke_arn    = module.user_api[0].invoke_arn
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
@@ -1225,76 +1225,76 @@ locals {
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
-    # Avi admin controls (/v1/admin/avi/*): the kill switch, the model pickers
+    # AI Assistant admin controls (/v1/admin/ai-assistant/*): the kill switch, the model pickers
     # and limits, plus the owner-scoped feedback/trace/conversation reads the
-    # /admin/avi page makes. Distinct from `local.avi_routes`, which is the
-    # user-facing /v1/avi/* ingress served by the Avi control plane.
-    admin_avi_config = {
+    # /admin/ai-assistant page makes. Distinct from `local.ai_assistant_routes`, which is the
+    # user-facing /v1/ai-assistant/* ingress served by the AI Assistant control plane.
+    admin_ai_assistant_config = {
       method               = "GET"
-      path                 = "/v1/admin/avi"
+      path                 = "/v1/admin/ai-assistant"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
-    admin_avi_config_update = {
+    admin_ai_assistant_config_update = {
       method               = "POST"
-      path                 = "/v1/admin/avi"
+      path                 = "/v1/admin/ai-assistant"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
-    admin_avi_feedback = {
+    admin_ai_assistant_feedback = {
       method               = "GET"
-      path                 = "/v1/admin/avi/feedback"
+      path                 = "/v1/admin/ai-assistant/feedback"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
-    admin_avi_feedback_delete = {
+    admin_ai_assistant_feedback_delete = {
       method               = "DELETE"
-      path                 = "/v1/admin/avi/feedback/{userId}/{runId}"
+      path                 = "/v1/admin/ai-assistant/feedback/{userId}/{runId}"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
-    admin_avi_traces = {
+    admin_ai_assistant_traces = {
       method               = "GET"
-      path                 = "/v1/admin/avi/traces"
+      path                 = "/v1/admin/ai-assistant/traces"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
-    admin_avi_trace_detail = {
+    admin_ai_assistant_trace_detail = {
       method               = "GET"
-      path                 = "/v1/admin/avi/traces/{userId}/{traceId}"
+      path                 = "/v1/admin/ai-assistant/traces/{userId}/{traceId}"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
-    admin_avi_conversations = {
+    admin_ai_assistant_conversations = {
       method               = "GET"
-      path                 = "/v1/admin/avi/conversations"
+      path                 = "/v1/admin/ai-assistant/conversations"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
-    admin_avi_conversation_detail = {
+    admin_ai_assistant_conversation_detail = {
       method               = "GET"
-      path                 = "/v1/admin/avi/conversations/{userId}/{conversationId}"
+      path                 = "/v1/admin/ai-assistant/conversations/{userId}/{conversationId}"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
-    admin_avi_evaluations = {
+    admin_ai_assistant_evaluations = {
       method               = "GET"
-      path                 = "/v1/admin/avi/evaluations"
+      path                 = "/v1/admin/ai-assistant/evaluations"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
     }
-    admin_avi_knowledge = {
+    admin_ai_assistant_knowledge = {
       method               = "GET"
-      path                 = "/v1/admin/avi/knowledge"
+      path                 = "/v1/admin/ai-assistant/knowledge"
       lambda_invoke_arn    = module.admin_console[0].invoke_arn
       lambda_function_name = module.admin_console[0].function_name
       authorization_type   = "JWT"
@@ -1424,26 +1424,26 @@ locals {
     }
   } : null
 
-  # Avi (the in-product assistant). One control plane serves both audiences:
+  # AI Assistant (the in-product assistant). One control plane serves both audiences:
   # `/badge` is unauthenticated by design (guests have no account) and throttled
   # much harder; `/session` requires the gateway-verified JWT. Both return the
   # MicroVM endpoint plus a signed token the agent service verifies, so the service
   # never has to trust a header or a body field.
-  avi_routes = var.enable_avi && one(module.avi_session[*].invoke_arn) != null ? {
+  ai_assistant_routes = var.enable_ai_assistant && one(module.ai_assistant_session[*].invoke_arn) != null ? {
     avi_badge = {
       method               = "POST"
-      path                 = "/v1/avi/badge"
-      lambda_invoke_arn    = one(module.avi_session[*].invoke_arn)
-      lambda_function_name = one(module.avi_session[*].function_name)
+      path                 = "/v1/ai-assistant/badge"
+      lambda_invoke_arn    = one(module.ai_assistant_session[*].invoke_arn)
+      lambda_function_name = one(module.ai_assistant_session[*].function_name)
       authorization_type   = "NONE"
       throttle_burst_limit = 4
       throttle_rate_limit  = 2
     }
-    avi_session = {
+    ai_assistant_session = {
       method               = "POST"
-      path                 = "/v1/avi/session"
-      lambda_invoke_arn    = one(module.avi_session[*].invoke_arn)
-      lambda_function_name = one(module.avi_session[*].function_name)
+      path                 = "/v1/ai-assistant/session"
+      lambda_invoke_arn    = one(module.ai_assistant_session[*].invoke_arn)
+      lambda_function_name = one(module.ai_assistant_session[*].function_name)
       authorization_type   = "JWT"
       throttle_burst_limit = 10
       throttle_rate_limit  = 5
@@ -1473,13 +1473,13 @@ module "api_gateway" {
 
   # /health is a MOCK 200 integration inside the api_gateway module (no Lambda).
   # Route groups are composed in locals: `merge()` accepts several arguments and
-  # ignores nulls, so each optional group (the agent runtime, Avi) is its own flat
+  # ignores nulls, so each optional group (the agent runtime, AI Assistant) is its own flat
   # conditional instead of a ternary nested inside another ternary. Referencing a
   # module that `count = 0` removed is avoided with `one(...)`, which yields null
   # rather than erroring.
   lambda_routes = merge(
     local.backend_lambda_routes,
     local.agent_runtime_routes,
-    local.avi_routes,
+    local.ai_assistant_routes,
   )
 }

@@ -21,15 +21,15 @@ locals {
   ingestion_watchdog_zip   = abspath("${path.module}/../../../../backend/services/ingestion/ingestion-watchdog/dist/function.zip")
   agent_run_zip            = abspath("${path.module}/../../../../backend/services/agent-run/dist/function.zip")
   agent_run_microvm_zip    = abspath("${path.module}/../../../../backend/services/agent-run/dist/microvm.zip")
-  # Avi (the in-product assistant): the stateless guest Lambda and the MicroVM
+  # AI Assistant (the in-product assistant): the stateless guest Lambda and the MicroVM
   # artifact (Dockerfile + Node proxy) that Lambda builds into an image.
-  avi_guest_zip   = abspath("${path.module}/../../../../backend/avi/dist/function.zip")
-  avi_session_zip = abspath("${path.module}/../../../../backend/services/avi/control-plane/dist/function.zip")
-  avi_microvm_zip = abspath("${path.module}/../../../../backend/services/avi/microvm/dist/microvm.zip")
+  ai_assistant_zip   = abspath("${path.module}/../../../../backend/ai-assistant/dist/function.zip")
+  ai_assistant_session_zip = abspath("${path.module}/../../../../backend/services/ai-assistant/control-plane/dist/function.zip")
+  ai_assistant_microvm_zip = abspath("${path.module}/../../../../backend/services/ai-assistant/microvm/dist/microvm.zip")
 
-  # The browser origins Avi's WebSocket and guest Function URL accept. Kept in
+  # The browser origins AI Assistant's WebSocket and guest Function URL accept. Kept in
   # step with the API Gateway CORS list in api_gateway.tf.
-  avi_allowed_origins = [
+  ai_assistant_allowed_origins = [
     "https://www.get1agent.com",
     "http://localhost:5173",
   ]
@@ -1077,7 +1077,7 @@ module "admin_console" {
   timeout     = 300
 
   dynamodb_table_arns = [module.database[0].table_arn]
-  # Admin → Avi reads a conversation transcript and a trace tree from S3 (the
+  # Admin → AI Assistant reads a conversation transcript and a trace tree from S3 (the
   # index items and config live in DynamoDB).
   s3_bucket_arns = [module.knowledge_storage[0].bucket_arn]
 
@@ -1107,7 +1107,7 @@ module "admin_console" {
     MCP_GATEWAY_URL = length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_url : ""
     MCP_TRANSPORT   = "gateway"
     BEDROCK_REGION  = var.aws_region
-    # Avi transcripts and trace trees (`/v1/admin/avi/{traces,conversations}/…`).
+    # AI Assistant transcripts and trace trees (`/v1/admin/ai-assistant/{traces,conversations}/…`).
     S3_BUCKET = module.knowledge_storage[0].bucket_name
     S3_REGION = var.aws_region
     # Platform status routes (/v1/admin/platform/*): Identity, Registry,
@@ -1634,29 +1634,29 @@ module "scheduler" {
   depends_on = [module.database]
 }
 
-# --- Avi (the in-product assistant) ------------------------------------------
+# --- AI Assistant (the in-product assistant) ------------------------------------------
 #
 # Three pieces, deliberately separate from the agent runtime:
 #
-#   * `avi_guest`   — the stateless guest ingress. A Function URL in
+#   * `ai_assistant`   — the stateless guest ingress. A Function URL in
 #                     RESPONSE_STREAM mode, because API Gateway HTTP APIs cannot
 #                     stream and cap an integration at 30s. It has no MicroVM and
 #                     no session, and it stores nothing.
-#   * `avi_session` — the control plane. Resolves the verified Auth0 sub to a
+#   * `ai_assistant_session` — the control plane. Resolves the verified Auth0 sub to a
 #                     userId, signs the session token the agent verifies, and
 #                     launches the MicroVM. It never sees a question.
-#   * `module.avi_runtime` — the MicroVM image that runs the agent container.
+#   * `module.ai_assistant_runtime` — the MicroVM image that runs the agent container.
 #
-# Avi is off until its agent image exists, because the MicroVM build pulls it.
+# AI Assistant is off until its agent image exists, because the MicroVM build pulls it.
 
-module "avi_guest" {
-  count  = var.enable_backend_lambdas && var.enable_avi ? 1 : 0
+module "ai_assistant" {
+  count  = var.enable_backend_lambdas && var.enable_ai_assistant ? 1 : 0
   source = "../../modules/lambda_function"
 
-  name             = "get1agent-prod-avi-guest"
+  name             = "get1agent-prod-ai-assistant"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
-  filename         = local.avi_guest_zip
-  source_code_hash = try(filebase64sha256(local.avi_guest_zip), "")
+  filename         = local.ai_assistant_zip
+  source_code_hash = try(filebase64sha256(local.ai_assistant_zip), "")
   handler          = "handler.lambda_handler"
   runtime          = "python3.13"
   layer_arns       = []
@@ -1675,16 +1675,16 @@ module "avi_guest" {
   create_function_url       = true
   function_url_invoke_mode  = "RESPONSE_STREAM"
   function_url_auth_type    = "NONE"
-  function_url_cors_origins = local.avi_allowed_origins
+  function_url_cors_origins = local.ai_assistant_allowed_origins
 
   environment = {
     DYNAMODB_TABLE    = module.database[0].table_name
     S3_BUCKET         = module.knowledge_storage[0].bucket_name
     BEDROCK_REGION    = "ap-south-1"
-    AVI_SCOPE         = "platform"
-    AVI_KB_ID         = "kb_platform_docs_0001"
-    AVI_GUEST_SALT    = var.avi_guest_salt
-    AVI_GUEST_ENABLED = "true"
+    AI_ASSISTANT_SCOPE         = "platform"
+    AI_ASSISTANT_KB_ID         = "kb_platform_docs_0001"
+    AI_ASSISTANT_GUEST_SALT    = var.ai_assistant_guest_salt
+    AI_ASSISTANT_GUEST_ENABLED = "true"
     VECTOR_STORE      = "s3vectors"
     EMBED_MODE        = "bedrock"
     CACHE_BACKEND     = "dynamodb"
@@ -1693,14 +1693,14 @@ module "avi_guest" {
   depends_on = [module.database, module.knowledge_storage, module.vectors]
 }
 
-module "avi_session" {
-  count  = var.enable_backend_lambdas && var.enable_avi && var.avi_microvm_zip != "" ? 1 : 0
+module "ai_assistant_session" {
+  count  = var.enable_backend_lambdas && var.enable_ai_assistant ? 1 : 0
   source = "../../modules/lambda_function"
 
-  name             = "get1agent-prod-avi-session"
+  name             = "get1agent-prod-ai-assistant"
   tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
-  filename         = local.avi_session_zip
-  source_code_hash = try(filebase64sha256(local.avi_session_zip), "")
+  filename         = local.ai_assistant_session_zip
+  source_code_hash = try(filebase64sha256(local.ai_assistant_session_zip), "")
   handler          = "index.handler"
   runtime          = "nodejs22.x"
   layer_arns       = []
@@ -1712,41 +1712,42 @@ module "avi_session" {
 
   environment = {
     DYNAMODB_TABLE                = module.database[0].table_name
-    AVI_MICROVM_IMAGE_ARN         = try(module.avi_runtime[0].microvm_image_arn, "")
-    AVI_SESSION_SECRET            = var.avi_session_secret
-    AVI_GUEST_SALT                = var.avi_guest_salt
-    AVI_GUEST_BADGES_PER_HOUR     = "30"
-    AVI_MICROVM_TOKEN_TTL_MINUTES = "25"
+    AI_ASSISTANT_MICROVM_IMAGE_ARN         = try(module.ai_assistant_runtime[0].microvm_image_arn, "")
+    AI_ASSISTANT_SESSION_SECRET            = var.ai_assistant_session_secret
+    AI_ASSISTANT_GUEST_SALT                = var.ai_assistant_guest_salt
+    AI_ASSISTANT_GUEST_BADGES_PER_HOUR     = "30"
+    AI_ASSISTANT_MICROVM_TOKEN_TTL_MINUTES = "25"
   }
 
-  depends_on = [module.database, module.avi_runtime]
+  depends_on = [module.database, module.ai_assistant_runtime]
 }
 
-module "avi_runtime" {
-  count  = var.enable_backend_lambdas && var.enable_avi && var.avi_microvm_zip != "" ? 1 : 0
-  source = "../../modules/avi_runtime"
+module "ai_assistant_runtime" {
+  count  = var.enable_backend_lambdas && var.enable_ai_assistant ? 1 : 0
+  source = "../../modules/ai_assistant_runtime"
 
   name = "get1agent-prod"
 
-  agent_image_uri = var.avi_agent_image_uri
-  microvm_zip     = local.avi_microvm_zip
+  # No agent_image_uri input: the agent image URI is templated into the artifact's
+  # Dockerfile by deploy-ai-assistant.sh, so the module never needed it. See variables.tf.
+  microvm_zip     = local.ai_assistant_microvm_zip
   artifact_bucket = module.knowledge_storage[0].bucket_name
   # Content-addressed so a rebuilt artifact produces a new image version in place.
   #
   # Wrapped in `try` deliberately: Terraform evaluates a module's arguments even
   # when `count` is 0, so `filesha256` on an artifact that has not been built yet
   # made the WHOLE prod configuration unplannable — not just this module. That
-  # blocked every backend deploy, Avi or not. Empty until the artifact exists.
-  microvm_artifact_key = try("microvms/avi-${substr(filesha256(local.avi_microvm_zip), 0, 16)}.zip", "")
+  # blocked every backend deploy, AI Assistant or not. Empty until the artifact exists.
+  microvm_artifact_key = try("microvms/ai-assistant-${substr(filesha256(local.ai_assistant_microvm_zip), 0, 16)}.zip", "")
 
   table_arn  = module.database[0].table_arn
   bucket_arn = module.knowledge_storage[0].bucket_arn
 
   scope_user_id   = "platform"
   kb_id           = "kb_platform_docs_0001"
-  session_secret  = var.avi_session_secret
-  guest_salt      = var.avi_guest_salt
-  allowed_origins = local.avi_allowed_origins
+  session_secret  = var.ai_assistant_session_secret
+  guest_salt      = var.ai_assistant_guest_salt
+  allowed_origins = local.ai_assistant_allowed_origins
 }
 
 resource "aws_cloudwatch_event_rule" "scheduler" {

@@ -154,7 +154,7 @@ variable "tags" {
 # --- optional Function URL ---------------------------------------------------
 # A Function URL exists for one narrow case: a *streaming* endpoint. API Gateway
 # HTTP APIs cannot stream and cap an integration at 30s, and Lambda response
-# streaming is only reachable through a Function URL — which is why Avi's guest
+# streaming is only reachable through a Function URL — which is why AI Assistant's guest
 # ingress uses one.
 
 variable "create_function_url" {
@@ -172,7 +172,7 @@ variable "function_url_invoke_mode" {
 variable "function_url_auth_type" {
   type        = string
   default     = "NONE"
-  description = "AWS_IAM or NONE. Avi's guest route is NONE, protected by per-IP rate limits instead."
+  description = "AWS_IAM or NONE. AI Assistant's guest route is NONE, protected by per-IP rate limits instead."
 }
 
 variable "function_url_cors_origins" {

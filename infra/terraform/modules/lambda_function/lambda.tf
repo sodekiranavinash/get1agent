@@ -68,7 +68,7 @@ resource "aws_lambda_event_source_mapping" "sqs" {
 
 # --- optional streaming Function URL -----------------------------------------
 # See the variables: this exists for response streaming, not as a general-purpose
-# ingress. Avi's guest path is the only caller.
+# ingress. AI Assistant's guest path is the only caller.
 
 resource "aws_lambda_function_url" "this" {
   count = var.create_function_url ? 1 : 0

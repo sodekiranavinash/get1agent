@@ -63,9 +63,9 @@ node_modules/
 
 # Build output
 dist/
-# Named build-output variants: dist-guest (the avi guest Lambda bundle), dist-ssr,
+# Named build-output variants: dist-guest (the ai-assistant guest Lambda bundle), dist-ssr,
 # etc. These must be covered as a group — enumerating them one at a time is how
-# backend/avi/dist-guest ended up listing ~4,000 untracked vendored files (91 MB)
+# backend/ai-assistant/dist-guest ended up listing ~4,000 untracked vendored files (91 MB)
 # in git status.
 dist-*/
 build/
