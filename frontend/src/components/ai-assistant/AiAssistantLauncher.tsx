@@ -20,13 +20,14 @@ const AiAssistantDialog = lazy(() =>
 )
 
 /**
- * The launcher's resting offset from the viewport bottom, in px (`5.5rem`).
+ * The launcher's resting offset from the viewport bottom, in px (`4.5rem`).
  *
- * The dialog is anchored above this — see `AiAssistantDialog`'s `sm:bottom-40` —
- * so the button stays visible and clickable while the dialog is open, and the icon
- * simply becomes an X. If this changes, that offset has to move with it.
+ * The dialog is anchored above this — `AiAssistantDialog`'s `sm:bottom-32` — so the
+ * button stays visible and clickable while the dialog is open and the icon simply
+ * becomes an X. **These two numbers move together**: the launcher's height plus a
+ * little air is the dialog's floor.
  */
-const LAUNCHER_REST_PX = 88
+const LAUNCHER_REST_PX = 72
 
 /**
  * The one exception, decided by **path**.
@@ -68,7 +69,7 @@ export function AiAssistantLauncher() {
         // Position, not `transform: translate`: every browser understands
         // `bottom`, and the clearance then cannot be lost to a transform shorthand
         // the browser ignores.
-        style={{ bottom: `calc(5.5rem + ${clearance}px)` }}
+        style={{ bottom: `calc(4.5rem + ${clearance}px)` }}
         // `rounded-2xl`, not a full pill: softer than the old square, without
         // reading as a generic chat widget.
         className="fixed right-5 z-[62] grid size-14 place-items-center rounded-2xl border border-accent/30 bg-accent text-white shadow-lg transition-[bottom,scale] duration-200 ease-out hover:scale-105 focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas focus-visible:outline-none"
@@ -77,7 +78,7 @@ export function AiAssistantLauncher() {
         {open ? (
           <X className="size-6" strokeWidth={2.5} />
         ) : (
-          <AviIcon className="size-7" />
+          <AviIcon className="size-8" />
         )}
       </button>
 

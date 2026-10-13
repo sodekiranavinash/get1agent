@@ -6,7 +6,7 @@ import { ArrowUp, Plus, Square, X } from 'lucide-react'
 import { AiAssistantMessage } from './AiAssistantMessage'
 import { useAiAssistant } from './useAiAssistant'
 import { startersFor } from '../../content/aiAssistantStarters'
-import { AiAssistantMark } from './AiAssistantMark'
+import { AviIcon } from './AviIcon'
 import { useApiClient } from '../../lib/api'
 import { useAuthToken } from '../../hooks/useAuthToken'
 import { useDemoMode } from '../../auth/useDemoMode'
@@ -124,12 +124,12 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
         role="dialog"
         aria-modal="true"
         aria-label="Avi, the get1agent assistant"
-        // On desktop the panel is anchored **above** the launcher (`sm:bottom-40`),
+        // On desktop the panel is anchored **above** the launcher (`sm:bottom-32`),
         // not over it: the launcher stays visible and turns into an X, so the
         // control that opened the dialog is the one that closes it. That offset
         // must stay clear of the launcher's `5.5rem` resting height; below `sm` the
         // dialog is a bottom sheet and simply covers the button.
-        className="fixed inset-x-0 bottom-0 z-[61] flex h-[min(80vh,600px)] flex-col overflow-hidden rounded-t-xl border border-border bg-canvas shadow-2xl sm:inset-x-auto sm:right-5 sm:bottom-40 sm:h-[min(540px,72vh)] sm:w-[380px] sm:rounded-xl"
+        className="fixed inset-x-0 bottom-0 z-[61] flex h-[min(80vh,600px)] flex-col overflow-hidden rounded-t-xl border border-border bg-canvas shadow-2xl sm:inset-x-auto sm:right-5 sm:bottom-32 sm:h-[min(540px,72vh)] sm:w-[380px] sm:rounded-xl"
       >
         {/* Grab handle: the phone sheet reads as draggable even though it is not. */}
         <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-border-strong sm:hidden" aria-hidden />
@@ -137,7 +137,7 @@ export function AiAssistantDialog({ open, onClose }: { open: boolean; onClose: (
         {/* Header — fixed above the transcript. */}
         <header className="flex shrink-0 items-center gap-2.5 border-b border-border px-3.5 py-2.5">
           <span className="relative shrink-0">
-            <AiAssistantMark className="size-8 rounded-lg" />
+            <AviIcon className="size-7 text-accent" />
             {streaming && (
               <span className="absolute -right-0.5 -bottom-0.5 size-2.5 animate-pulse rounded-full border-2 border-canvas bg-accent" />
             )}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ExternalLink, User } from 'lucide-react'
 
-import { AiAssistantMark } from './AiAssistantMark'
+import { AviIcon } from './AviIcon'
 
 import { AiAssistantFeedback } from './AiAssistantFeedback'
 import { ChatAnswer } from '../chat/ChatAnswer'
@@ -200,7 +200,7 @@ export function AiAssistantMessage({
 
       {/* The answer, with AI Assistant's mark on the outside. */}
       <div className="flex items-start gap-2">
-        <AiAssistantMark className="mt-0.5 size-6 rounded-md" />
+        <AviIcon className="mt-0.5 size-5 text-accent" />
         <div className="min-w-0 flex-1 pt-0.5">
           {run.answer ? (
             <ChatAnswer

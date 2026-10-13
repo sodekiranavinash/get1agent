@@ -1,23 +1,22 @@
 /**
  * Avi's icon — a solid four-point sparkle.
  *
- * Replaced twice before landing here, for reasons worth recording:
+ * Short history, because the failures are instructive:
  *
  *   - the **product logo** said "this is get1agent", not "there is something here,
  *     click me";
  *   - a **glowing orbit** (core + ring + satellite) looked soft and blurry at the
- *     32px it actually renders at, and its animation read as dated. Thin strokes
- *     and a radial gradient cannot survive that size — the gradient *is* the blur.
+ *     ~30px it actually renders at, and its animation read as dated — a radial
+ *     gradient with 1.1px strokes *is* the blur at that size;
+ *   - a **cluster of three sparkles** read as specks rather than a mark, and a
+ *     **bloom cross** degenerated into an X, colliding with the close control.
  *
- * So this is the opposite approach: one **solid, single-colour** shape with no
- * gradient, no glow and no animation. At 32px a filled four-point star is
- * unmistakable, and it is what the rest of the industry settled on for AI entry
- * points — a convention worth following precisely because it needs no explanation.
- *
- * Deliberately **not** lucide's `Sparkles`: that icon is already used across the
- * platform (chat, playground, landing, architecture), so reusing it for Avi would
- * make the launcher look like decoration that belongs to whatever is on the page.
- * This one is Avi's alone.
+ * So: one **solid, single-colour** shape, no gradient, no glow, no animation. A
+ * filled four-point star is unmistakable at 28px, and it is what the industry
+ * settled on for AI entry points, so it explains itself. Deliberately **not**
+ * lucide's `Sparkles`, which is already used across chat, playground, landing and
+ * architecture — sharing it would make the launcher look like decoration belonging
+ * to the page rather than a fixed control.
  *
  * `currentColor` throughout, so it takes the contrast its surface already sets.
  */
@@ -26,15 +25,15 @@
 export const AVI_ICON_TESTID = 'avi-icon'
 
 /**
- * A four-point star with concave sides, drawn as one closed path.
+ * A four-point star with concave sides, as one closed path.
  *
- * The control points sit at ~26% of the way from each tip to the centre, which is
- * what gives the crisp "sparkle" pinch. Too close to the centre and it turns into
- * a thin cross (which is what an earlier attempt produced, and it read as an X —
- * the same shape as the close control). Too far and it rounds off into a diamond.
+ * The control points sit ~26% of the way from each tip to the centre — that is the
+ * pinch that reads as a sparkle. Closer to the centre it thins into a cross (which
+ * is what the bloom attempt produced, and it read as an X); further out it rounds
+ * into a diamond.
  *
- * Solid rather than stroked on purpose: a stroke at 32px is 1px of anti-aliased
- * grey, which is the washed-out look this is replacing.
+ * Filled rather than stroked on purpose: a 1px stroke at 28px is anti-aliased grey,
+ * which is exactly the washed-out look this replaced.
  */
 const D =
   'M12 1.4c.62 4.4 1.6 6.86 3.28 8.18C16.8 10.74 19.3 11.4 22.6 12c-3.3.6-5.8 1.26-7.32 2.42' +
