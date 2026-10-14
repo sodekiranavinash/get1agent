@@ -116,10 +116,16 @@ renders** — generated from the app's own diagram spec and layout engine by
 [`frontend/scripts/render-architecture.mts`](frontend/scripts/render-architecture.mts), so the README
 can never drift from the product. Regenerate them with **`make architecture`**.
 
-**Platform overview** — every service, boundary and hop
+**Platform architecture** — one sheet, the request path traced service to service
 
 <p align="center">
-  <img src="docs/assets/architecture.svg" alt="get1agent platform overview: browser, Cloudflare edge delivery serving the SPA and proxying the API, API Gateway with Auth0, Lambda services, isolated AgentCore runtime, data plane and external providers" width="100%">
+  <img src="docs/assets/architecture.svg" alt="get1agent platform architecture: client, edge and identity, AWS serverless control plane, isolated agent runtime, MCP tool servers, retrieval and RAG, Bedrock and AgentCore, data plane and observability — sections in request order, services left to right inside each" width="100%">
+</p>
+
+**Layered view** — the same platform by tier, top to bottom
+
+<p align="center">
+  <img src="docs/assets/architecture-layers.svg" alt="get1agent layered platform overview: browser, Cloudflare edge delivery serving the SPA and proxying the API, API Gateway with Auth0, Lambda services, isolated AgentCore runtime, data plane and external providers" width="100%">
 </p>
 
 **Deployment & environments** — delivery, infrastructure as code, local parity

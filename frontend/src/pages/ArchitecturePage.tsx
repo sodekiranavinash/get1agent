@@ -5,6 +5,7 @@ import {
   Boxes,
   Database,
   KeyRound,
+  Layers,
   Rocket,
   Route,
   Search,
@@ -17,9 +18,12 @@ import { LandingNav } from '../components/landing/LandingNav'
 import { AppFooter } from '../components/layout/AppFooter'
 import { ReturnLink } from '../components/layout/ReturnLink'
 import { DiagramTab } from '../components/architecture/views/DiagramTab'
+import { FlowTab } from '../components/architecture/views/FlowTab'
 import { PipelinesTab } from '../components/architecture/views/PipelinesTab'
 import {
   ARCHITECTURE,
+  ARCHITECTURE_FLOW,
+  ARCHITECTURE_FLOW_LEGEND,
   ARCHITECTURE_LEGEND,
   AI_ASSISTANT_FLOWS,
   DATA_LEGEND,
@@ -37,6 +41,7 @@ import {
 
 type TabId =
   | 'architecture'
+  | 'layers'
   | 'deployment'
   | 'flows'
   | 'runtime'
@@ -49,6 +54,7 @@ type TabId =
 
 const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: 'architecture', label: 'Architecture', icon: Boxes },
+  { id: 'layers', label: 'Layers', icon: Layers },
   { id: 'flows', label: 'Request flows', icon: Route },
   { id: 'runtime', label: 'Agent runtime', icon: Bot },
   { id: 'ai-assistant', label: 'AI Assistant', icon: Sparkles },
@@ -68,9 +74,19 @@ function TabContent({ tab }: { tab: TabId }) {
   switch (tab) {
     case 'architecture':
       return (
+        <FlowTab
+          title="Platform architecture — the request path"
+          blurb="Five stacks of services, read left to right: the request walks down each stack and on to the next column — browser → Cloudflare → API Gateway → user-api → control plane → Lambda MicroVM → AgentCore → MCP Gateway → knowledge-mcp → Titan embeddings → vector search and BM25 → RRF → Bedrock Rerank. The platform it runs on sits in the stacks beneath, each one under the column that calls it. The answer comes back the other way, right to left along the top, into the browser."
+          spec={ARCHITECTURE_FLOW}
+          legend={ARCHITECTURE_FLOW_LEGEND}
+          note="9 stacks · 36 services · request → · ← response"
+        />
+      )
+    case 'layers':
+      return (
         <DiagramTab
-          title="Platform overview"
-          blurb="How a request flows through the platform: browser → Cloudflare (serves the UI, proxies the API) → edge auth → application Lambdas → isolated agent runtime → AgentCore Gateway → tool servers, models and state. Fully AWS-native; Auth0 and Cloudflare are the only deliberate non-AWS dependencies."
+          title="Layered view"
+          blurb="The same platform drawn boundary by boundary, so every service's tier is explicit: client, edge delivery, UI, request entry, application services, agent runtime, MCP gateway, tool servers, models and agent platform, state and observability. Read top to bottom."
           spec={ARCHITECTURE}
           legend={ARCHITECTURE_LEGEND}
           note="11 stages · application flow"

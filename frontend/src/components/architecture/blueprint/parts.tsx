@@ -26,7 +26,14 @@ export type SymbolNode = {
 }
 
 /** Defs shared by every canvas: an arrow head per tone. */
-export function MarkerDefs({ tones }: { tones: ArchEdgeTone[] }) {
+export function MarkerDefs({
+  tones,
+  scale = 1,
+}: {
+  tones: ArchEdgeTone[]
+  /** Bigger heads where connectors are short and need to read at a glance. */
+  scale?: number
+}) {
   return (
     <defs>
       {tones.map((tone) => {
@@ -38,8 +45,8 @@ export function MarkerDefs({ tones }: { tones: ArchEdgeTone[] }) {
             viewBox="0 0 10 10"
             refX="7.5"
             refY="5"
-            markerWidth="7"
-            markerHeight="7"
+            markerWidth={7 * scale}
+            markerHeight={7 * scale}
             orient="auto-start-reverse"
           >
             <path
@@ -98,8 +105,17 @@ export function EdgeLayer({
   )
 }
 
+/** The minimum a connector needs to carry a floating chip. */
+export type LabelledEdge = {
+  id: string
+  tone: ArchEdgeTone
+  label?: string
+  labelX?: number
+  labelY?: number
+}
+
 /** Floating connector captions, kept on their own non-interactive layer. */
-export function EdgeLabels({ edges }: { edges: LaidEdge[] }) {
+export function EdgeLabels({ edges }: { edges: LabelledEdge[] }) {
   return (
     <div className="pointer-events-none absolute inset-0">
       {edges

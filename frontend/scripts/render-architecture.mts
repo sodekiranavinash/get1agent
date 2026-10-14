@@ -20,7 +20,15 @@ import { Resvg } from '@resvg/resvg-js'
 import { layoutDiagram, type Layout } from '../src/components/architecture/blueprint/engine.ts'
 import { pipelineToDiagram } from '../src/components/architecture/blueprint/pipeline.ts'
 import {
+  layoutFlow,
+  type FlowLayout,
+  type LaidFlowEdge,
+  type LaidFlowSection,
+} from '../src/components/architecture/blueprint/flow.ts'
+import {
   ARCHITECTURE,
+  ARCHITECTURE_FLOW,
+  ARCHITECTURE_FLOW_LEGEND,
   ARCHITECTURE_LEGEND,
   DEPLOYMENT,
   DEPLOYMENT_LEGEND,
@@ -46,6 +54,7 @@ import { AWS_ICONS } from '../src/components/architecture/blueprint/awsIcons.ts'
 
 const C = {
   canvas: '#101216',
+  raised: '#1e2127',
   foreground: '#e8eaed',
   muted: '#9aa2ad',
   subtle: '#6b7280',
@@ -157,6 +166,57 @@ function boundary(x: number, y: number, w: number, h: number, tone: ArchEdgeTone
     `fill="url(#wash-${tone})" stroke="${toneAlpha(tone, 0.5)}" stroke-width="1.5" ` +
     `stroke-dasharray="2 4"/>`
   )
+}
+
+/** Trim to `maxW`, with an ellipsis, so a label never overflows its column. */
+function truncate(s: string, maxW: number, size: number, bold = false): string {
+  if (textWidth(s, size, bold) <= maxW) return s
+  let out = s
+  while (out.length > 1 && textWidth(`${out}…`, size, bold) > maxW) out = out.slice(0, -1)
+  return `${out.trimEnd()}…`
+}
+
+/** Place an icon at (x, y) at the given size, clipped to a rounded tile. */
+function tileIcon(aws: unknown, icon: unknown, kind: string, x: number, y: number, size: number, radius: number): string {
+  const out: string[] = []
+  if (aws) {
+    out.push(
+      `<g transform="translate(${round(x)} ${round(y)})">` +
+        `<g clip-path="url(#tileClipSmall)">${placeIcon(aws, 0, 0, size)}</g>` +
+        `</g>`,
+    )
+  } else {
+    out.push(
+      `<rect x="${round(x)}" y="${round(y)}" width="${size}" height="${size}" rx="${radius}" ` +
+        `fill="${SYMBOL_COLORS[kind as keyof typeof SYMBOL_COLORS]}"/>`,
+    )
+    const inner = round(size * 0.44)
+    out.push(placeIcon(icon, x + (size - inner) / 2, y + (size - inner) / 2, inner))
+  }
+  out.push(
+    `<rect x="${round(x)}" y="${round(y)}" width="${size}" height="${size}" rx="${radius}" ` +
+      `fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>`,
+  )
+  return out.join('')
+}
+
+/**
+ * One service in the composed map: a 46px tile with its name and one micro
+ * line under it — the same shape `FlowTile` renders.
+ */
+function flowTile(n: any): string {
+  const size = 40
+  const tileX = n.x + (n.w - size) / 2
+  const aws = n.aws ? AWS_ICONS[n.aws as keyof typeof AWS_ICONS] : undefined
+  const Icon = n.icon ?? KIND_META[n.kind as keyof typeof KIND_META].icon
+  const out: string[] = [tileIcon(aws, Icon, n.kind, tileX, n.y, size, 13)]
+  let ty = n.y + size + 12
+  for (const line of wrapText(n.title, n.w + 6, 10, true, 2)) {
+    out.push(text(n.cx, ty, line, { size: 10, weight: 600, anchor: 'middle' }))
+    ty += 11
+  }
+  if (n.code) out.push(text(n.cx, ty + 1, n.code, { size: 8.5, fill: C.subtle, anchor: 'middle', mono: true }))
+  return out.join('')
 }
 
 /** A service symbol: a 52px AWS tile with the name and subtitle beneath it. */
@@ -281,6 +341,7 @@ function defs(tones: ArchEdgeTone[]): string {
   return (
     `<defs>${markers}${washes}` +
     `<clipPath id="tileClip"><rect x="0" y="0" width="52" height="52" rx="16"/></clipPath>` +
+    `<clipPath id="tileClipSmall"><rect x="0" y="0" width="26" height="26" rx="8"/></clipPath>` +
     `</defs>`
   )
 }
@@ -355,6 +416,92 @@ function renderDiagram(layout: Layout, tones: ArchEdgeTone[], note?: string): st
 }
 
 /* -------------------------------------------------------------------------- */
+/* FlowSpec (horizontal request map)                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A group of services: the dotted box with its number, title and hint along the
+ * top — the same shape `GroupBox` renders.
+ */
+function flowGroup(section: LaidFlowSection): string {
+  const color = ARCH_TONES[section.tone].color
+  const out: string[] = [
+    boundary(section.x, section.y, section.w, section.h, section.tone),
+  ]
+  const x = section.x + 12
+  const y = section.y + 8
+  const index = String(section.index + 1).padStart(2, '0')
+  out.push(text(x, y + 8, index, { size: 10, fill: C.subtle, mono: true }))
+  const dotX = x + textWidth(index, 10) + 10
+  out.push(`<circle cx="${round(dotX)}" cy="${round(y + 4.5)}" r="3" fill="${color}"/>`)
+  out.push(
+    text(dotX + 9, y + 8, section.title.toUpperCase(), {
+      size: 11,
+      weight: 600,
+      fill: color,
+      spacing: 1.3,
+    }),
+  )
+  if (section.hint) {
+    out.push(
+      text(x, y + 24, truncate(section.hint, section.w - 24, 10), {
+        size: 10,
+        fill: C.subtle,
+      }),
+    )
+  }
+  return out.join('')
+}
+
+/** Connectors: a solid line, an arrow at the target and a dot at the source. */
+function flowEdges(edges: LaidFlowEdge[]): string {
+  const out: string[] = []
+  for (const e of edges) {
+    const color = ARCH_TONES[e.tone].color
+    out.push(
+      `<path d="${e.d}" fill="none" stroke="${color}" stroke-width="1.7" ` +
+        `stroke-opacity="${e.still ? 1 : 0.6}" stroke-linecap="round" ` +
+        `stroke-linejoin="round"${e.still ? ' stroke-dasharray="2 5"' : ''} ` +
+        `marker-end="url(#arrow-${e.tone})"/>`,
+    )
+    if (!e.still) out.push(`<circle cx="${round(e.sx)}" cy="${round(e.sy)}" r="2.8" fill="${color}"/>`)
+    if (e.label && e.labelX != null && e.labelY != null) {
+      const w = textWidth(e.label, 9, true) + 12
+      out.push(
+        `<rect x="${round(e.labelX - w / 2)}" y="${round(e.labelY - 7)}" width="${round(w)}" height="14" rx="7" ` +
+          `fill="${C.canvas}" fill-opacity="0.92" stroke="${toneAlpha(e.tone, 0.4)}" stroke-width="1"/>`,
+      )
+      out.push(
+        text(e.labelX, e.labelY + 3, e.label, {
+          size: 9,
+          fill: color,
+          anchor: 'middle',
+          mono: true,
+        }),
+      )
+    }
+  }
+  return out.join('')
+}
+
+function renderFlow(layout: FlowLayout, tones: ArchEdgeTone[], note?: string): string {
+  const tonesUsed = Array.from(new Set<ArchEdgeTone>([...tones, ...layout.edges.map((e) => e.tone)]))
+  const width = layout.width + 2 * PAD
+  const canvasTop = PAD + LEGEND_H + GAP
+  const height = canvasTop + layout.height + PAD
+  const out: string[] = [defs(tonesUsed)]
+
+  out.push(`<g transform="translate(${PAD} 0)">${legend(tones, note, layout.width, PAD)}</g>`)
+  out.push(`<g transform="translate(${PAD} ${canvasTop})">`)
+  for (const section of layout.sections) out.push(flowGroup(section))
+  out.push(flowEdges(layout.edges))
+  for (const n of layout.nodes) out.push(flowTile(n))
+  out.push('</g>')
+
+  return frame(width, height, out.join(''))
+}
+
+/* -------------------------------------------------------------------------- */
 /* Registry — one entry per README image                                       */
 /* -------------------------------------------------------------------------- */
 
@@ -365,6 +512,10 @@ const images: { file: string; svg: string }[] = []
 
 images.push({
   file: 'architecture',
+  svg: renderFlow(layoutFlow(ARCHITECTURE_FLOW), ARCHITECTURE_FLOW_LEGEND, '9 groups · 36 services · AWS-native'),
+})
+images.push({
+  file: 'architecture-layers',
   svg: renderDiagram(layoutDiagram(ARCHITECTURE), ARCHITECTURE_LEGEND, '11 stages · application flow · 10+ AWS services'),
 })
 images.push({
