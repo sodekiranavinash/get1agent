@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react'
-import ReactMarkdown from 'react-markdown'
+import { useMemo, type ReactNode } from 'react'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, Ban, Braces, FileText, Sparkles } from 'lucide-react'
 import type { AgentOutputFormat } from '../../lib/agents'
 import type { ChatTurnStatus } from '../../lib/chat'
@@ -51,6 +52,22 @@ function CitationBadge({ number, turnId }: { number: number; turnId: string }) {
   )
 }
 
+/**
+ * A `/path` that is *shaped* like an app route: one lowercase-hyphen segment and
+ * an optional `#fragment`.
+ *
+ * Deliberately strict, in the spirit of `backend/ai-assistant/src/deep_links.py`
+ * — a wrong link is worse than no link. It accepts `/metrics`, `/agent-builder`
+ * and `/docs#metrics`, and leaves `/v1/lab/metrics`, `/usr/local/bin` and any
+ * multi-segment file path as plain code.
+ */
+const INTERNAL_ROUTE = /^\/[a-z0-9][a-z0-9-]*(?:#[a-z0-9][a-z0-9-]*)?$/
+
+/** True for a link that points inside this app rather than off it. */
+function isInternalHref(href: string): boolean {
+  return href.startsWith('/') && !href.startsWith('//')
+}
+
 function CitationLink({ href, children }: { href?: string; children?: ReactNode }) {
   if (href?.startsWith('#source-')) {
     const id = href.slice(1)
@@ -59,11 +76,52 @@ function CitationLink({ href, children }: { href?: string; children?: ReactNode 
       return <CitationBadge number={Number(match[2])} turnId={match[1]} />
     }
   }
+  // An in-app route navigates the router. It used to be an `<a target="_blank">`,
+  // which reloads the whole bundle in a new tab and loses the client-side route.
+  if (href && isInternalHref(href)) {
+    return <Link to={href}>{children}</Link>
+  }
   return (
     <a href={href} target="_blank" rel="noreferrer">
       {children}
     </a>
   )
+}
+
+/**
+ * Rescue a route the model wrapped in brackets but never gave a target.
+ *
+ * Asked for `[Metrics](/metrics)`, a small model reliably drops the parenthetical
+ * and writes `[/metrics]` instead, which Markdown renders as literal text — dead
+ * in exactly the way the code span was. The route is the one thing the model got
+ * right, so it becomes both the label and the target. A `(?!\()` guard leaves a
+ * real link alone, and this only runs for AI Assistant (`linkRoutes`), never for
+ * an agent's answer.
+ */
+function linkBareRoutes(content: string): string {
+  return content.replace(/\[(\/[^\][\s()]+)\](?!\()/g, (_match, route: string) => `[${route}](${route})`)
+}
+
+/**
+ * A code span that is really an in-app route.
+ *
+ * The assistant was told to write routes as inline code ("open the Agent builder
+ * (`/agent-builder`)"), which renders as plain text: clicking `/metrics` did
+ * nothing at all. The prompt now asks for a Markdown link, and this is the
+ * safety net for an answer that still writes one — the route is only linked when
+ * it passes `INTERNAL_ROUTE`, and fenced code (which carries a `language-*`
+ * class) is never touched.
+ */
+function RouteCode({ className, children }: { className?: string; children?: ReactNode }) {
+  const text = typeof children === 'string' ? children.trim() : ''
+  if (!className && INTERNAL_ROUTE.test(text)) {
+    return (
+      <Link to={text} title={text} className="text-accent hover:underline">
+        <code>{text}</code>
+      </Link>
+    )
+  }
+  return <code className={className}>{children}</code>
 }
 
 /** Render plain text with ``[n]`` markers as round citation badges. */
@@ -137,6 +195,7 @@ export function ChatAnswer({
   status,
   turnId,
   compact = false,
+  linkRoutes = false,
 }: {
   content: string
   format: AgentOutputFormat
@@ -144,12 +203,27 @@ export function ChatAnswer({
   turnId: string
   /** Wide surfaces (chat, builder) keep the format header; narrow widgets drop it. */
   compact?: boolean
+  /**
+   * Turn a route-shaped code span (`` `/metrics` ``) into a link.
+   *
+   * Opt-in, and only the AI Assistant widget asks for it: its prompt is the one
+   * that writes routes, so elsewhere a `/path` in a code span is more likely to
+   * be code than a page. Markdown links always navigate the router.
+   */
+  linkRoutes?: boolean
 }) {
   const streaming = status === 'streaming'
   const FormatIcon = format === 'json' ? Braces : format === 'text' ? FileText : Sparkles
   // The widget has no numbered carousel to jump to, so it drops the markers
   // instead of rendering badges that go nowhere.
   const body = compact ? stripCitations(content) : content
+  // Avi's answers only: its prompt is the one that writes routes, so a `/path`
+  // in a code span or a bare bracket elsewhere is far more likely to be code.
+  const linked = linkRoutes ? linkBareRoutes(body) : body
+  const components = useMemo<Components>(
+    () => (linkRoutes ? { a: CitationLink, code: RouteCode } : { a: CitationLink }),
+    [linkRoutes],
+  )
 
   if (status === 'error' && !content) {
     return (
@@ -189,8 +263,8 @@ export function ChatAnswer({
               : 'md-preview'
           }
         >
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
-            {linkCitations(body, turnId)}
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+            {linkCitations(linked, turnId)}
           </ReactMarkdown>
           {streaming ? <Caret /> : null}
         </div>

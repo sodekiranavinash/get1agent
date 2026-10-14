@@ -209,6 +209,7 @@ export function AiAssistantMessage({
               status={run.status}
               turnId={turn.id}
               compact
+              linkRoutes
             />
           ) : streaming ? (
             <ThinkingSkeleton stages={turn.stages ?? []} />
