@@ -202,3 +202,141 @@ def catalog_text(*, allow_admin: bool = False) -> str:
             lines.append(f"- {feature.label}: `{feature.path}`{note}")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+# --------------------------------------------------------------------------- #
+# Route grounding: nothing the model writes becomes a link to a page that is not
+# in the catalogue above.
+# --------------------------------------------------------------------------- #
+
+#: The three shapes a route reaches the reader in — a Markdown link, a route in
+#: brackets with no target, and a code span — as **one** alternation, so a route
+#: is only ever rewritten once and a rewrite cannot be re-matched.
+#:
+#: These are exactly the shapes the widget turns into a link (`ChatAnswer`):
+#: `CitationLink` renders the first, `linkBareRoutes` the second and `RouteCode`
+#: the third. A route written as ordinary prose is never linkified, so it needs
+#: nothing here either.
+_ROUTE_FORMS = re.compile(
+    r"\[(?P<label>[^\]\n]*)\]\((?P<target>[^)\s]+)\)"
+    r"|\[(?P<bare>/[^\]\[\s()]+)\](?!\()"
+    r"|`(?P<code>[^`\n]+)`"
+)
+
+#: An in-app path, as opposed to `https://…`, `mailto:…`, `#fragment` or `//host`.
+_INTERNAL = re.compile(r"^/(?!/)")
+
+
+def sanitize_answer(text: str, *, allow_admin: bool = False) -> str:
+    """Drop links to pages that do not exist, keeping the words.
+
+    Citations are already checked against the catalogue, but the **answer** was
+    not: the model could write any path it liked and the widget would render it as
+    a link. Asked where to import a skill, it read that `/agent-skills` has a
+    *Skills Registry* tab, invented `/skills-registry` from the tab's name, and
+    handed the reader a 404. A wrong link is worse than no link, so:
+
+    * a link to a real route is left exactly as written;
+    * a link whose **label** names a real page is corrected to that page, which
+      is what "open the [Metrics](/metric)" deserves;
+    * anything else keeps its words and loses its target — the sentence still
+      reads, it just no longer promises a page;
+    * a `code` span holding an unknown route loses its backticks, because the
+      widget would otherwise link it;
+    * anything that is not an in-app path (`https://…`, `#anchor`) is untouched.
+    """
+    def replace(match: re.Match[str]) -> str:
+        target = match.group("target")
+        if target is not None:
+            if not _INTERNAL.match(target) or is_valid(target, allow_admin=allow_admin):
+                return match.group(0)
+            label = match.group("label") or ""
+            resolved = normalize(label, allow_admin=allow_admin)
+            return f"[{label}]({resolved})" if resolved else label
+        bare = match.group("bare")
+        if bare is not None:
+            # The route is the whole content, so there is no label to fall back
+            # to: keep the characters, drop the brackets that make it a link.
+            return match.group(0) if is_valid(bare, allow_admin=allow_admin) else bare
+        code = match.group("code") or ""
+        if _INTERNAL.match(code) and not is_valid(code, allow_admin=allow_admin):
+            return code
+        return match.group(0)
+
+    return _ROUTE_FORMS.sub(replace, text)
+
+
+def _safe_prefix(text: str) -> int:
+    """How much of ``text`` may be emitted now.
+
+    Everything **before** the last construct a later chunk could still change:
+    an unclosed code span, an unclosed ``[``, a ``](target`` with no ``)`` yet, or
+    a ``[…]`` sitting at the very end that may still gain its ``(target)``. In
+    ordinary prose this holds nothing at all.
+    """
+    limit = len(text)
+
+    if text.count("`") % 2:
+        limit = text.rfind("`")
+
+    depth = 0
+    last_open = -1
+    for index, char in enumerate(text):
+        if char == "[":
+            if depth == 0:
+                last_open = index
+            depth += 1
+        elif char == "]" and depth:
+            depth -= 1
+
+    if last_open != -1:
+        if depth:
+            limit = min(limit, last_open)
+        else:
+            after = text.find("]", last_open) + 1
+            if text[after : after + 1] == "(":
+                if ")" not in text[after:]:
+                    limit = min(limit, last_open)
+            elif not text[after:].strip():
+                limit = min(limit, last_open)
+
+    return max(limit, 0)
+
+
+class RouteFilter:
+    """Stream one answer through :func:`sanitize_answer`.
+
+    A construct cannot be judged until it is complete, so the filter holds back
+    the single construct still being written — a handful of characters — and
+    emits everything before it already sanitised. :meth:`flush` releases the tail
+    once the model has stopped.
+    """
+
+    def __init__(self, *, allow_admin: bool = False) -> None:
+        self._allow_admin = allow_admin
+        self._buffer = ""
+
+    def feed(self, delta: str) -> str:
+        """Take one model chunk and return the text safe to emit now."""
+        if not delta:
+            return ""
+        self._buffer += delta
+        safe = _safe_prefix(self._buffer)
+        if safe <= 0:
+            return ""
+        chunk, self._buffer = self._buffer[:safe], self._buffer[safe:]
+        return sanitize_answer(chunk, allow_admin=self._allow_admin)
+
+    def flush(self) -> str:
+        """Release what is still held back. Call once, when the model stops."""
+        chunk, self._buffer = self._buffer, ""
+        return sanitize_answer(chunk, allow_admin=self._allow_admin)
+
+    @property
+    def pending(self) -> bool:
+        """Whether a half-written construct is still held back.
+
+        A caller must not read "nothing has been emitted" as "the model said
+        nothing" — the answer may be entirely inside the buffer.
+        """
+        return bool(self._buffer)

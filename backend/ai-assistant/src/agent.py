@@ -29,7 +29,7 @@ import sys
 import time
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Iterator
 
 from src import deep_links, metrics, prompts, retrieval, settings
 from src.classifier import Verdict, fail_open
@@ -192,7 +192,7 @@ def _make_tools(state: "_RunState") -> list[Any]:
         they dispute, or anything the documentation does not cover.
         """
         return (
-            "Point the user to the Support page (`/support`), where they can message "
+            "Point the user to the [Support page](/support), where they can message "
             "the team directly. Mention that a security issue has its own form on "
             f"the same page. Reason recorded: {reason[:200]}"
         )
@@ -377,6 +377,7 @@ async def run_turn(
         conversation_id=request.conversation_id,
         entry_route=request.route,
         is_guest=request.is_guest,
+        allow_admin=request.allow_admin,
     )
     state = _RunState(request=request)
 
@@ -423,7 +424,8 @@ async def run_turn(
             request.question,
         ):
             yield frame
-        yield writer.completed(stop_reason="off_topic")
+        for frame in _terminal(writer, stop_reason="off_topic"):
+            yield frame
         return
 
     # A greeting needs no retrieval and no agent graph: one cheap model call, the
@@ -437,7 +439,8 @@ async def run_turn(
             writer, model_id, prompts.greeting_prompt(request.route), request.question
         ):
             yield frame
-        yield writer.completed(stop_reason="smalltalk")
+        for frame in _terminal(writer, stop_reason="smalltalk"):
+            yield frame
         return
 
     # --- 3. Retrieve before the first model call --------------------------
@@ -498,7 +501,8 @@ async def run_turn(
         async for frame in _stream_direct(writer, model_id, system_prompt, request.question):
             yield frame
         _emit_turn_metrics(writer, verdict, request, classifier_ms)
-        yield writer.completed()
+        for frame in _terminal(writer):
+            yield frame
         return
 
     yield writer.stage(STAGE_PLAN, "Planning how to answer")
@@ -523,7 +527,10 @@ async def run_turn(
     try:
         agent, cap = _build_agent(model_id, system_prompt, state)
     except Exception as exc:  # noqa: BLE001 - never fail the turn on setup
-        yield writer.failed(f"Agent unavailable: {type(exc).__name__}: {exc}", retryable=True)
+        for frame in _terminate(
+            writer, f"Agent unavailable: {type(exc).__name__}: {exc}", retryable=True
+        ):
+            yield frame
         _emit_turn_metrics(writer, verdict, request, classifier_ms, failed=True)
         return
 
@@ -565,13 +572,16 @@ async def run_turn(
             if state.cap_hit
             else "I hit a problem answering that. Please try again in a moment."
         )
-        yield writer.failed(message, retryable=True)
+        for frame in _terminate(writer, message, retryable=True):
+            yield frame
         _emit_turn_metrics(writer, verdict, request, classifier_ms, failed=True)
         return
 
     # The streamed text is the answer; if the model said nothing (a pure tool
-    # turn), fall back to the last non-empty assistant message.
-    if not writer.answer.strip():
+    # turn), fall back to the last non-empty assistant message. `pending_text`
+    # covers the case where the whole answer is still held back mid-construct:
+    # that is not silence, and the tail is flushed by `_terminal` below.
+    if not writer.answer.strip() and not writer.pending_text:
         fallback = _last_assistant_text(getattr(state, "final_text", ""))
         if fallback:
             frame = writer.text_delta(fallback)
@@ -582,11 +592,39 @@ async def run_turn(
                 yield frame
 
     _emit_turn_metrics(writer, verdict, request, classifier_ms)
-    yield writer.completed()
+    for frame in _terminal(writer):
+        yield frame
 
 
 def _last_assistant_text(value: str) -> str:
     return value.strip()
+
+
+def _terminal(
+    writer: FrameWriter, *, stop_reason: str = "end_turn"
+) -> Iterator[dict[str, Any]]:
+    """Flush the answer's held-back tail, then close the run.
+
+    ``text_delta`` holds a half-written link or code span back until it is
+    complete (see ``deep_links.RouteFilter``), so the last few characters of an
+    answer exist only once the model has stopped. The widget ignores
+    ``run.completed.text`` when the answer already streamed, so the tail has to be
+    sent as a ``text`` frame here or it would be lost.
+    """
+    frame = writer.flush_text()
+    if frame:
+        yield frame
+    yield writer.completed(stop_reason=stop_reason)
+
+
+def _terminate(
+    writer: FrameWriter, message: str, *, retryable: bool = False
+) -> Iterator[dict[str, Any]]:
+    """Same as :func:`_terminal`, for a run that ends in an error."""
+    frame = writer.flush_text()
+    if frame:
+        yield frame
+    yield writer.failed(message, retryable=retryable)
 
 
 def _emit_turn_metrics(

@@ -17,6 +17,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from src import deep_links
+
 #: AI Assistant's own frame — the classifier verdict, emitted before any text.
 FRAME_INTENT = "ai-assistant.intent"
 
@@ -130,6 +132,10 @@ class FrameWriter:
     conversation_id: str = ""
     entry_route: str = ""
     is_guest: bool = False
+    #: Whose routes this run may cite. The answer is grounded against the same
+    #: catalogue the prompt injected, so an admin-only path is not a link for a
+    #: normal caller either.
+    allow_admin: bool = False
 
     started_at: float = field(default_factory=time.perf_counter)
     first_token_at: float | None = None
@@ -141,6 +147,10 @@ class FrameWriter:
     _started: bool = False
     _terminal: bool = False
     _composing: bool = False
+    _routes: deep_links.RouteFilter = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._routes = deep_links.RouteFilter(allow_admin=self.allow_admin)
 
     # --- timings ---------------------------------------------------------
     @property
@@ -156,6 +166,15 @@ class FrameWriter:
     @property
     def answer(self) -> str:
         return "".join(self.text)
+
+    @property
+    def pending_text(self) -> bool:
+        """Whether part of the answer is still held back by the route filter.
+
+        ``answer`` is only what has been *sent*, so "empty" is not the same as
+        "the model said nothing" while a construct is mid-flight.
+        """
+        return self._routes.pending
 
     # --- frames ----------------------------------------------------------
     def run_started(self) -> dict[str, Any]:
@@ -180,13 +199,36 @@ class FrameWriter:
         ``answer``. Emitting ``text`` here makes the widget concatenate
         ``undefined`` once per chunk, so this key is part of the contract, not a
         naming preference.
+
+        The chunk passes through :class:`deep_links.RouteFilter` first, so a route
+        the model invented is never linkified in the reader's widget. Returns
+        ``None`` while a link or code span is still half-written — callers already
+        treat that as "nothing to send yet".
         """
         if not delta:
             return None
+        chunk = self._routes.feed(delta)
+        if not chunk:
+            return None
         if self.first_token_at is None:
             self.first_token_at = time.perf_counter()
-        self.text.append(delta)
-        return {"type": "text", "data": delta}
+        self.text.append(chunk)
+        return {"type": "text", "data": chunk}
+
+    def flush_text(self) -> dict[str, Any] | None:
+        """Release the answer's held-back tail. Call immediately before the
+        terminal frame.
+
+        The last few characters of an answer only exist once the model has
+        stopped, and the reducer ignores ``run.completed.text`` whenever the answer
+        already streamed — so without this frame the tail would be dropped rather
+        than sanitised.
+        """
+        chunk = self._routes.flush()
+        if not chunk:
+            return None
+        self.text.append(chunk)
+        return {"type": "text", "data": chunk}
 
     def note(self, message: str) -> dict[str, Any]:
         """Narration shown while AI Assistant works (never part of the answer).
