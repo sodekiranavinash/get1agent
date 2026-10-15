@@ -1,5 +1,5 @@
 {
-  "Comment": "Ingest one document: Extract -> Embed -> Index. Any stage failure records which stage failed, then marks the document failed. Runs as STANDARD so long ingestions are not cut off by the EXPRESS 5-minute cap; TimeoutSeconds is the safety bound.",
+  "Comment": "Ingest one document: Extract -> Embed -> Index. Any stage failure records which stage failed, then marks the document failed. Runs as STANDARD so long ingestions are not cut off by the EXPRESS 5-minute cap; TimeoutSeconds is the safety bound. Every stage retries the Lambda *service* exceptions (Lambda.TooManyRequestsException and friends) with backoff: they are not matched by States.TaskFailed, and they are what a burst of ingestions produces on an account whose concurrency limit is small — a corpus upload of 47 documents failed 10 of them at the extract stage before this retrier existed.",
   "StartAt": "Extract",
   "TimeoutSeconds": 3600,
   "States": {
@@ -24,6 +24,18 @@
           "IntervalSeconds": 2,
           "MaxAttempts": 5,
           "BackoffRate": 2.0
+        },
+        {
+          "ErrorEquals": [
+            "Lambda.TooManyRequestsException",
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 8,
+          "BackoffRate": 2.0,
+          "MaxDelaySeconds": 60
         },
         {
           "ErrorEquals": ["States.TaskFailed"],
@@ -70,8 +82,15 @@
             "Lambda.TooManyRequestsException",
             "Lambda.ServiceException",
             "Lambda.AWSLambdaException",
-            "States.TaskFailed"
+            "Lambda.SdkClientException"
           ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 8,
+          "BackoffRate": 2.0,
+          "MaxDelaySeconds": 60
+        },
+        {
+          "ErrorEquals": ["States.TaskFailed"],
           "IntervalSeconds": 5,
           "MaxAttempts": 4,
           "BackoffRate": 2.0
@@ -110,8 +129,15 @@
             "Lambda.TooManyRequestsException",
             "Lambda.ServiceException",
             "Lambda.AWSLambdaException",
-            "States.TaskFailed"
+            "Lambda.SdkClientException"
           ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 8,
+          "BackoffRate": 2.0,
+          "MaxDelaySeconds": 60
+        },
+        {
+          "ErrorEquals": ["States.TaskFailed"],
           "IntervalSeconds": 5,
           "MaxAttempts": 3,
           "BackoffRate": 2.0
