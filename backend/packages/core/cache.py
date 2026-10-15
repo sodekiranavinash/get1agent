@@ -103,6 +103,35 @@ def _ddb_get(key: str) -> Any:
     return _decode(item.get("payload"))
 
 
+#: Every value in a DynamoDB-JSON item is a single-key map keyed by its type code.
+_DDB_TYPE_CODES = frozenset({"S", "N", "B", "BOOL", "NULL", "M", "L", "SS", "NS", "BS"})
+
+
+def _item_from(raw: dict[str, Any]) -> dict[str, Any]:
+    """A ``BatchGetItem`` item as plain Python values.
+
+    ``_table()`` is a boto3 **resource**, and that resource's client carries the
+    high-level DynamoDB transform: ``batch_get_item`` through it comes back already
+    decoded (``{"pk": "CACHE#…", "expiresAt": Decimal(…)}``). The low-level shape is
+    ``{"pk": {"S": "CACHE#…"}}``.
+
+    Only the second needs a deserializer, and running the first through one raised
+    ``AttributeError: 'str' object has no attribute 'keys'`` — on the first cache
+    *hit*, which is exactly why it survived unnoticed: a read that misses returns no
+    items at all, so the loop body never ran. Re-ingesting an already-embedded
+    document, or asking the same question twice, was enough to hit it.
+    """
+    if raw and all(
+        isinstance(value, dict) and len(value) == 1 and next(iter(value)) in _DDB_TYPE_CODES
+        for value in raw.values()
+    ):
+        from boto3.dynamodb.types import TypeDeserializer
+
+        deserializer = TypeDeserializer()
+        return {key: deserializer.deserialize(value) for key, value in raw.items()}
+    return dict(raw)
+
+
 def _ddb_get_many(keys: list[str]) -> list[Any]:
     out: list[Any] = [None] * len(keys)
     table = _table()
@@ -117,23 +146,22 @@ def _ddb_get_many(keys: list[str]) -> list[Any]:
         index[(pk, sk)] = position
         request_keys.append({"pk": pk, "sk": sk})
 
-    from boto3.dynamodb.types import TypeDeserializer
-
-    deserializer = TypeDeserializer()
     for start in range(0, len(request_keys), _DDB_BATCH):
         chunk = request_keys[start : start + _DDB_BATCH]
         try:
             response = client.batch_get_item(RequestItems={name: {"Keys": chunk}})
-        except Exception:  # noqa: BLE001
-            return out
-        for raw in (response.get("Responses") or {}).get(name, []):
-            item = {k: deserializer.deserialize(v) for k, v in raw.items()}
-            position = index.get((item.get("pk"), item.get("sk")))
-            if position is None:
-                continue
-            if _unexpired(item) is None:
-                continue
-            out[position] = _decode(item.get("payload"))
+            for raw in (response.get("Responses") or {}).get(name, []):
+                item = _item_from(raw)
+                position = index.get((item.get("pk"), item.get("sk")))
+                if position is None:
+                    continue
+                if _unexpired(item) is None:
+                    continue
+                out[position] = _decode(item.get("payload"))
+        except Exception:  # noqa: BLE001 - the cache may never break a request
+            # Deliberately wider than the call itself: a decoding failure has to
+            # degrade to a miss too, which is this module's documented contract.
+            continue
     return out
 
 

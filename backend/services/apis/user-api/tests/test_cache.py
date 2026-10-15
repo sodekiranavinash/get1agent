@@ -45,6 +45,75 @@ class CacheConfigTests(unittest.TestCase):
             self.assertEqual(cache.ttl("search", 300), 300)
 
 
+class DynamoBatchReadTests(unittest.TestCase):
+    """`_ddb_get_many` against both shapes of a BatchGetItem response.
+
+    Every other test here mocks `cache.get_many`, which is how this went unnoticed:
+    `_table()` is a boto3 **resource**, so `table.meta.client.batch_get_item` returns
+    items that are *already* decoded, and the old code ran them through a
+    `TypeDeserializer` a second time. A miss returns no items, so the failing loop
+    body only ran on a cache **hit** — re-ingesting an embedded document raised
+    `AttributeError: 'str' object has no attribute 'keys'` and failed the ingest.
+    """
+
+    def setUp(self) -> None:
+        self.key = "g1a:embedding:probe"
+        self.pk, self.sk = cache._pk_sk(self.key)
+        self.payload = json.dumps({"vector": [0.1, 0.2]})
+
+    def _run(self, items: list[dict]) -> list:
+        class FakeClient:
+            def batch_get_item(self, **_kwargs):
+                return {"Responses": {"get1agent": items}}
+
+        class FakeTable:
+            name = "get1agent"
+            meta = SimpleNamespace(client=FakeClient())
+
+        with mock.patch.object(cache, "_table", return_value=FakeTable()), mock.patch.dict(
+            os.environ, {"CACHE_BACKEND": "dynamodb"}
+        ):
+            return cache.get_many([self.key])
+
+    def test_the_resource_shape_is_already_decoded(self) -> None:
+        hit = self._run(
+            [{"pk": self.pk, "sk": self.sk, "payload": self.payload}]
+        )
+        self.assertEqual(hit, [{"vector": [0.1, 0.2]}])
+
+    def test_the_low_level_dynamodb_json_shape_still_decodes(self) -> None:
+        hit = self._run(
+            [
+                {
+                    "pk": {"S": self.pk},
+                    "sk": {"S": self.sk},
+                    "payload": {"S": self.payload},
+                }
+            ]
+        )
+        self.assertEqual(hit, [{"vector": [0.1, 0.2]}])
+
+    def test_a_batch_failure_is_a_miss_not_an_error(self) -> None:
+        class ExplodingClient:
+            def batch_get_item(self, **_kwargs):
+                raise RuntimeError("boom")
+
+        class FakeTable:
+            name = "get1agent"
+            meta = SimpleNamespace(client=ExplodingClient())
+
+        with mock.patch.object(cache, "_table", return_value=FakeTable()), mock.patch.dict(
+            os.environ, {"CACHE_BACKEND": "dynamodb"}
+        ):
+            self.assertEqual(cache.get_many([self.key]), [None])
+
+    def test_an_expired_entry_is_a_miss(self) -> None:
+        hit = self._run(
+            [{"pk": self.pk, "sk": self.sk, "payload": self.payload, "expiresAt": 1}]
+        )
+        self.assertEqual(hit, [None])
+
+
 class EmbeddingCacheTests(unittest.TestCase):
     def _config(self) -> SimpleNamespace:
         return SimpleNamespace(
