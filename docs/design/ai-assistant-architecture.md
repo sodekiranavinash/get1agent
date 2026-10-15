@@ -287,7 +287,7 @@ feedback table needs in one item, with no second lookup.
 | Layer | Guest | Signed-in |
 |---|---|---|
 | API Gateway route throttle | burst 4 / rate 2 | burst 10 / rate 5 |
-| Per-caller window (`core.ratelimit`) | per IP hash: 6/hour, 20/day | per user: 120/hour, 1000/day |
+| Per-caller window (`core.ratelimit`) | per IP hash: 10/3 min, 60/hour, 100/day | per user: 120/hour, 1000/day (no 3-minute cap) |
 | Turn and loop caps | n/a (stateless) | 6 agent steps per turn, 40 turns per conversation |
 | Input caps | 2 000 chars per question; 8 turns / 24 000 chars of history | same |
 | Persistence | none | transcript, feedback, traces |

@@ -549,5 +549,8 @@ shows the wait plus a **sign-in to keep asking** button — the natural upsell.
    **admin → AI Assistant** rather than the user chat sidebar (keeps `CHAT#` clean).
 3. `AI_ASSISTANT_PER_HOUR=120` / `AI_ASSISTANT_PER_DAY=1000` for signed-in users — high enough to
    feel unlimited, low enough to bound a leaked token.
-4. Guest cap `6/hour, 20/day` per IP hash — raise if the landing trial feels
-   tight once we see real traffic.
+4. Guest cap `10 / 3 minutes, 60/hour, 100/day` per IP hash. The **3-minute burst
+   window is the one a visitor actually meets**: with an hour as the shortest window
+   a handful of questions produced *"try again in about 16 min"*, which reads as a
+   wall rather than a rate. Ten in three minutes is the promise; the hour and day
+   windows still bound a loop and a patient script.

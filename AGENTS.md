@@ -845,9 +845,15 @@ docs** — it has its own space on purpose.
   objects; only small metadata items are in DynamoDB. Guests are never persisted.
 - **Rate limiting is layered**, cheapest first: API Gateway route throttles
   (`/v1/ai-assistant/guest` burst 4/rate 2, `/v1/ai-assistant/ask` 20/10), then a per-caller
-  fixed-window counter (`core.ratelimit`, kind `ai-assistant-hour`/`ai-assistant-day`), then the
+  fixed-window counter (`core.ratelimit`, kinds `ai-assistant-burst` (3 min) /
+  `ai-assistant-hour` / `ai-assistant-day`), then the
   in-agent turn cap and the 24 s soft turn budget. Every model call also passes
-  `core.ratelimit_bedrock`.
+  `core.ratelimit_bedrock`. The burst window is the one a real visitor meets, and
+  it is deliberately short so a refusal reads "try again in a couple of minutes":
+  a guest gets **10 per 3 minutes** (defaults `guestPerBurst`), then 60/hour and
+  100/day; signed-in callers are 120/hour and 1000/day with no burst cap by
+  default (`userPerBurst` 0 disables a window). These live in
+  `ai_assistant_settings` and are editable at `/admin/ai-assistant`.
 - **Admin page** `/admin/ai-assistant` (routes `GET|POST /v1/admin/ai-assistant`, plus owner-scoped
   `/feedback`, `/traces`, `/conversations`, `/evaluations` and
   `GET|POST /knowledge` + `POST /knowledge/reingest` in
