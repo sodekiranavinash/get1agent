@@ -1699,6 +1699,13 @@ module "ai_assistant" {
   environment = {
     DYNAMODB_TABLE             = module.database[0].table_name
     S3_BUCKET                  = module.knowledge_storage[0].bucket_name
+    # The semantic leg is `retrieval.s3_vectors`, so it needs the vector bucket by
+    # name, exactly as knowledge-mcp does. Without it `VectorStore()` raises
+    # "S3_VECTOR_BUCKET is required for VECTOR_STORE=s3vectors" and the search
+    # degrades to "not documented" by design — every answer came back with no
+    # sources, which is how this hid: the corpus was indexed and searchable, and
+    # the assistant still cited nothing.
+    S3_VECTOR_BUCKET           = module.vectors[0].vector_bucket_name
     BEDROCK_REGION             = "ap-south-1"
     RERANK_MODE                = "bedrock"
     RERANK_REGION              = var.rerank_region
