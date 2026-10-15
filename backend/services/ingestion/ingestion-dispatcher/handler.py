@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import uuid
+import re
 from typing import Any
 
 import boto3
@@ -29,12 +29,22 @@ def _log(level: str, message: str, **fields: Any) -> None:
     )
 
 
-def _is_uuid(value: str) -> bool:
-    try:
-        uuid.UUID(value)
-        return True
-    except (ValueError, TypeError):
-        return False
+#: The id shape the pipeline routes on. Ordinary uploads use a uuid4 for both the
+#: knowledge-base and the document id, but AI Assistant's reserved platform scope
+#: deliberately uses fixed, human-readable ids (``kb_platform_docs_0001``,
+#: ``ai-assistant-<slug>``) — so requiring a UUID dropped every platform document
+#: on the floor. The S3 event fired, SQS delivered, this function was invoked and
+#: returned success, and nothing was ever ingested: the corpus uploaded cleanly and
+#: stayed ``processing`` until the watchdog failed it.
+#:
+#: The shape test is only a junk filter — no slashes, no traversal, bounded length.
+#: Whether a document is real is decided by the extract stage, which reads the
+#: document item; this function is a router, not the authority.
+_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+
+def _is_routable_id(value: str) -> bool:
+    return bool(_ID_PATTERN.match(value))
 
 
 def _parse_key(key: str) -> dict[str, str] | None:
@@ -49,7 +59,7 @@ def _parse_key(key: str) -> dict[str, str] | None:
     if len(parts) != 5 or parts[0] != "raw":
         return None
     _, user_id, kb_id, doc_id, file_name = parts
-    if not (_is_uuid(kb_id) and _is_uuid(doc_id)):
+    if not (_is_routable_id(kb_id) and _is_routable_id(doc_id)):
         return None
     if not user_id or not file_name or file_name.startswith("."):
         return None
