@@ -40,11 +40,32 @@ def _log(level: str, message: str, **fields: Any) -> None:
 #: The shape test is only a junk filter — no slashes, no traversal, bounded length.
 #: Whether a document is real is decided by the extract stage, which reads the
 #: document item; this function is a router, not the authority.
-_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+#:
+#: The bound is 128 because a platform document id is ``ai-assistant-`` + a
+#: 58-character slug = 71: a 64-character cap (the first version of this fix) refused
+#: eight of the 47 corpus documents for their *length* alone, silently, exactly as
+#: the UUID test had refused all 47.
+_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
+#: Step Functions rejects an execution name longer than this.
+_MAX_EXECUTION_NAME = 80
 
 
 def _is_routable_id(value: str) -> bool:
     return bool(_ID_PATTERN.match(value))
+
+
+def _execution_name(document_id: str, token: str) -> str:
+    """A unique, <=80-character execution name.
+
+    The token is what makes the name unique (and what makes a re-upload run at all,
+    since a STANDARD state machine ignores a repeated name for 90 days), so the
+    document id is what gets truncated. Un-truncated, a corpus document is
+    ``ingest-`` + 71 + ``-`` + 12 = 91 characters, and ``start_execution`` raises
+    ValidationException — the document is never ingested.
+    """
+    suffix = f"-{token}"
+    return f"ingest-{document_id}"[: _MAX_EXECUTION_NAME - len(suffix)] + suffix
 
 
 def _parse_key(key: str) -> dict[str, str] | None:
@@ -110,6 +131,16 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
                 continue
             parsed = _parse_key(detail["key"])
             if parsed is None:
+                # Never silent: a `raw/` key that reaches this function and is not
+                # routed is a bug in the key layout or in the shape test, and the
+                # symptom is otherwise a document that stays `processing` forever
+                # with nothing in the logs to explain it.
+                _log(
+                    "warning",
+                    "ignoring a raw/ key that does not look like an upload",
+                    key=detail["key"],
+                    messageId=message_id,
+                )
                 continue
 
             payload = {
@@ -117,9 +148,8 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
                 "s3Key": detail["key"],
                 "contentHash": detail["etag"],
             }
-            execution_name = (
-                f"ingest-{parsed['documentId']}"
-                f"-{_execution_token(detail['etag'], detail['eventId'])}"
+            execution_name = _execution_name(
+                parsed["documentId"], _execution_token(detail["etag"], detail["eventId"])
             )
             try:
                 client.start_execution(

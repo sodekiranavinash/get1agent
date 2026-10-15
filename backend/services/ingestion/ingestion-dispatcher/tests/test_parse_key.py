@@ -38,6 +38,11 @@ UUID_DOC = "9b8c7d6e-5f40-4a3b-9c2d-1e0f9a8b7c6d"
 PLATFORM_KB = "kb_platform_docs_0001"
 PLATFORM_DOC = "ai-assistant-chat"
 
+#: The longest id the corpus actually produces: ``ai-assistant-`` + a 58-character
+#: slug (``generator.Document.id``). It is 71 characters, and an id cap of 64 refused
+#: eight real documents — so this exact length is pinned here.
+LONG_PLATFORM_DOC = "ai-assistant-" + "troubleshooting-a-custom-tool-times-out-or-errors-check--4"
+
 
 class ParseKeyTest(unittest.TestCase):
     def test_a_uuid_key_routes(self):
@@ -56,6 +61,14 @@ class ParseKeyTest(unittest.TestCase):
         self.assertEqual(parsed["userId"], "platform")
         self.assertEqual(parsed["knowledgeBaseId"], PLATFORM_KB)
         self.assertEqual(parsed["documentId"], PLATFORM_DOC)
+
+    def test_the_longest_corpus_id_routes(self):
+        self.assertEqual(len(LONG_PLATFORM_DOC), 71)
+        parsed = handler._parse_key(
+            f"raw/platform/{PLATFORM_KB}/{LONG_PLATFORM_DOC}/troubleshooting.md"
+        )
+        self.assertIsNotNone(parsed, "a 71-character corpus id must not be refused")
+        self.assertEqual(parsed["documentId"], LONG_PLATFORM_DOC)
 
     def test_derived_and_index_writes_are_ignored(self):
         for key in (
@@ -76,7 +89,8 @@ class ParseKeyTest(unittest.TestCase):
             f"raw/platform/{PLATFORM_KB}/{PLATFORM_DOC}/",  # empty file name
             f"raw/platform/{PLATFORM_KB}/{PLATFORM_DOC}/.hidden",  # dotfile
             f"raw/platform/../etc/{PLATFORM_DOC}/passwd",  # traversal in the id
-            f"raw/platform/{PLATFORM_KB}/{'a' * 80}/chat.md",  # id too long
+            f"raw/platform/{PLATFORM_KB}/{'a' * 200}/chat.md",  # id too long
+            f"raw/platform/{PLATFORM_KB}/{PLATFORM_DOC}/../escape.md",  # traversal in the name
         ):
             with self.subTest(key=key):
                 self.assertIsNone(handler._parse_key(key))
@@ -145,7 +159,41 @@ class LambdaHandlerTest(unittest.TestCase):
         self.assertEqual(payload["userId"], "platform")
         self.assertEqual(payload["contentHash"], "abc123")
         self.assertEqual(
-            client.calls[0]["name"], f"ingest-{PLATFORM_DOC}-{handler._execution_token('abc123', 'evt-1')}"
+            client.calls[0]["name"],
+            handler._execution_name(PLATFORM_DOC, handler._execution_token("abc123", "evt-1")),
+        )
+
+    def test_the_longest_corpus_id_still_starts_an_execution(self):
+        # The whole point: 71-character ids, which with the prefix and token are 91
+        # characters un-truncated, well past the 80-character ceiling.
+        result, client = self._run(
+            f"raw/platform/{PLATFORM_KB}/{LONG_PLATFORM_DOC}/troubleshooting.md"
+        )
+        self.assertEqual(result, {"batchItemFailures": []})
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(json.loads(str(client.calls[0]["input"]))["documentId"], LONG_PLATFORM_DOC)
+
+    def test_execution_names_fit_and_stay_unique(self):
+        token_a = handler._execution_token("abc123", "evt-1")
+        token_b = handler._execution_token("abc123", "evt-2")
+        long_name_a = handler._execution_name(LONG_PLATFORM_DOC, token_a)
+        long_name_b = handler._execution_name(LONG_PLATFORM_DOC, token_b)
+
+        self.assertLessEqual(len(long_name_a), handler._MAX_EXECUTION_NAME)
+        self.assertTrue(long_name_a.startswith("ingest-"))
+        self.assertTrue(long_name_a.endswith(token_a))
+        # Uniqueness comes from the token, so truncating the id cannot collide two
+        # different uploads of the same document.
+        self.assertNotEqual(long_name_a, long_name_b)
+
+    def test_a_refused_key_is_logged_not_silent(self):
+        # A `raw/` key that is not routed used to `continue` with no line in the log,
+        # which is what made a stuck document undiagnosable.
+        with mock.patch.object(handler, "_log") as log:
+            self._run(f"raw/platform/{PLATFORM_KB}/{'a' * 200}/chat.md")
+        messages = [call.args[1] for call in log.call_args_list]
+        self.assertTrue(
+            any("does not look like an upload" in m for m in messages), messages
         )
 
     def test_a_re_upload_gets_a_new_execution_name(self):
