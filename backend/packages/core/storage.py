@@ -149,10 +149,19 @@ class Storage:
         except Exception as exc:  # noqa: BLE001
             from botocore.exceptions import ClientError
 
+            # S3 reports a lost race two ways, and callers must retry on both:
+            #   412 PreconditionFailed          — the ETag has moved on;
+            #   409 ConditionalRequestConflict — another conditional write to this
+            #     key is in flight, so this one could not be evaluated. It is
+            #     transient and succeeds on a re-read; without it here, the raw
+            #     ClientError escaped and failed the whole ingestion stage. The
+            #     term index is one shared object per token, so two documents
+            #     indexed at once (a bulk upload, the AI Assistant corpus) collide
+            #     on the vocabulary they have in common.
             if (
                 isinstance(exc, ClientError)
                 and exc.response.get("Error", {}).get("Code")
-                in {"PreconditionFailed", "412"}
+                in {"PreconditionFailed", "412", "ConditionalRequestConflict", "409"}
             ):
                 raise PreconditionFailed(key) from exc
             raise
