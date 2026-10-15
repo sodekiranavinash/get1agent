@@ -643,6 +643,7 @@ def load_limits() -> list[dict[str, Any]]:
     # AI Assistant's own limits come from its settings defaults.
     rows.extend(
         [
+            {"area": "AI Assistant", "limit": "Guest questions per IP per 3 minutes", "value": ai_assistant_settings.DEFAULT_GUEST_PER_BURST, "enforced": "ai_assistant_settings.DEFAULT_GUEST_PER_BURST"},
             {"area": "AI Assistant", "limit": "Guest questions per IP per hour", "value": ai_assistant_settings.DEFAULT_GUEST_PER_HOUR, "enforced": "ai_assistant_settings.DEFAULT_GUEST_PER_HOUR"},
             {"area": "AI Assistant", "limit": "Guest questions per IP per day", "value": ai_assistant_settings.DEFAULT_GUEST_PER_DAY, "enforced": "ai_assistant_settings.DEFAULT_GUEST_PER_DAY"},
             {"area": "AI Assistant", "limit": "Signed-in questions per hour", "value": ai_assistant_settings.DEFAULT_USER_PER_HOUR, "enforced": "ai_assistant_settings.DEFAULT_USER_PER_HOUR"},

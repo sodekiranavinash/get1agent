@@ -377,10 +377,10 @@
     },
     {
       "audience": "user",
-      "chars": 1607,
+      "chars": 1656,
       "fileName": "platform-limits.md",
       "group": "Manage",
-      "hash": "b7d09108b683d729",
+      "hash": "e80c1b5510741cf4",
       "id": "platform-limits",
       "route": "/usage",
       "source": "code",

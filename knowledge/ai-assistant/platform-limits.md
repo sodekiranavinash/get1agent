@@ -54,8 +54,9 @@ actually apply to your account.
 
 ## Platform limits > AI Assistant
 
-- **Guest questions per IP per hour**: 6
-- **Guest questions per IP per day**: 20
+- **Guest questions per IP per 3 minutes**: 10
+- **Guest questions per IP per hour**: 60
+- **Guest questions per IP per day**: 100
 - **Signed-in questions per hour**: 120
 - **Signed-in questions per day**: 1000
 - **Agent steps per AI Assistant answer**: 6

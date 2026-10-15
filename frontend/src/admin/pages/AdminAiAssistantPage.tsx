@@ -53,10 +53,12 @@ const MODEL_ROLES: { key: keyof AviSettings; label: string; hint: string }[] = [
 ]
 
 const LIMIT_FIELDS: { key: keyof AviSettings; label: string; hint: string }[] = [
-  { key: 'userPerHour', label: 'Signed-in per hour', hint: 'Per account' },
-  { key: 'userPerDay', label: 'Signed-in per day', hint: 'Per account' },
+  { key: 'guestPerBurst', label: 'Guest per 3 minutes', hint: 'Per IP hash' },
   { key: 'guestPerHour', label: 'Guest per hour', hint: 'Per IP hash' },
   { key: 'guestPerDay', label: 'Guest per day', hint: 'Per IP hash' },
+  { key: 'userPerBurst', label: 'Signed-in per 3 minutes', hint: '0 disables · per account' },
+  { key: 'userPerHour', label: 'Signed-in per hour', hint: 'Per account' },
+  { key: 'userPerDay', label: 'Signed-in per day', hint: 'Per account' },
   { key: 'maxAgentSteps', label: 'Max agent steps', hint: 'Per answer' },
   { key: 'maxInputChars', label: 'Max question length', hint: 'Characters' },
 ]

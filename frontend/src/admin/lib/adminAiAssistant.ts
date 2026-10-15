@@ -25,8 +25,10 @@ export type AviSettings = {
   judgeModel: string
   maxAgentSteps: number
   maxInputChars: number
+  userPerBurst: number
   userPerHour: number
   userPerDay: number
+  guestPerBurst: number
   guestPerHour: number
   guestPerDay: number
 }

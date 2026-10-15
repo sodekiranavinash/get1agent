@@ -48,13 +48,26 @@ DEFAULT_MAX_INPUT_CHARS = 2_000
 DEFAULT_MAX_HISTORY_TURNS = 8
 DEFAULT_MAX_HISTORY_CHARS = 24_000
 
+#: The short window is what makes the cap feel like a rate rather than a wall.
+#: Sized so a visitor can ask ten questions in three minutes — the number the
+#: product promises — and, when they do hit it, wait under three minutes instead
+#: of most of an hour. `limits.py` enforces it before the hour and day windows.
+DEFAULT_BURST_WINDOW_SECONDS = 180
+
 #: Signed-in users are effectively unlimited, but bounded so a leaked token
-#: cannot run up an unbounded Bedrock bill.
+#: cannot run up an unbounded Bedrock bill. No burst cap by default (0 = off):
+#: they are already bounded hourly, and adding a short window would make the
+#: "unlimited" surface stricter than it is today.
+DEFAULT_USER_PER_BURST = 0
 DEFAULT_USER_PER_HOUR = 120
 DEFAULT_USER_PER_DAY = 1_000
-#: Guests share an unauthenticated surface, so they are capped hard per IP hash.
-DEFAULT_GUEST_PER_HOUR = 6
-DEFAULT_GUEST_PER_DAY = 20
+#: Guests share an unauthenticated surface, so they are capped per IP hash. Ten
+#: per three minutes, and the outer windows sized so that is actually reachable
+#: repeatedly rather than consumed once (an hourly cap of 6 made the burst window
+#: meaningless).
+DEFAULT_GUEST_PER_BURST = 10
+DEFAULT_GUEST_PER_HOUR = 60
+DEFAULT_GUEST_PER_DAY = 100
 
 #: Bedrock models the admin page offers for each role. Every id here was probed
 #: as **invocable** in this account (ap-south-1) — notably the plain
@@ -107,8 +120,10 @@ _ENV_KEYS = {
     "judgeModel": "AI_ASSISTANT_JUDGE_MODEL",
     "maxAgentSteps": "AI_ASSISTANT_MAX_AGENT_STEPS",
     "maxInputChars": "AI_ASSISTANT_MAX_INPUT_CHARS",
+    "userPerBurst": "AI_ASSISTANT_PER_BURST",
     "userPerHour": "AI_ASSISTANT_PER_HOUR",
     "userPerDay": "AI_ASSISTANT_PER_DAY",
+    "guestPerBurst": "AI_ASSISTANT_GUEST_PER_BURST",
     "guestPerHour": "AI_ASSISTANT_GUEST_PER_HOUR",
     "guestPerDay": "AI_ASSISTANT_GUEST_PER_DAY",
 }
@@ -122,8 +137,10 @@ _DEFAULTS: dict[str, Any] = {
     "judgeModel": DEFAULT_JUDGE_MODEL,
     "maxAgentSteps": DEFAULT_MAX_AGENT_STEPS,
     "maxInputChars": DEFAULT_MAX_INPUT_CHARS,
+    "userPerBurst": DEFAULT_USER_PER_BURST,
     "userPerHour": DEFAULT_USER_PER_HOUR,
     "userPerDay": DEFAULT_USER_PER_DAY,
+    "guestPerBurst": DEFAULT_GUEST_PER_BURST,
     "guestPerHour": DEFAULT_GUEST_PER_HOUR,
     "guestPerDay": DEFAULT_GUEST_PER_DAY,
 }
@@ -188,11 +205,17 @@ def normalize(item: dict[str, Any] | None) -> dict[str, Any]:
         "maxInputChars": _coerce_int(
             stored.get("maxInputChars"), base["maxInputChars"], minimum=100, maximum=20_000
         ),
+        "userPerBurst": _coerce_int(
+            stored.get("userPerBurst"), base["userPerBurst"], minimum=0, maximum=100_000
+        ),
         "userPerHour": _coerce_int(
             stored.get("userPerHour"), base["userPerHour"], minimum=0, maximum=100_000
         ),
         "userPerDay": _coerce_int(
             stored.get("userPerDay"), base["userPerDay"], minimum=0, maximum=100_000
+        ),
+        "guestPerBurst": _coerce_int(
+            stored.get("guestPerBurst"), base["guestPerBurst"], minimum=0, maximum=10_000
         ),
         "guestPerHour": _coerce_int(
             stored.get("guestPerHour"), base["guestPerHour"], minimum=0, maximum=10_000
