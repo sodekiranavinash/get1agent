@@ -13,7 +13,6 @@ SHELL := /bin/bash
 
 COMPOSE := docker compose --env-file .env -f infra/local/floci/docker-compose.yml
 FLOCI_API_URL := http://get1agent.execute-api.localhost.floci.io:4566
-LOCAL_EMBED_MODEL ?= mxbai-embed-large
 
 # Local cross-encoder reranker (TEI). TEI's CPU image is amd64; Apple Silicon
 # runs it under Rosetta. Override RERANKER_IMAGE to pin a different tag.
@@ -24,7 +23,7 @@ RERANKER_IMAGE ?= ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
 RERANKER_PORT ?= 8080
 
 .PHONY: help ui architecture agent test test-unit floci floci-env floci-artifacts floci-build floci-up floci-wait \
-	floci-embed floci-rerank floci-reload floci-down floci-logs floci-oauth-proxy floci-oauth-proxy-logs \
+	floci-rerank floci-reload floci-down floci-logs floci-oauth-proxy floci-oauth-proxy-logs \
 	ai-assistant-knowledge ai-assistant-knowledge-check ai-assistant-knowledge-verify ai-assistant-bootstrap ai-assistant-upload ai-assistant-status
 
 help:
@@ -39,7 +38,7 @@ help:
 	@echo "  make test             Run backend integration tests (no Docker; moto)"
 	@echo ""
 	@echo "  AI Assistant (in-product assistant):"
-	@echo "    make ai-assistant-knowledge          Regenerate + validate knowledge/ai-assistant from the repo"
+	@echo "    make ai-assistant-knowledge          Regenerate + validate backend/ai-assistant/knowledge from the repo"
 	@echo "    make ai-assistant-knowledge-verify   Fail if the committed corpus is stale (CI)"
 	@echo "    make ai-assistant-bootstrap          Create the reserved platform-docs knowledge base"
 	@echo "    make ai-assistant-upload             Push the corpus through the ingestion pipeline"
@@ -72,7 +71,7 @@ ui:
 # Ingesting it is deliberately the *existing* pipeline: `ai-assistant-bootstrap` creates
 # the reserved `platform-docs` knowledge base once, then `ai-assistant-upload` writes
 # raw/platform/… which the normal S3 → EventBridge → Step Functions flow picks up.
-AI_ASSISTANT_TOOL := python3 tools/ai-assistant-knowledge/build.py
+AI_ASSISTANT_TOOL := python3 backend/ai-assistant/tools/build.py
 
 ai-assistant-knowledge:
 	$(AI_ASSISTANT_TOOL) build
@@ -102,7 +101,7 @@ ai-assistant-status: floci-env
 ai-assistant-local-ingest:
 	@UV_CACHE_DIR="$(CURDIR)/.uv-cache" uv sync --directory backend/ai-assistant --quiet \
 		|| { echo "uv sync failed — is uv installed? (https://docs.astral.sh/uv/)"; exit 1; }
-	backend/ai-assistant/.venv/bin/python tools/ai-assistant-knowledge/local_ingest.py
+	backend/ai-assistant/.venv/bin/python backend/ai-assistant/tools/local_ingest.py
 
 # AI Assistant runs **in the stack** (the `ai-assistant` compose service), so there
 # is no target to start it and no second terminal to keep open: `make floci` and
@@ -371,19 +370,6 @@ floci-reload: floci-env
 		echo "✓ No Lambdas rebuilt and provisioning unchanged, skipping provision script"; \
 	fi
 
-# Pull the local embedding model (only needed for EMBED_MODE=local).
-floci-embed: floci-env
-	@mode=$$(grep -E '^EMBED_MODE=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
-	model=$$(grep -E '^LOCAL_EMBED_MODEL=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
-	if [ "$${mode:-local}" != "local" ]; then \
-		echo "EMBED_MODE=$${mode:-local}; skipping Ollama (not needed)."; \
-	else \
-		$(COMPOSE) --profile local-embeddings up -d ollama; \
-		echo "waiting for ollama..."; \
-		until $(COMPOSE) --profile local-embeddings exec -T ollama ollama list >/dev/null 2>&1; do sleep 2; done; \
-		$(COMPOSE) --profile local-embeddings exec -T ollama ollama pull $${model:-$(LOCAL_EMBED_MODEL)}; \
-	fi
-
 # Wait for the local reranker (only needed for RERANK_MODE=local).
 floci-rerank: floci-env
 	@mode=$$(grep -E '^RERANK_MODE=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
@@ -422,7 +408,6 @@ floci: floci-env
 	$(MAKE) floci-artifacts
 	$(MAKE) floci-up
 	$(MAKE) floci-wait
-	$(MAKE) floci-embed
 	$(MAKE) floci-rerank
 	@echo ""
 	@echo "Floci stack ready."

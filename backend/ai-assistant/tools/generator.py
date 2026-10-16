@@ -1,7 +1,7 @@
 """Generate AI Assistant's corpus from the repository.
 
 Every document is derived from a file that is already the source of truth, and is
-written to ``knowledge/ai-assistant/`` as committed markdown: reviewable in a pull request,
+written to ``backend/ai-assistant/knowledge/`` as committed markdown: reviewable in a pull request,
 deterministic across machines, and diffable in CI so AI Assistant can never answer from a
 stale document.
 
@@ -28,7 +28,7 @@ from sources import (
     load_routes,
 )
 
-OUTPUT_DIR = REPO_ROOT / "knowledge" / "ai-assistant"
+OUTPUT_DIR = REPO_ROOT / "backend" / "ai-assistant" / "knowledge"
 MANIFEST_NAME = "manifest.json"
 SCHEMA_VERSION = 1
 

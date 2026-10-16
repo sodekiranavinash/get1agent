@@ -78,10 +78,10 @@ services:
       AUTH_MGMT_CLIENT_ID: ${AUTH_MGMT_CLIENT_ID:-}
       AUTH_MGMT_CLIENT_SECRET: ${AUTH_MGMT_CLIENT_SECRET:-}
       AGENT_RUN_FUNCTION: ${AGENT_RUN_FUNCTION:-}
-      LOCAL_EMBED_URL: ${LOCAL_EMBED_URL:-http://ollama:11434}
-      LOCAL_EMBED_MODEL: ${LOCAL_EMBED_MODEL:-mxbai-embed-large}
-      # Embedding backend: local (Ollama, offline) | bedrock (real Titan).
-      EMBED_MODE: ${EMBED_MODE:-local}
+      # Embeddings are always Amazon Titan on **real AWS** (the production
+      # model) — the stack ships no offline embedder. Needs AWS credentials,
+      # which the ~/.aws mount below provides, exactly like the Labs.
+      EMBED_MODE: ${EMBED_MODE:-bedrock}
       TEXT_EMBED_MODEL: ${TEXT_EMBED_MODEL:-amazon.titan-embed-text-v2:0}
       IMAGE_EMBED_MODEL: ${IMAGE_EMBED_MODEL:-amazon.titan-embed-image-v1}
       EMBED_IMAGES: ${EMBED_IMAGES:-false}
@@ -258,15 +258,12 @@ services:
       S3_BUCKET: ${S3_BUCKET:-get1agent-local}
       S3_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
       # Retrieval, configured exactly as the host-side corpus ingest does it
-      # (tools/ai-assistant-knowledge/local_env.py): the local vector store, and no
+      # (backend/ai-assistant/tools/local_env.py): the local vector store, and no
       # cache — the DynamoDB cache adds latency locally and hides whether retrieval
-      # actually worked. The embedding mode follows the stack's switch (`EMBED_MODE`
-      # in .env: `bedrock` = Titan on real AWS, `local` = the Ollama container), so
-      # this service and the ingestion workers cannot disagree about which model
+      # actually worked. Embeddings are always Amazon Titan on real AWS (`bedrock`),
+      # so this service and the ingestion workers cannot disagree about which model
       # wrote the vectors.
       EMBED_MODE: ${EMBED_MODE:-bedrock}
-      # Read only when EMBED_MODE=local.
-      LOCAL_EMBED_URL: http://ollama:11434
       VECTOR_STORE: local
       CACHE_BACKEND: none
       # The reserved platform scope the corpus is ingested into.
@@ -355,18 +352,6 @@ services:
       - get1agent
     restart: unless-stopped
 
-  # Real text embeddings for local ingestion (1024-dim, matches the schema).
-  # Opt-in profile: only started for EMBED_MODE=local.
-  ollama:
-    image: ollama/ollama:latest
-    profiles: ["local-embeddings"]
-    ports:
-      - "${LOCAL_EMBED_PORT:-11434}:11434"
-    volumes:
-      - ollama_models:/root/.ollama
-    networks:
-      - get1agent
-
   # Real cross-encoder reranker for local retrieval (mirrors Bedrock Rerank
   # Rerank). HuggingFace Text Embeddings Inference serves POST /rerank. Opt-in
   # profile: only started for RERANK_MODE=local.
@@ -394,5 +379,4 @@ networks:
 volumes:
   floci_data:
   dynamodb_data:
-  ollama_models:
   reranker_models:

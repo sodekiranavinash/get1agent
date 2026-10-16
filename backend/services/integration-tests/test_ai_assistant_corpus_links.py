@@ -22,7 +22,7 @@ import pytest
 
 from support import REPO_ROOT
 
-TOOLS = REPO_ROOT / "tools" / "ai-assistant-knowledge"
+TOOLS = REPO_ROOT / "backend" / "ai-assistant" / "tools"
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 

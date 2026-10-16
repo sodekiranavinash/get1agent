@@ -76,7 +76,7 @@ class CorpusLinkTest(unittest.TestCase):
     """The committed corpus, checked through the same gate the runtime uses."""
 
     def test_every_document_route_is_openable(self) -> None:
-        documents = sorted((REPO_ROOT / "knowledge" / "ai-assistant").glob("*.md"))
+        documents = sorted((REPO_ROOT / "backend" / "ai-assistant" / "knowledge").glob("*.md"))
         self.assertTrue(documents, "the committed corpus is missing")
         for path in documents:
             match = re.search(r'^route: "([^"]+)"', path.read_text(encoding="utf-8"), re.M)

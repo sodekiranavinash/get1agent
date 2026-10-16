@@ -91,7 +91,7 @@ the widget parses it frame by frame exactly as it parsed a live stream.
 | Lambda | `backend/ai-assistant/handler.py` | Lambda (Python 3.13, API Gateway) | Both routes: gateway claims for `/ask`, IP hash for `/guest`; runs the turn and returns buffered SSE |
 | Local server | `backend/ai-assistant/main.py` + `src/local_auth.py` | developer machine (`:8091`) | Dev-only ASGI shim: builds the gateway event, verifies the Auth0 JWT (JWKS), calls the same `lambda_handler` |
 | Admin API | `backend/services/admin/admin-console/src/ai-assistant.py` | Lambda (admin-console) | `/v1/admin/ai-assistant/*` |
-| Corpus tools | `tools/ai-assistant-knowledge/` | CI / developer | Generate, validate, upload, drift-check |
+| Corpus tools | `backend/ai-assistant/tools/` | CI / developer | Generate, validate, upload, drift-check |
 | Infra | `infra/terraform/envs/prod/backend.tf` (`module "ai_assistant"`) | Terraform | One Lambda zip and its two API Gateway routes |
 
 ---
@@ -209,7 +209,7 @@ reachable only through `search_my_knowledge`, which is scoped to their own id.
 ### 6.3 Pipeline
 
 ```
-tools/ai-assistant-knowledge  ──generate──▶  knowledge/ai-assistant/*.md  ──validate──▶  commit
+backend/ai-assistant/tools  ──generate──▶  backend/ai-assistant/knowledge/*.md  ──validate──▶  commit
                                                                         │
                                                               make ai-assistant-knowledge
                                                                         ▼

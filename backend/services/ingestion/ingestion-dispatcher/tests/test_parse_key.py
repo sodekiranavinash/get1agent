@@ -33,7 +33,7 @@ import handler  # noqa: E402
 UUID_KB = "0f0a1e6c-9a1f-4f6b-8a2e-2b1c3d4e5f60"
 UUID_DOC = "9b8c7d6e-5f40-4a3b-9c2d-1e0f9a8b7c6d"
 
-#: The reserved platform scope, exactly as ``tools/ai-assistant-knowledge/scope.py``
+#: The reserved platform scope, exactly as ``backend/ai-assistant/tools/scope.py``
 #: defines it and as AI Assistant's Lambda is configured (``AI_ASSISTANT_KB_ID``).
 PLATFORM_KB = "kb_platform_docs_0001"
 PLATFORM_DOC = "ai-assistant-chat"

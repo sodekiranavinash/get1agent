@@ -231,8 +231,9 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   (`pymupdf`, `python-docx`, `openpyxl`) ship in the `extra-tools` layer.
 - Embeddings: selected by `EMBED_MODE` — **`bedrock`** (the default everywhere;
   Amazon **Titan Text Embeddings V2** for text and **Titan Multimodal
-  Embeddings G1** for images). Ollama `mxbai-embed-large` (`local`) is the
-  offline fallback used by Floci and tests. Image embeddings are **opt-in**
+  Embeddings G1** for images). `local` (Ollama `mxbai-embed-large`) is an offline
+  code path exercised only by the integration tests; the local Floci stack is
+  bedrock-only. Image embeddings are **opt-in**
   (`EMBED_IMAGES=false` by default) because they are computed but not searched
   and Titan Multimodal is rate-limited to 20 RPM. Embedding calls are admitted
   through `core.ratelimit_bedrock` (global per-model token bucket) before hitting
@@ -819,9 +820,9 @@ docs** — it has its own space on purpose.
     ride on the diagnostic, so a trace shows whether ranking was actually applied.
     A reranker failure returns the RRF order (availability over precision).
 - **The corpus is generated from the repository** and ingested through the normal
-  pipeline — `tools/ai-assistant-knowledge/` reads `frontend/src/content/docs.ts`, the real
+  pipeline — `backend/ai-assistant/tools/` reads `frontend/src/content/docs.ts`, the real
   route table (nested routes included), the sidebar registries and the **enforced
-  limit constants**, then writes 48 documents to `knowledge/ai-assistant/`. `make
+  limit constants**, then writes 48 documents to `backend/ai-assistant/knowledge/`. `make
   ai-assistant-knowledge` regenerates; `make ai-assistant-knowledge-verify` fails CI when the
   committed corpus is stale. It also emits `backend/ai-assistant/src/features.json` (the
   deep-link allow-list) and `frontend/src/content/aiAssistantStarters.ts` (the widget's
@@ -871,7 +872,7 @@ docs** — it has its own space on purpose.
     **ignores a repeated name for 90 days** — reusing one would silently no-op.
     `{documentId}` targets a single document; omitting it re-ingests the corpus.
 - **Evaluations** are a committed set of 81 cases
-  (`tools/ai-assistant-knowledge/eval/ai-assistant-eval.jsonl`) across six kinds — answerable, find,
+  (`backend/ai-assistant/tools/eval/ai-assistant-eval.jsonl`) across six kinds — answerable, find,
   refuse, boundary, unknown, multiturn — each naming the page a correct answer must
   cite, and validated against the real route table at generation time.
 - **Metrics** use CloudWatch EMF under `get1agent/ai-assistant` (`ai-assistant/metrics.py`), and cost
@@ -1373,7 +1374,7 @@ docs** — it has its own space on purpose.
   confirms the model answers (latency, sample output, model list are returned and
   stored on the item). A small SSRF guard blocks non-https and
   loopback/private/link-local/metadata addresses unless
-  `VAULT_ALLOW_PRIVATE_URLS=true` (set locally so Ollama works; prod false).
+  `VAULT_ALLOW_PRIVATE_URLS=true` (set locally so a local provider key works; prod false).
   Env: `VAULT_KMS_KEY_ARN`, `VAULT_TEST_TIMEOUT_SECONDS` (15),
   `VAULT_ALLOW_PRIVATE_URLS`. Each secret's last test result is stored and shown
   as a Verified/Test-failed badge.
@@ -2001,10 +2002,9 @@ make floci-down       # stop and remove (named volumes are kept)
   + routes from `infra/terraform/envs/prod/api_gateway.tf`.
 - The state machine definition is the same file Terraform deploys:
   `infra/terraform/modules/ingestion/statemachine.asl.json`.
-- Ingestion runs with `EMBED_MODE=local` in Floci: the Ollama container
-  (`mxbai-embed-large`, pulled by `make floci`) returns real vectors with no cloud
-  call. Set `EMBED_MODE=bedrock` to use the real Amazon Titan models instead
-  (host credentials are forwarded automatically — see "Real AWS from local").
+- Ingestion runs with `EMBED_MODE=bedrock` in Floci: it embeds with the real
+  Amazon Titan models on AWS (the stack ships no offline embedder), using the
+  credentials forwarded from the host — see "Real AWS from local".
 - Retrieval runs with `VECTOR_STORE=local` (brute-force cosine over
   `index/<userId>/vectors.json`; S3 Vectors is not emulated) and
   `RERANK_MODE=none` (rerank is opt-in per request). Set `RERANK_MODE=local` to

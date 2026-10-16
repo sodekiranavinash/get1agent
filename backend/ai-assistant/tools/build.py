@@ -3,16 +3,16 @@
 Commands
 --------
 ``check``      generate in memory, validate, print a summary (no writes)
-``build``      write ``knowledge/ai-assistant/*.md`` + ``manifest.json``
+``build``      write ``backend/ai-assistant/knowledge/*.md`` + ``manifest.json``
 ``verify``     rebuild in memory and fail if the committed corpus differs (CI)
 ``upload``     put the corpus in S3 and register the document items, then wait
 ``bootstrap``  create the reserved ``platform-docs`` knowledge base once
 
 Run from the repo root:
 
-    python3 tools/ai-assistant-knowledge/build.py build
-    python3 tools/ai-assistant-knowledge/build.py verify
-    python3 tools/ai-assistant-knowledge/build.py upload
+    python3 backend/ai-assistant/tools/build.py build
+    python3 backend/ai-assistant/tools/build.py verify
+    python3 backend/ai-assistant/tools/build.py upload
 """
 
 from __future__ import annotations
@@ -223,7 +223,7 @@ STARTERS_PATH = REPO_ROOT / "frontend" / "src" / "content" / "aiAssistantStarter
 
 #: The evaluation dataset. Committed so a change to it is reviewable, and
 #: regenerated with the corpus so it never names a page that no longer exists.
-EVAL_PATH = REPO_ROOT / "tools" / "ai-assistant-knowledge" / "eval" / "ai-assistant-eval.jsonl"
+EVAL_PATH = REPO_ROOT / "backend" / "ai-assistant" / "tools" / "eval" / "ai-assistant-eval.jsonl"
 
 
 def render_starters() -> str:
@@ -412,9 +412,9 @@ def cmd_verify() -> int:
         drifted.append("manifest count is out of date")
 
     if not FEATURES_PATH.exists():
-        drifted.append("missing: backend/ai-assistant/ai-assistant/features.json")
+        drifted.append("missing: backend/ai-assistant/src/features.json")
     elif FEATURES_PATH.read_text(encoding="utf-8") != render_features():
-        drifted.append("changed: backend/ai-assistant/ai-assistant/features.json (a route moved)")
+        drifted.append("changed: backend/ai-assistant/src/features.json (a route moved)")
 
     if not STARTERS_PATH.exists():
         drifted.append("missing: frontend/src/content/aiAssistantStarters.ts")
@@ -423,9 +423,9 @@ def cmd_verify() -> int:
 
     cases = eval_cases.build_cases()
     if not EVAL_PATH.exists():
-        drifted.append("missing: tools/ai-assistant-knowledge/eval/ai-assistant-eval.jsonl")
+        drifted.append("missing: backend/ai-assistant/tools/eval/ai-assistant-eval.jsonl")
     elif EVAL_PATH.read_text(encoding="utf-8") != eval_cases.render_jsonl(cases):
-        drifted.append("changed: tools/ai-assistant-knowledge/eval/ai-assistant-eval.jsonl (corpus moved)")
+        drifted.append("changed: backend/ai-assistant/tools/eval/ai-assistant-eval.jsonl (corpus moved)")
 
     if drifted:
         print("AI Assistant's corpus is out of date — run `make ai-assistant-knowledge` and commit it:")
@@ -473,7 +473,7 @@ def cmd_bootstrap() -> int:
     )
     print(f"created knowledge base {item['name']} ({item['kbId']})")
     print(
-        "next: python3 tools/ai-assistant-knowledge/build.py upload   "
+        "next: python3 backend/ai-assistant/tools/build.py upload   "
         "(writes raw/platform/… so the ingestion pipeline picks it up)"
     )
     return 0
@@ -506,7 +506,7 @@ def prune_removed_documents(
     The corpus is **generated**, so it is authoritative: an ingest reconciles
     rather than only adding. Without this, a document deleted from the repository
     stays in the index forever and keeps being cited — which is exactly how an
-    admin-console page survived its own removal from `knowledge/ai-assistant/`, and why a
+    admin-console page survived its own removal from `backend/ai-assistant/knowledge/`, and why a
     re-ingest alone could not fix an answer that named it.
 
     Returns the removed document ids. A failure on one document is reported and

@@ -22,7 +22,7 @@ export type DocSection = {
   /**
    * Who the section is written for. Sections that document an **admin-console**
    * page are tagged `'admin'`, which excludes them from AI Assistant's knowledge corpus
-   * (`tools/ai-assistant-knowledge/generator.py`) — the assistant is opened by ordinary
+   * (`backend/ai-assistant/tools/generator.py`) — the assistant is opened by ordinary
    * users and guests, so it must never answer with, or link to, a page they
    * cannot open. Defaults to `'user'`.
    */

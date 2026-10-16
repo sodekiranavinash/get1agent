@@ -44,14 +44,10 @@ RULE_NAME = "get1agent-local-ingestion-s3-object-created"
 WATCHDOG_RULE_NAME = "get1agent-local-ingestion-watchdog"
 SCHEDULER_RULE_NAME = "get1agent-local-scheduler"
 STATE_MACHINE_NAME = "get1agent-local-ingestion"
-# Local embedding backend. `bedrock` calls Amazon Titan through **real AWS** —
-# the same model production uses — and `local` calls the Ollama container, which
-# is the offline fallback. Floci's bedrock-runtime is a stub that rejects the
-# embedding APIs, so `bedrock` mode needs real credentials (the ~/.aws mount the
-# compose stack already provides) exactly like the Labs do.
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
-LOCAL_EMBED_MODEL = os.environ.get("LOCAL_EMBED_MODEL", "mxbai-embed-large")
-EMBED_MODE = os.environ.get("EMBED_MODE", "bedrock").strip().lower()
+# Local embedding backend. Ingestion always embeds with Amazon Titan through
+# **real AWS** — the same model production uses. Floci's bedrock-runtime is a stub
+# that rejects the embedding APIs, so this needs real credentials (the ~/.aws mount
+# the compose stack already provides) exactly like the Labs do.
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION", "ap-south-1")
 BEDROCK_EMBED_MODEL = os.environ.get("TEXT_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 # Rerank backend: local (TEI) | none | bedrock. Rerank is opt-in per request.
@@ -61,21 +57,13 @@ RERANK_URL = os.environ.get("LOCAL_RERANK_URL", "http://reranker:80/rerank")
 
 
 def embedding_env() -> dict[str, str]:
-    """The embedding environment for one Lambda, per ``EMBED_MODE``.
+    """The embedding environment for one Lambda: Amazon Titan on **real AWS**.
 
-    One place, because the two modes need **different** variables and the wrong
-    pairing fails at the first call: handing `mxbai-embed-large` to Bedrock is a
-    "model not found", and a Titan id to Ollama is the same. Bedrock also needs its
-    own endpoint pin — Floci sets a global `AWS_ENDPOINT_URL` on every Lambda
-    container, and only a service-specific override keeps model calls off the stub.
+    The stack ships no offline embedder, so this is always `bedrock`. Bedrock also
+    needs its own endpoint pin — Floci sets a global `AWS_ENDPOINT_URL` on every
+    Lambda container, and only a service-specific override keeps model calls off
+    the stub.
     """
-    if EMBED_MODE == "local":
-        return {
-            "EMBED_MODE": "local",
-            "LOCAL_EMBED_URL": OLLAMA_URL,
-            "LOCAL_EMBED_MODEL": LOCAL_EMBED_MODEL,
-            "TEXT_EMBED_MODEL": LOCAL_EMBED_MODEL,
-        }
     endpoint = os.environ.get("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "").strip()
     return {
         "EMBED_MODE": "bedrock",

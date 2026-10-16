@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 FRONTEND_SRC = REPO_ROOT / "frontend" / "src"
 BACKEND_PACKAGES = REPO_ROOT / "backend" / "packages"
 

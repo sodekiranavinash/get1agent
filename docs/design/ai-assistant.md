@@ -155,8 +155,8 @@ backend/ai-assistant/                            ← the Lambda: handler.py + sr
   handler.py                                       both routes, buffered SSE, claims → userId
   src/                                             classifier · retrieval · frames · conversations
                                                    traces · limits · identity · metrics · settings
-tools/ai-assistant-knowledge/                    ← generators + validator (make ai-assistant-knowledge)
-knowledge/ai-assistant/                          ← generated, committed markdown (the corpus)
+backend/ai-assistant/tools/                    ← generators + validator (make ai-assistant-knowledge)
+backend/ai-assistant/knowledge/                          ← generated, committed markdown (the corpus)
 ```
 
 Reuse is by **import**, never by copy: `retrieval.*` (hybrid search, s3_vectors,
@@ -267,7 +267,7 @@ chat UI.
 **Source of truth is git; the pipeline is the one we already run.** AI Assistant's
 knowledge base is one more knowledge base, owned by a reserved `platform` scope.
 
-### 7.1 Corpus (`knowledge/ai-assistant/*.md`, generated then reviewed)
+### 7.1 Corpus (`backend/ai-assistant/knowledge/*.md`, generated then reviewed)
 
 ```yaml
 ---
@@ -295,9 +295,9 @@ updated: 2026-10-11
 
 ### 7.2 Build
 
-`make ai-assistant-knowledge` (`tools/ai-assistant-knowledge/`):
+`make ai-assistant-knowledge` (`backend/ai-assistant/tools/`):
 
-1. **generate** markdown into `knowledge/ai-assistant/`;
+1. **generate** markdown into `backend/ai-assistant/knowledge/`;
 2. **validate** — unique `id`, `route` exists in the real route table, no broken
    relative links, no secrets/tokens, size caps, frontmatter schema;
 3. **upload** to `raw/platform/<kbId>/<docId>/<file>.md`;
@@ -374,7 +374,7 @@ the key builders alongside the others in `data/keys.py`.
 
 ## 10. Evaluations, metrics and traces
 
-### 10.1 Evaluation dataset (`tools/ai-assistant-knowledge/eval/ai-assistant-eval.jsonl`)
+### 10.1 Evaluation dataset (`backend/ai-assistant/tools/eval/ai-assistant-eval.jsonl`)
 
 ~60 committed cases, generated from the same corpus so they stay in sync:
 
@@ -513,7 +513,7 @@ shows the wait plus a **sign-in to keep asking** button — the natural upsell.
 
 | Phase | Deliverable | Exit criterion |
 |---|---|---|
-| **0 — Corpus** (1 d) | `tools/ai-assistant-knowledge/` generators + validator; ~60 documents in `knowledge/ai-assistant/`; `ai-assistant-bootstrap` creates `platform-docs` | Every `docs.ts` section and every sidebar route exists as a validated document |
+| **0 — Corpus** (1 d) | `backend/ai-assistant/tools/` generators + validator; ~60 documents in `backend/ai-assistant/knowledge/`; `ai-assistant-bootstrap` creates `platform-docs` | Every `docs.ts` section and every sidebar route exists as a validated document |
 | **1 — Retrieval** (1 d) | Platform-scoped `retrieval.py` + heading/breadcrumb chunking | ≥ 90 % of a 20-question set returns the correct page as source #1 |
 | **2 — Classifier** (0.5 d) | `classifier.py` + the 60-case eval set | Off-topic F1 ≥ 0.95, fail-open on timeout, rules stage catches ≥ 30 % of real traffic |
 | **3 — Agent service** (1.5 d) | `backend/ai-assistant/` container: model, tools, frames, persistence, `/ping`, feedback | Local end-to-end: question → tokens → `[n]` sources → route chip → feedback stored |

@@ -343,7 +343,7 @@ The full rationale lives in [`docs/design/design-b-dynamodb-s3.md`](docs/design/
 | **Observability** | CloudWatch + X-Ray (OpenTelemetry via ADOT), AgentCore Evaluations |
 | **Infrastructure** | Terraform, GitHub Actions, Cloudflare (DNS), Lambda MicroVMs, ECR |
 | **Web search** | Amazon Bedrock AgentCore Web Search (gateway connector; no model access required) |
-| **Local development** | Floci (LocalStack-compatible AWS emulator), DynamoDB Local, Ollama, HuggingFace TEI |
+| **Local development** | Floci (LocalStack-compatible AWS emulator), DynamoDB Local, HuggingFace TEI |
 
 ## Repository layout
 
@@ -432,10 +432,10 @@ State persists across restarts, so uploaded documents and the retrieval index su
 | `make test-unit` | Per-Lambda unit tests |
 | `make floci-oauth-proxy` | (Re)start the background loopback forwarder for remote-MCP OAuth |
 
-Local ingestion runs **offline by default** — `EMBED_MODE=local` embeds with the Ollama container so
-Floci needs no cloud call. Set `EMBED_MODE=bedrock` to use the real Amazon Titan models instead. The
-Ollama container (`mxbai-embed-large`). Retrieval uses `VECTOR_STORE=local` (brute-force cosine; S3
-Vectors is not emulated) with `RERANK_MODE=none` or `local` (HuggingFace TEI).
+Local ingestion embeds with **Amazon Titan on real AWS** (`EMBED_MODE=bedrock`), so the stack needs
+AWS credentials (the same `~/.aws` mount the Labs use). Retrieval uses `VECTOR_STORE=local`
+(brute-force cosine; S3 Vectors is not emulated) with `RERANK_MODE=none` or `local`
+(HuggingFace TEI).
 
 ## Testing
 

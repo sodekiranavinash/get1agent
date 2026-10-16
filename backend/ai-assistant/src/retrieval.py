@@ -1,7 +1,7 @@
 """Retrieve platform knowledge for an AI Assistant answer.
 
 AI Assistant's knowledge base is an **ordinary knowledge base** owned by the reserved
-``platform`` scope (see ``tools/ai-assistant-knowledge/scope.py``), so this module does not
+``platform`` scope (see ``backend/ai-assistant/tools/scope.py``), so this module does not
 invent a retrieval system: it reuses the platform's own primitives —
 
 * ``retrieval.embedding.embeddings.embed_texts`` for the query vector (which is

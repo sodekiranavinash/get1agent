@@ -1,6 +1,6 @@
 """The AI Assistant corpus is generated, so an ingest must reconcile — not just add.
 
-Removing a document from `knowledge/ai-assistant/` does nothing to an index that already
+Removing a document from `backend/ai-assistant/knowledge/` does nothing to an index that already
 holds it: the page stays answerable and keeps being cited. That is how an
 admin-console page outlived its own removal, and why "re-run the ingest" was not
 enough to fix an answer that named it. Both ingest paths now prune first
@@ -17,11 +17,11 @@ import pytest
 
 from support import REPO_ROOT, FakeStorage, load_module
 
-TOOLS = REPO_ROOT / "tools" / "ai-assistant-knowledge"
+TOOLS = REPO_ROOT / "backend" / "ai-assistant" / "tools"
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
-build = load_module("tools/ai-assistant-knowledge/build.py", "avi_corpus_build")
+build = load_module("backend/ai-assistant/tools/build.py", "avi_corpus_build")
 
 from data.repositories import documents as docs_repo  # noqa: E402
 

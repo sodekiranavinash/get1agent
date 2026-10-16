@@ -8,21 +8,22 @@ them in order, in-process. Same extract → chunk → embed → index code as
 production, just without the queue in front of it.
 
 Requires the local stack (`make floci`): DynamoDB Local on :8000, Floci on
-:4566 and Ollama for embeddings (`EMBED_MODE=local`).
+:4566, and real AWS credentials for Titan embeddings (`EMBED_MODE=bedrock`).
 
-    python3 tools/ai-assistant-knowledge/local_ingest.py
+    python3 backend/ai-assistant/tools/local_ingest.py
 
 Then point the widget at a local agent service and ask it something.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -94,6 +95,56 @@ def _ensure_kb() -> dict:
     )
     print(f"  created knowledge base {item['name']} ({item['kbId']})")
     return item
+
+
+#: The EventBridge rule Floci provisions for `raw/` uploads (see
+#: `infra/local/floci/init/ready.d/10-provision.py`). Writing the corpus to `raw/`
+#: fires it, so the real S3 → EventBridge → SQS → Step Functions pipeline starts
+#: for every document even though this script indexes them in-process — a second,
+#: concurrent indexer. On a small Docker VM the ~50 emulated Lambda containers it
+#: spawns have been enough to OOM Floci, and the crash left a half-written index
+#: object that then hung every later ingest. So the rule is paused for the upload
+#: and restored in a ``finally``.
+_INGESTION_RULE = os.environ.get(
+    "AI_ASSISTANT_LOCAL_INGESTION_RULE",
+    "get1agent-local-ingestion-s3-object-created",
+)
+
+
+@contextlib.contextmanager
+def _pipeline_paused():
+    """Pause the `raw/` → ingestion-pipeline rule while we upload in-process.
+
+    Best effort: a stack without Events still ingests fine, it just risks the
+    emulated pipeline indexing the corpus a second time.
+    """
+    import boto3  # noqa: PLC0415  (needed only on the local path)
+
+    client = None
+    try:
+        client = boto3.client(
+            "events", endpoint_url=os.environ.get("AWS_ENDPOINT_URL") or None
+        )
+        client.disable_rule(Name=_INGESTION_RULE)
+        print(f"  paused     EventBridge rule {_INGESTION_RULE} (ingesting in-process)")
+    except Exception as exc:  # noqa: BLE001 - never block the ingest on this
+        print(
+            f"  note       could not pause {_INGESTION_RULE} ({type(exc).__name__});"
+            " the local pipeline may index this corpus too"
+        )
+        client = None
+    try:
+        yield
+    finally:
+        if client is not None:
+            try:
+                client.enable_rule(Name=_INGESTION_RULE)
+                print(f"  resumed    EventBridge rule {_INGESTION_RULE}")
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"  warning    re-enable {_INGESTION_RULE} by hand "
+                    f"({type(exc).__name__})"
+                )
 
 
 def _upload(documents: list, kb_id: str) -> list[dict]:
@@ -232,7 +283,10 @@ def main() -> int:
     kb = _ensure_kb()
     kb_id = str(kb["kbId"])
     _prune(kb_id, documents)
-    items = _upload(documents, kb_id)
+    # Upload with the pipeline paused: the `raw/` writes must not also start the
+    # emulated S3 → EventBridge → Step Functions ingestion for every document.
+    with _pipeline_paused():
+        items = _upload(documents, kb_id)
 
     print("  ingesting (extract → embed → index)…")
     failures = _ingest(items)
