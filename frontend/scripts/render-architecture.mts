@@ -3,8 +3,8 @@
  * README — from the *same* source the app renders.
  *
  * There is deliberately no second drawing here: this script imports the exact
- * `DiagramSpec`/`PipelineSpec` objects (`diagrams.ts`) and runs the exact same
- * layout engines (`layoutDiagram` / `layoutPipeline`) the React page uses, then
+ * `FlowSpec` objects the app renders (`diagrams.ts`, `sheets.ts`, `journeys.ts`)
+ * and runs the exact same layout engine (`layoutFlow`) the React page uses, then
  * serialises the result to a self-contained dark-theme SVG. Change the app's
  * diagram and re-run `npm run gen:architecture` — the README follows.
  *
@@ -17,8 +17,6 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Resvg } from '@resvg/resvg-js'
 
-import { layoutDiagram, type Layout } from '../src/components/architecture/blueprint/engine.ts'
-import { pipelineToDiagram } from '../src/components/architecture/blueprint/pipeline.ts'
 import {
   layoutFlow,
   type FlowLayout,
@@ -26,19 +24,24 @@ import {
   type LaidFlowSection,
 } from '../src/components/architecture/blueprint/flow.ts'
 import {
-  ARCHITECTURE,
   ARCHITECTURE_FLOW,
   ARCHITECTURE_FLOW_LEGEND,
-  ARCHITECTURE_LEGEND,
-  DEPLOYMENT,
-  DEPLOYMENT_LEGEND,
-  DATA_STORAGE,
-  DATA_LEGEND,
-  SECURITY,
-  SECURITY_LEGEND,
-  AGENT_LIFECYCLE,
-  KNOWLEDGE_TAB_FLOWS,
 } from '../src/components/architecture/blueprint/diagrams.ts'
+import {
+  KNOWLEDGE_JOURNEYS,
+  RUNTIME_JOURNEYS,
+  journeyTones,
+} from '../src/components/architecture/blueprint/journeys.ts'
+import {
+  DATA_FLOW,
+  DATA_FLOW_LEGEND,
+  DEPLOYMENT_FLOW,
+  DEPLOYMENT_FLOW_LEGEND,
+  LAYERS_FLOW,
+  LAYERS_FLOW_LEGEND,
+  SECURITY_FLOW,
+  SECURITY_FLOW_LEGEND,
+} from '../src/components/architecture/blueprint/sheets.ts'
 import {
   ARCH_TONES,
   KIND_META,
@@ -219,83 +222,6 @@ function flowTile(n: any): string {
   return out.join('')
 }
 
-/** A service symbol: a 52px AWS tile with the name and subtitle beneath it. */
-function node(node: any, numbered?: number): string {
-  const tileX = node.cx - 26
-  const tileY = node.y
-  const out: string[] = []
-  const aws = node.aws ? AWS_ICONS[node.aws as keyof typeof AWS_ICONS] : undefined
-
-  if (aws) {
-    out.push(
-      `<g transform="translate(${round(tileX)} ${round(tileY)})">` +
-        `<g clip-path="url(#tileClip)">${placeIcon(aws, 0, 0, 52)}</g>` +
-        `</g>`,
-    )
-  } else {
-    const Icon = node.icon ?? KIND_META[node.kind as keyof typeof KIND_META].icon
-    out.push(
-      `<rect x="${round(tileX)}" y="${round(tileY)}" width="52" height="52" rx="16" ` +
-        `fill="${SYMBOL_COLORS[node.kind as keyof typeof SYMBOL_COLORS]}"/>`,
-    )
-    out.push(placeIcon(Icon, tileX + 14, tileY + 14, 24))
-  }
-  out.push(
-    `<rect x="${round(tileX)}" y="${round(tileY)}" width="52" height="52" rx="16" ` +
-      `fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>`,
-  )
-
-  if (numbered != null) {
-    out.push(
-      `<circle cx="${round(tileX + 10)}" cy="${round(tileY + 10)}" r="10" ` +
-        `fill="${C.canvas}" stroke="${C.border}" stroke-width="1"/>`,
-    )
-    out.push(text(tileX + 10, tileY + 13.5, String(numbered), { size: 9, weight: 600, anchor: 'middle', mono: true }))
-  }
-
-  const maxW = node.w - 6
-  let ty = tileY + 52 + 18
-  const titleLines = wrapText(node.title, maxW, 12, true, 2)
-  for (const line of titleLines) {
-    out.push(text(node.cx, ty, line, { size: 12, weight: 600, anchor: 'middle' }))
-    ty += 13.5
-  }
-  if (node.subtitle) {
-    ty += 1
-    for (const line of wrapText(node.subtitle, maxW, 10.5, false, 2)) {
-      out.push(text(node.cx, ty, line, { size: 10.5, fill: C.muted, anchor: 'middle' }))
-      ty += 12.6
-    }
-  }
-  if (node.code) {
-    ty += 1.5
-    out.push(text(node.cx, ty, node.code, { size: 9.5, fill: C.subtle, anchor: 'middle', mono: true }))
-  }
-  return out.join('')
-}
-
-function edgeLayer(edges: Layout['edges']): string {
-  const out: string[] = []
-  for (const e of edges) {
-    const color = ARCH_TONES[e.tone].color
-    out.push(
-      `<path d="${e.d}" fill="none" stroke="${color}" stroke-width="1.5" ` +
-        `stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="1 6" ` +
-        `marker-end="url(#arrow-${e.tone})"/>`,
-    )
-    out.push(`<circle cx="${round(e.sx)}" cy="${round(e.sy)}" r="2.6" fill="${color}"/>`)
-    if (e.label && e.labelX != null && e.labelY != null) {
-      const w = textWidth(e.label, 9, true) + 12
-      out.push(
-        `<rect x="${round(e.labelX - w / 2)}" y="${round(e.labelY - 7)}" width="${round(w)}" height="14" rx="7" ` +
-          `fill="${C.canvas}" fill-opacity="0.9" stroke="${toneAlpha(e.tone, 0.4)}" stroke-width="1"/>`,
-      )
-      out.push(text(e.labelX, e.labelY + 3, e.label, { size: 9, fill: color, anchor: 'middle', mono: true }))
-    }
-  }
-  return out.join('')
-}
-
 function legend(tones: ArchEdgeTone[], note: string | undefined, width: number, top: number): string {
   const cy = top + LEGEND_H / 2
   const out: string[] = []
@@ -354,65 +280,6 @@ function frame(width: number, height: number, body: string): string {
     body +
     `</svg>`
   )
-}
-
-/* -------------------------------------------------------------------------- */
-/* DiagramSpec (layered map)                                                   */
-/* -------------------------------------------------------------------------- */
-
-function renderDiagram(layout: Layout, tones: ArchEdgeTone[], note?: string): string {
-  const tonesUsed = Array.from(new Set<ArchEdgeTone>([...tones, ...layout.edges.map((e) => e.tone)]))
-  const width = layout.width + 2 * PAD
-  const canvasTop = PAD + LEGEND_H + GAP
-  const height = canvasTop + layout.height + PAD
-  const out: string[] = [defs(tonesUsed)]
-
-  out.push(`<g transform="translate(${PAD} 0)">${legend(tones, note, layout.width, PAD)}</g>`)
-  out.push(`<g transform="translate(${PAD} ${canvasTop})">`)
-
-  for (const band of layout.bands) {
-    out.push(boundary(band.x, band.y, band.w, band.h, band.tone))
-    // Gutter label: index + dot, uppercase title, wrapped hint — right aligned.
-    const gx = band.x - 20
-    const titleLines = wrapText(band.title.toUpperCase(), 148, 12, true, 3, 1.4)
-    const hintLines = band.hint ? wrapText(band.hint, 148, 10.5, false, 3) : []
-    const blockH = 15 + titleLines.length * 14 + (hintLines.length ? 4 + hintLines.length * 12.5 : 0)
-    let cy = band.y + band.h / 2 - blockH / 2
-    const rowCy = cy + 6
-    const index = String(band.index + 1).padStart(2, '0')
-    out.push(text(gx - 11, rowCy + 3.5, index, { size: 10, fill: C.subtle, anchor: 'end', mono: true }))
-    out.push(`<circle cx="${round(gx - 3.5)}" cy="${round(rowCy)}" r="3" fill="${ARCH_TONES[band.tone].color}"/>`)
-    cy += 15
-    for (const line of titleLines) {
-      out.push(text(gx, cy + 10, line, { size: 12, weight: 600, anchor: 'end', fill: ARCH_TONES[band.tone].color, spacing: 1.4 }))
-      cy += 14
-    }
-    if (hintLines.length) {
-      cy += 4
-      for (const line of hintLines) {
-        out.push(text(gx, cy + 9, line, { size: 10.5, fill: C.subtle, anchor: 'end' }))
-        cy += 12.5
-      }
-    }
-  }
-
-  for (const cap of layout.captions) {
-    const cy = cap.y + 11
-    const cx = cap.x + cap.w / 2
-    const label = cap.text.toUpperCase()
-    const tw = textWidth(label, 10.5, true, 1.5)
-    const left = cx - (tw + 16) / 2
-    out.push(`<line x1="${round(cap.x)}" y1="${round(cy)}" x2="${round(left - 10)}" y2="${round(cy)}" stroke="${toneAlpha(cap.tone, 0.35)}"/>`)
-    out.push(`<line x1="${round(left + tw + 10)}" y1="${round(cy)}" x2="${round(cap.x + cap.w)}" y2="${round(cy)}" stroke="${toneAlpha(cap.tone, 0.35)}"/>`)
-    out.push(`<circle cx="${round(left + 3)}" cy="${round(cy)}" r="3" fill="${ARCH_TONES[cap.tone].color}"/>`)
-    out.push(text(left + 10, cy + 3.5, label, { size: 10.5, weight: 600, fill: C.subtle, spacing: 1.5 }))
-  }
-
-  out.push(edgeLayer(layout.edges))
-  for (const n of layout.nodes) out.push(node(n, n.badge))
-  out.push('</g>')
-
-  return frame(width, height, out.join(''))
 }
 
 /* -------------------------------------------------------------------------- */
@@ -516,27 +383,32 @@ images.push({
 })
 images.push({
   file: 'architecture-layers',
-  svg: renderDiagram(layoutDiagram(ARCHITECTURE), ARCHITECTURE_LEGEND, '11 stages · application flow · 10+ AWS services'),
+  svg: renderFlow(layoutFlow(LAYERS_FLOW), LAYERS_FLOW_LEGEND, '12 tiers · read left to right'),
 })
 images.push({
   file: 'architecture-deployment',
-  svg: renderDiagram(layoutDiagram(DEPLOYMENT), DEPLOYMENT_LEGEND, 'one codebase · local and prod'),
+  svg: renderFlow(layoutFlow(DEPLOYMENT_FLOW), DEPLOYMENT_FLOW_LEGEND, 'one codebase · local and prod'),
 })
 images.push({
   file: 'architecture-data',
-  svg: renderDiagram(layoutDiagram(DATA_STORAGE), DATA_LEGEND, 'write → store → read'),
+  svg: renderFlow(layoutFlow(DATA_FLOW), DATA_FLOW_LEGEND, 'write → store → read'),
 })
 images.push({
   file: 'architecture-security',
-  svg: renderDiagram(layoutDiagram(SECURITY), SECURITY_LEGEND, 'defense in depth'),
+  svg: renderFlow(layoutFlow(SECURITY_FLOW), SECURITY_FLOW_LEGEND, 'defense in depth'),
 })
 
-const runtimeTones = Array.from(new Set(AGENT_LIFECYCLE.spec.envs.map((e) => e.tone)))
-images.push({ file: 'architecture-agent-runtime', svg: renderDiagram(layoutDiagram(pipelineToDiagram(AGENT_LIFECYCLE.spec)), runtimeTones) })
+const runtime = RUNTIME_JOURNEYS[0]
+images.push({
+  file: 'architecture-agent-runtime',
+  svg: renderFlow(layoutFlow(runtime.spec), journeyTones(runtime), 'one run · end to end'),
+})
 
-const retrieval = KNOWLEDGE_TAB_FLOWS.find((f) => f.id === 'retrieval') ?? KNOWLEDGE_TAB_FLOWS[0]
-const knowledgeTones = Array.from(new Set(retrieval.spec.envs.map((e) => e.tone)))
-images.push({ file: 'architecture-knowledge', svg: renderDiagram(layoutDiagram(pipelineToDiagram(retrieval.spec)), knowledgeTones) })
+const retrieval = KNOWLEDGE_JOURNEYS.find((j) => j.id === 'retrieval') ?? KNOWLEDGE_JOURNEYS[0]
+images.push({
+  file: 'architecture-knowledge',
+  svg: renderFlow(layoutFlow(retrieval.spec), journeyTones(retrieval), 'question → answer'),
+})
 
 /* -------------------------------------------------------------------------- */
 /* Write SVG + PNG                                                             */

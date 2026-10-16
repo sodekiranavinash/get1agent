@@ -1,28 +1,27 @@
 import { useMemo, useState } from 'react'
-import { DiagramCanvas } from '../blueprint/DiagramCanvas'
-import { layoutDiagram } from '../blueprint/engine'
-import { pipelineToDiagram } from '../blueprint/pipeline'
-import type { RequestFlow } from '../blueprint/diagrams'
+import { FlowCanvas } from '../blueprint/FlowCanvas'
+import { layoutFlow } from '../blueprint/flow'
+import { journeyTones, type Journey } from '../blueprint/journeys'
 
-function FlowChips({
-  flows,
+function JourneyChips({
+  journeys,
   active,
   onSelect,
 }: {
-  flows: RequestFlow[]
+  journeys: Journey[]
   active: string
   onSelect: (id: string) => void
 }) {
   return (
     <div className="scrollbar-thin -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-      {flows.map((flow) => {
-        const Icon = flow.icon
-        const selected = flow.id === active
+      {journeys.map((journey) => {
+        const Icon = journey.icon
+        const selected = journey.id === active
         return (
           <button
-            key={flow.id}
+            key={journey.id}
             type="button"
-            onClick={() => onSelect(flow.id)}
+            onClick={() => onSelect(journey.id)}
             className={`flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-1.5 text-[12px] font-medium transition-colors ${
               selected
                 ? 'border-accent/50 bg-accent-soft text-accent'
@@ -30,7 +29,7 @@ function FlowChips({
             }`}
           >
             <Icon className="size-3.5" strokeWidth={1.9} />
-            {flow.label}
+            {journey.label}
           </button>
         )
       })}
@@ -39,29 +38,24 @@ function FlowChips({
 }
 
 /**
- * A tab that walks one journey at a time as a vertical, numbered flow, with a
- * chip per journey. Consecutive steps in the same environment share a dotted
- * boundary — the same layered language the map tabs use.
+ * A tab that walks one journey at a time as the same composed map the overview
+ * sheet uses: stages left → right on one row, and — where the flow is a round
+ * trip — a single labelled return edge travelling back along the top to the
+ * client. A dot travels every connector in the direction of data flow.
  */
-export function PipelinesTab({
+export function JourneysTab({
   title,
   blurb,
-  flows,
+  journeys,
 }: {
   title: string
   blurb: string
-  flows: RequestFlow[]
+  journeys: Journey[]
 }) {
-  const [activeId, setActiveId] = useState(flows[0].id)
-  const flow = flows.find((f) => f.id === activeId) ?? flows[0]
-  const layout = useMemo(
-    () => layoutDiagram(pipelineToDiagram(flow.spec)),
-    [flow],
-  )
-  const legend = useMemo(
-    () => Array.from(new Set(flow.spec.envs.map((env) => env.tone))),
-    [flow],
-  )
+  const [activeId, setActiveId] = useState(journeys[0].id)
+  const journey = journeys.find((j) => j.id === activeId) ?? journeys[0]
+  const layout = useMemo(() => layoutFlow(journey.spec), [journey])
+  const legend = useMemo(() => journeyTones(journey), [journey])
 
   return (
     <div className="space-y-4">
@@ -74,31 +68,31 @@ export function PipelinesTab({
         </p>
       </header>
 
-      {flows.length > 1 ? (
-        <FlowChips flows={flows} active={flow.id} onSelect={setActiveId} />
+      {journeys.length > 1 ? (
+        <JourneyChips journeys={journeys} active={journey.id} onSelect={setActiveId} />
       ) : null}
 
       <div className="space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-3">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-canvas text-accent">
-              <flow.icon className="size-4" strokeWidth={1.8} />
+              <journey.icon className="size-4" strokeWidth={1.8} />
             </span>
             <div>
               <h3 className="text-[14px] font-semibold text-foreground">
-                {flow.label}
+                {journey.label}
               </h3>
               <p className="mt-1 max-w-4xl text-[12.5px] leading-relaxed text-muted">
-                {flow.summary}
+                {journey.summary}
               </p>
             </div>
           </div>
           <span className="rounded-full border border-border bg-canvas/60 px-2.5 py-1 font-mono text-[10.5px] text-subtle">
-            {flow.spec.steps.length} steps
+            {journey.spec.sections.length} stages · read left to right
           </span>
         </div>
 
-        <DiagramCanvas key={flow.id} layout={layout} legend={legend} />
+        <FlowCanvas key={journey.id} layout={layout} legend={legend} />
       </div>
     </div>
   )

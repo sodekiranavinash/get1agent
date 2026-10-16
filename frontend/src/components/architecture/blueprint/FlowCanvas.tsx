@@ -125,11 +125,11 @@ function FlowTile({ node }: { node: FlowLayout['nodes'][number] }) {
           </span>
         )}
       </span>
-      <span className="mt-1 text-[10px] leading-tight font-semibold tracking-tight text-foreground">
+      <span className="mt-1 line-clamp-2 w-full px-0.5 text-[10px] leading-tight font-semibold tracking-tight text-foreground">
         {node.title}
       </span>
       {node.code ? (
-        <span className="mt-0.5 font-mono text-[8.5px] leading-none text-subtle">
+        <span className="mt-0.5 w-full truncate px-0.5 font-mono text-[8.5px] leading-none text-subtle">
           {node.code}
         </span>
       ) : null}

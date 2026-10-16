@@ -17,27 +17,30 @@ import { AuroraBackground } from '../components/landing/AuroraBackground'
 import { LandingNav } from '../components/landing/LandingNav'
 import { AppFooter } from '../components/layout/AppFooter'
 import { ReturnLink } from '../components/layout/ReturnLink'
-import { DiagramTab } from '../components/architecture/views/DiagramTab'
 import { FlowTab } from '../components/architecture/views/FlowTab'
-import { PipelinesTab } from '../components/architecture/views/PipelinesTab'
+import { JourneysTab } from '../components/architecture/views/JourneysTab'
 import {
-  ARCHITECTURE,
   ARCHITECTURE_FLOW,
   ARCHITECTURE_FLOW_LEGEND,
-  ARCHITECTURE_LEGEND,
-  AI_ASSISTANT_FLOWS,
-  DATA_LEGEND,
-  DATA_STORAGE,
-  DEPLOYMENT,
-  DEPLOYMENT_LEGEND,
-  AGENT_LIFECYCLE,
-  IDENTITY_TAB_FLOWS,
-  KNOWLEDGE_TAB_FLOWS,
-  OBSERVABILITY_TAB_FLOWS,
-  REQUEST_TAB_FLOWS,
-  SECURITY,
-  SECURITY_LEGEND,
 } from '../components/architecture/blueprint/diagrams'
+import {
+  AI_ASSISTANT_JOURNEYS,
+  IDENTITY_JOURNEYS,
+  KNOWLEDGE_JOURNEYS,
+  OBSERVABILITY_JOURNEYS,
+  REQUEST_JOURNEYS,
+  RUNTIME_JOURNEYS,
+} from '../components/architecture/blueprint/journeys'
+import {
+  DATA_FLOW,
+  DATA_FLOW_LEGEND,
+  DEPLOYMENT_FLOW,
+  DEPLOYMENT_FLOW_LEGEND,
+  LAYERS_FLOW,
+  LAYERS_FLOW_LEGEND,
+  SECURITY_FLOW,
+  SECURITY_FLOW_LEGEND,
+} from '../components/architecture/blueprint/sheets'
 
 type TabId =
   | 'architecture'
@@ -84,89 +87,89 @@ function TabContent({ tab }: { tab: TabId }) {
       )
     case 'layers':
       return (
-        <DiagramTab
+        <FlowTab
           title="Layered view"
-          blurb="The same platform drawn boundary by boundary, so every service's tier is explicit: client, edge delivery, UI, request entry, application services, agent runtime, MCP gateway, tool servers, models and agent platform, state and observability. Read top to bottom."
-          spec={ARCHITECTURE}
-          legend={ARCHITECTURE_LEGEND}
-          note="11 stages · application flow"
+          blurb="The same platform drawn boundary by boundary, so every service's tier is explicit: client, edge delivery, UI, request entry, application services, agent runtime, MCP gateway and tool servers across the top; the Bedrock and AgentCore platforms, the data plane and observability beneath. Read left to right."
+          spec={LAYERS_FLOW}
+          legend={LAYERS_FLOW_LEGEND}
+          note="12 tiers · read left to right"
         />
       )
     case 'deployment':
       return (
-        <DiagramTab
+        <FlowTab
           title="Deployment & environments"
-          blurb="How the platform is built and shipped: commit → CI/CD → Terraform → image build → deployed services, agent runtime, AgentCore platform, data and models — with local parity."
-          spec={DEPLOYMENT}
-          legend={DEPLOYMENT_LEGEND}
+          blurb="How the platform is built and shipped, left to right: commit → CI/CD → Terraform → image build → deployed services and the agent runtime → the AgentCore platform, data, models and local parity it stands up."
+          spec={DEPLOYMENT_FLOW}
+          legend={DEPLOYMENT_FLOW_LEGEND}
           note="one codebase · local and prod"
         />
       )
     case 'flows':
       return (
-        <PipelinesTab
+        <JourneysTab
           title="Request flows"
-          blurb="The end-to-end journeys a user can trigger — an agent chat run, a multi-agent workflow, and a scheduled run."
-          flows={REQUEST_TAB_FLOWS}
+          blurb="The end-to-end journeys a user can trigger — an agent chat run, a multi-agent workflow, and a scheduled run. Each reads left to right: the request walks the stages, and the answer returns along the top into the client."
+          journeys={REQUEST_JOURNEYS}
         />
       )
     case 'runtime':
       return (
-        <PipelinesTab
+        <JourneysTab
           title="Agent run lifecycle"
-          blurb="What happens inside one run: session and memory, planning, policy-checked tool calls through the gateway, an optional human pause, the streamed answer, and the persisted trace."
-          flows={[AGENT_LIFECYCLE]}
+          blurb="One run end to end, left to right: prompt, control plane, the isolated runtime (memory + planning), policy and gateway, the tool servers — then the answer streaming back along the top and the persisted trace."
+          journeys={RUNTIME_JOURNEYS}
         />
       )
     case 'ai-assistant':
       return (
-        <PipelinesTab
+        <JourneysTab
           title="AI Assistant — the in-product assistant"
-          blurb="AI Assistant is a separate subsystem, not part of the agent runtime: a bottom-right dialog on every page, two ingress paths (a stateless guest Lambda and an isolated MicroVM for signed-in users), a dedicated intent classifier, its own LangChain Deep Agents loop, and a reserved platform knowledge scope ingested through the standard pipeline. Grounded only in the repository — no crawling."
-          flows={AI_ASSISTANT_FLOWS}
+          blurb="AI Assistant is a separate subsystem, not part of the agent runtime: a bottom-right dialog on every page, two ingress paths (a stateless guest route and a signed-in route), a dedicated intent classifier, its own LangChain Deep Agents loop, and a reserved platform knowledge scope ingested through the standard pipeline. Read left to right; grounded only in the repository — no crawling."
+          journeys={AI_ASSISTANT_JOURNEYS}
         />
       )
     case 'knowledge':
       return (
-        <PipelinesTab
+        <JourneysTab
           title="Knowledge & retrieval"
-          blurb="Documents are chunked, embedded with Titan and indexed into S3 Vectors; questions are answered by hybrid semantic + BM25 search, fused with RRF and reranked on Bedrock."
-          flows={KNOWLEDGE_TAB_FLOWS}
+          blurb="Documents are chunked, embedded with Titan and indexed into S3 Vectors; questions are answered by hybrid semantic + BM25 search, fused with RRF and reranked on Bedrock. Read left to right — ingestion on the left, the grounded answer returning along the top."
+          journeys={KNOWLEDGE_JOURNEYS}
         />
       )
     case 'data':
       return (
-        <DiagramTab
+        <FlowTab
           title="Data plane"
-          blurb="Where every byte lives — DynamoDB for small metadata, S3 for objects and the BM25 index, S3 Vectors for embeddings, KMS for secrets — all keyed by the internal userId."
-          spec={DATA_STORAGE}
-          legend={DATA_LEGEND}
+          blurb="Where every byte lives, read left to right: the writers on the left; then the object store, the semantic index and the metadata table; the readers that query them; and the cache. DynamoDB holds small metadata, S3 the objects and the BM25 index, S3 Vectors the embeddings, KMS the secrets — all keyed by the internal userId."
+          spec={DATA_FLOW}
+          legend={DATA_FLOW_LEGEND}
           note="one item per entity · never a Scan"
         />
       )
     case 'identity':
       return (
-        <PipelinesTab
+        <JourneysTab
           title="Identity & access"
-          blurb="Identity end to end: Google-only OIDC sign-in, OAuth 2.1 for remote tool servers, AgentCore Identity for delegated tokens, and service-to-service auth for scheduled and evaluation runs."
-          flows={IDENTITY_TAB_FLOWS}
+          blurb="Identity end to end, left to right: Google-only OIDC sign-in, OAuth 2.1 for remote tool servers, AgentCore Identity for delegated tokens, and service-to-service auth for scheduled and evaluation runs."
+          journeys={IDENTITY_JOURNEYS}
         />
       )
     case 'observability':
       return (
-        <PipelinesTab
+        <JourneysTab
           title="Observability & evaluation"
-          blurb="OpenTelemetry spans to CloudWatch and X-Ray, online evaluation of live traces, and the offline eval lab with datasets and scores."
-          flows={OBSERVABILITY_TAB_FLOWS}
+          blurb="OpenTelemetry spans to CloudWatch and X-Ray, online evaluation of live traces, the offline eval lab with datasets and scores, and the metrics/feedback loop. Read left to right; the feedback loop closes back along the top."
+          journeys={OBSERVABILITY_JOURNEYS}
         />
       )
     case 'security':
       return (
-        <DiagramTab
+        <FlowTab
           title="Security safeguards"
-          blurb="Defense in depth: the layers a request must clear — identity, isolation and encryption, execution, AI governance (AgentCore Policy + Bedrock Guardrails) and observability. All enforced server-side."
-          spec={SECURITY}
-          legend={SECURITY_LEGEND}
+          blurb="Defense in depth, left to right: the layers a request must clear — identity, isolation and encryption, network and execution, AI governance (AgentCore Policy + Bedrock Guardrails) and observability. All enforced server-side."
+          spec={SECURITY_FLOW}
+          legend={SECURITY_FLOW_LEGEND}
           note="A request must satisfy every layer"
         />
       )
@@ -209,8 +212,9 @@ function TabBar({
 }
 
 /**
- * Public architecture page. A sticky top tab bar switches between the layered
- * maps and the journey pipelines; each is scaled to the full content width and
+ * Public architecture page. A sticky top tab bar switches between the composed
+ * maps; each is read left to right (with the response returning along the top
+ * where the flow is a round trip) and scaled to the full content width and
  * rendered directly in the page flow, so the page keeps one natural scrollbar.
  */
 export function ArchitecturePage() {
