@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from data.client import now_iso, table
+from data.client import is_conditional_failure, now_iso, table
 from data.keys import GSI1, GSI2, KB_PREFIX, META, kb_sk, user_pk
 
 KB_STATUSES = ("processing", "ready", "failed")
@@ -225,7 +225,30 @@ def adjust_processing(kb_id: str, delta: int) -> int:
         },
         ReturnValues="UPDATED_NEW",
     )
-    count = max(0, int((response.get("Attributes") or {}).get("processingCount") or 0))
+    raw = int((response.get("Attributes") or {}).get("processingCount") or 0)
+    # ``ADD`` is atomic but unbounded: a document re-registered while it is still
+    # ``processing`` decrements without a matching increment (``processing`` ->
+    # ``uploaded`` is -1, and the next run's +1 only brings it back to where it
+    # started), so the stored count drifts negative and stays there — production
+    # carried -133. Status already reads a clamped value, but a negative stored
+    # count also hides a genuinely in-flight document (``+1`` applied to -1 is
+    # still ``<= 0``), so repair the item instead of leaving it lying. The repair
+    # is conditional, so it can never undo a concurrent increment, and best-effort:
+    # a lost race means another writer is moving the same counter, which is the
+    # healthy case.
+    if raw < 0:
+        try:
+            table().update_item(
+                Key={"pk": item["pk"], "sk": item["sk"]},
+                UpdateExpression="SET processingCount = :zero",
+                ConditionExpression="processingCount < :zero",
+                ExpressionAttributeValues={":zero": 0},
+            )
+            raw = 0
+        except Exception as exc:  # noqa: BLE001 - never fail an ingest over a repair
+            if not is_conditional_failure(exc):
+                raise
+    count = max(0, raw)
     desired = "processing" if count > 0 else "ready"
     if item.get("status") != desired:
         table().update_item(

@@ -127,6 +127,27 @@ def test_documents_crud_and_status_gsi():
     assert get_kb_by_id(item["kbId"])["status"] == "ready"
 
 
+def test_processing_counter_repaired_when_it_drifts_negative():
+    """The stored in-flight count must self-heal instead of drifting negative.
+
+    ``ADD`` is unbounded, and a re-registration while a document is ``processing``
+    decrements without its matching increment, so the counter walks below zero and
+    stays there (production carried -133). A negative count also hides a genuinely
+    in-flight document, because ``max(0, …)`` reads it as idle.
+    """
+    profile = _profile()
+    item = _kb(profile)
+
+    assert adjust_processing(item["kbId"], -5) == 0
+    assert int(get_kb_by_id(item["kbId"])["processingCount"]) == 0
+
+    # ...and a real transition afterwards is counted from the repaired zero.
+    assert adjust_processing(item["kbId"], 1) == 1
+    assert get_kb_by_id(item["kbId"])["status"] == "processing"
+    assert adjust_processing(item["kbId"], -1) == 0
+    assert get_kb_by_id(item["kbId"])["status"] == "ready"
+
+
 def test_tags_are_grouped_and_denormalized():
     profile = _profile()
     sub = profile["userId"]
