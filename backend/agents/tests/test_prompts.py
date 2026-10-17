@@ -81,6 +81,20 @@ class BuildSystemPromptTests(unittest.TestCase):
             prompts.build_system_prompt({"prompt": "p"}, []),
         )
 
+    def test_personal_questions_come_from_memory_not_the_knowledge_base(self) -> None:
+        # The knowledge-base rule used to say "prefer their content over your own
+        # memory" — naming the very `<memory>` block that answers personal
+        # questions. With a KB attached, "what is my favourite colour?" was
+        # answered "I couldn't find it in the available sources" even though the
+        # memory block held it.
+        prompt = prompts.build_system_prompt(
+            {"prompt": "p", "knowledgeBaseIds": ["kb1"]}, [], memory_enabled=True
+        )
+        self.assertNotIn("over your own memory", prompt)
+        self.assertIn("over your own training knowledge", prompt)
+        self.assertIn("answered from the `<memory>` block", prompt)
+        self.assertIn("Never report such a question as not found", prompt)
+
     def test_answers_are_grounded_in_tools_only(self) -> None:
         prompt = prompts.build_system_prompt({"prompt": "p"}, [])
         self.assertIn("GROUNDING (mandatory)", prompt)
@@ -98,6 +112,19 @@ class BuildSystemPromptTests(unittest.TestCase):
         prompt = prompts.build_system_prompt({"prompt": "p"}, [], memory_enabled=True)
         self.assertIn("USER MEMORY (long-term)", prompt)
         self.assertNotIn("add_memory", prompt)
+
+    def test_a_memory_answer_carries_no_citation_marker(self) -> None:
+        # Memory has no source index, but GROUNDING insists every factual
+        # sentence carry one — so the model invented a literal `[memory]` tag.
+        # The carve-out has to sit on the citation rule itself, not in a trailing
+        # parenthetical, or the mandatory rule wins.
+        grounded = prompts.build_system_prompt({"prompt": "p"}, [])
+        self.assertIn("carries no marker at all", grounded)
+        self.assertIn("write no tag for it, not `[memory]`", grounded)
+
+        with_memory = prompts.build_system_prompt({"prompt": "p"}, [], memory_enabled=True)
+        self.assertIn("write no bracketed tag", with_memory)
+        self.assertIn("not `[memory]`", with_memory)
 
     def test_memory_save_instruction_names_the_add_tool(self) -> None:
         prompt = prompts.build_system_prompt(

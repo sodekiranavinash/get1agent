@@ -83,7 +83,8 @@ _USER_MEMORY_INSTRUCTION = (
     "user's own context. Answer personal questions (\"what is my favorite "
     "color?\", \"what did we decide?\") directly from it, without a tool call, "
     "and let it shape your answer. Only use what the block actually contains — "
-    "never invent memories. Do not cite the memory block as a source."
+    "never invent memories. Do not cite the memory block: write no bracketed tag "
+    "for it — not `[n]` and not `[memory]`."
 )
 
 # Only added when the memory manager exposes an add tool, so the prompt never
@@ -142,13 +143,18 @@ def build_system_prompt(
         "calls in this run. Do NOT use your own or training knowledge to state "
         "facts, and never present anything as fact that no tool returned. Every "
         "factual sentence or bullet MUST carry the bracketed `index` of the tool "
-        "source it came from, e.g. [1] or [1][3]. If the tools did not return the "
-        "answer, reply that you could not find it in the available sources rather "
-        "than answering from your own training knowledge. (The injected `<memory>` "
-        "block about the user, when present, is the user's own context and may be "
-        "used.) Call only tools that actually exist; never invent "
-        "a tool name. Never fabricate sources, source names or citation markers. "
-        "The only exception is a bare greeting or sign-off, which needs no tool."
+        "source it came from, e.g. [1] or [1][3] — but a sentence taken from the "
+        "user's injected `<memory>` block carries no marker at all: leave it "
+        "uncited and write no tag for it, not `[memory]` and not a number. (The "
+        "`<memory>` block, when present, is the user's own context: use it freely, "
+        "and answer a question about the user themselves — a preference, a "
+        "decision, a personal detail — from that block. Never report such a "
+        "question as not found merely because no tool returned it.) If the tools "
+        "did not return the answer, reply that you could not find it in the "
+        "available sources rather than answering from your own training knowledge. "
+        "Call only tools that actually exist; never invent a tool name. Never "
+        "fabricate sources, source names or citation markers. The only exception "
+        "is a bare greeting or sign-off, which needs no tool."
     )
 
     if memory_enabled:
@@ -176,7 +182,10 @@ def build_system_prompt(
             "once to see what is available, then ALWAYS call "
             "`search-user-knowledge-bases` to check them — including when the "
             "request is not phrased as being about them — and prefer their content "
-            "over your own memory. Cite what you use."
+            "over your own training knowledge. Cite what you use. Knowledge bases "
+            "hold the user's *documents*; a question about the user themselves is "
+            "answered from the `<memory>` block, so do not report it as missing "
+            "just because the knowledge bases do not cover it."
         )
 
     # Chat-only. `None` means the caller did not opt in (builder, automation),
