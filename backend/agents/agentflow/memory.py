@@ -151,6 +151,35 @@ def _extraction_config() -> Any:
         return True
 
 
+def _memory_injection_query(context: Any) -> str:
+    """Search memory for what the *user* asked, on every model call.
+
+    Strands' default derives the query from the most recent *assistant* message on
+    a non-user turn (a tool-result turn). In a tool loop that message is a tool-use
+    step carrying no text at all, so the derived query was empty and injection was
+    skipped — precisely on the call that writes the answer. Anchoring to the latest
+    user ask keeps retrieval on-topic for every call in the run.
+    """
+    for message in reversed(context.messages or []):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            text = content
+        else:
+            text = "\n".join(
+                str(block.get("text") or "")
+                for block in (content or [])
+                if isinstance(block, dict)
+            )
+        text = text.strip()
+        if text:
+            # A run's input can carry folded plan text and attachments; a query
+            # only has to be representative, and the embedder has a token limit.
+            return text[:2000]
+    return ""
+
+
 def build_memory_manager(config: RuntimeConfig, user_id: str, *, session_id: str) -> Any:
     """Build the Strands ``MemoryManager`` for this run.
 
@@ -160,11 +189,22 @@ def build_memory_manager(config: RuntimeConfig, user_id: str, *, session_id: str
     service, and a missing ``AGENTCORE_MEMORY_ID`` is a hard error here (the run
     loop degrades gracefully around it).
     """
-    from strands.memory import MemoryManager
+    from strands.memory import MemoryInjectionConfig, MemoryManager
+
+    # Not Strands' defaults. ``userTurn`` injects only into the latest user ask, and
+    # the default query comes from the previous *assistant* step on any other turn —
+    # which in a tool loop is a tool-use with no text, so a run that searched a
+    # knowledge base wrote its final answer having never seen the memory and
+    # reported "I couldn't find it" while the block held the fact.
+    injection = MemoryInjectionConfig(
+        trigger="everyTurn", query=_memory_injection_query
+    )
 
     if config.memory_backend == core_memory.MEMORY_DYNAMO:
         return MemoryManager(
-            stores=[DynamoMemoryStore(user_id)], add_tool_config=True
+            stores=[DynamoMemoryStore(user_id)],
+            add_tool_config=True,
+            injection=injection,
         )
 
     if not config.memory_id:
@@ -195,7 +235,7 @@ def build_memory_manager(config: RuntimeConfig, user_id: str, *, session_id: str
     # ``add_tool_config`` stays off: ``AgentCoreMemoryStore`` has ``add_messages``
     # (server-side extraction) but no ``add``, so enabling the add tool raises.
     # The search tool and passive memory injection are on by default.
-    return MemoryManager(stores=[store])
+    return MemoryManager(stores=[store], injection=injection)
 
 
 def memory_enabled(user_id: str) -> bool:

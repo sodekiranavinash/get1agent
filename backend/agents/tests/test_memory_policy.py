@@ -99,6 +99,41 @@ class MemoryBackendTests(unittest.TestCase):
         )
         self.assertIsInstance(manager._stores[0], memory.DynamoMemoryStore)
 
+    def test_memory_is_injected_on_every_model_call(self) -> None:
+        # Strands' default trigger, "userTurn", folds the memory block into the
+        # latest user *ask* only. A run's final answer follows a tool result, so
+        # with the default the model wrote that answer having never seen the
+        # memory — and reported "I couldn't find it" while the block held the
+        # fact. Every question about the user that also consulted a tool was
+        # affected, which is why this is pinned for both backends.
+        dynamo = memory.build_memory_manager(_config(), "u_1", session_id="7")
+        self.assertEqual(dynamo._injection_config["trigger"], "everyTurn")
+        self.assertIs(dynamo._injection_config["query"], memory._memory_injection_query)
+
+        class _StoreStub:
+            writable = True
+            name = "user_memory"
+            description = ""
+            max_search_results = 5
+            extraction = True
+
+            async def add(self, *_args, **_kwargs):
+                return ""
+
+            async def search(self, *_args, **_kwargs):
+                return []
+
+        with mock.patch(
+            "bedrock_agentcore.memory.integrations.strands.memorystore.AgentCoreMemoryStore",
+            return_value=_StoreStub(),
+        ):
+            managed = memory.build_memory_manager(
+                _config(memory_backend="agentcore", memory_id="mem-123"),
+                "u_1",
+                session_id="7",
+            )
+        self.assertEqual(managed._injection_config["trigger"], "everyTurn")
+
 
 class MemoryCanSaveTests(unittest.TestCase):
     """Only a manager with a real add tool may be advertised as saving memory.
@@ -359,6 +394,48 @@ class PolicyConfigTests(unittest.TestCase):
             allowed, reason = policy.build_evaluator()("http-fetch", {})
         self.assertFalse(allowed)
         self.assertIn("denied", reason)
+
+
+class MemoryInjectionQueryTests(unittest.TestCase):
+    """The injection query must come from the user's ask, not the last tool step.
+
+    Strands' default derives it from the most recent *assistant* message on a
+    tool-result turn — a tool-use step carrying no text — so the query was empty
+    and injection was skipped on the very call that writes the answer.
+    """
+
+    @staticmethod
+    def _context(*messages):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(messages=list(messages))
+
+    def test_uses_the_users_ask_not_the_last_tool_step(self) -> None:
+        context = self._context(
+            {"role": "user", "content": [{"text": "what is my dog's name?"}]},
+            {"role": "assistant", "content": [{"toolUse": {"name": "search"}}]},
+            {"role": "user", "content": [{"toolResult": {"content": []}}]},
+        )
+        self.assertEqual(
+            memory._memory_injection_query(context), "what is my dog's name?"
+        )
+
+    def test_takes_the_latest_ask(self) -> None:
+        context = self._context(
+            {"role": "user", "content": [{"text": "first"}]},
+            {"role": "assistant", "content": [{"text": "ok"}]},
+            {"role": "user", "content": [{"text": "second"}]},
+        )
+        self.assertEqual(memory._memory_injection_query(context), "second")
+
+    def test_no_user_message_yields_no_query(self) -> None:
+        context = self._context({"role": "assistant", "content": [{"text": "hi"}]})
+        self.assertEqual(memory._memory_injection_query(context), "")
+
+    def test_caps_a_large_run_input(self) -> None:
+        # A run's input carries folded plan text and attachments.
+        context = self._context({"role": "user", "content": [{"text": "x" * 5000}]})
+        self.assertEqual(len(memory._memory_injection_query(context)), 2000)
 
 
 if __name__ == "__main__":
