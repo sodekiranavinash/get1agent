@@ -354,6 +354,65 @@ def test_find_duplicate_returns_none_without_text() -> None:
     assert memory.find_duplicate("u_1", "   ") is None
 
 
+def test_the_threshold_is_tunable_without_a_deploy(agentcore, monkeypatch) -> None:
+    # The measured separation between a paraphrase (~0.76) and a same-shaped
+    # different fact (~0.56) is only ~0.2, so the boundary has to be operable
+    # against real traffic rather than guessed.
+    stub = agentcore(
+        retrieve_memory_records={
+            "memoryRecordSummaries": [
+                {
+                    "memoryRecordId": "mem-1",
+                    "content": {"text": "The user's favourite colour is red and white."},
+                    "score": 0.76,
+                }
+            ]
+        },
+        batch_create_memory_records={"successfulRecords": []},
+    )
+
+    # Default: not close enough, so a genuinely new fact is never dropped.
+    memory.save_record("u_1", "The user likes red and white best.")
+    assert len(stub.kwargs_for("batch_create_memory_records")) == 1
+
+    # Lowered: the paraphrase is collapsed.
+    monkeypatch.setenv("MEMORY_DUPLICATE_SCORE", "0.75")
+    saved = memory.save_record("u_1", "The user likes red and white best.")
+    assert len(stub.kwargs_for("batch_create_memory_records")) == 1
+    assert saved["duplicate"] is True
+
+
+def test_a_threshold_above_one_leaves_exact_matches_only(agentcore, monkeypatch) -> None:
+    monkeypatch.setenv("MEMORY_DUPLICATE_SCORE", "1.5")
+    stub = agentcore(
+        retrieve_memory_records={
+            "memoryRecordSummaries": [
+                {
+                    "memoryRecordId": "mem-1",
+                    "content": {"text": "The user likes red."},
+                    "score": 0.999,
+                }
+            ]
+        },
+        batch_create_memory_records={"successfulRecords": []},
+    )
+
+    # A near-perfect score is ignored, but an exact restatement still is not.
+    memory.save_record("u_1", "The user likes red and white.")
+    assert len(stub.kwargs_for("batch_create_memory_records")) == 1
+
+    saved = memory.save_record("u_1", "the user likes red")
+    assert saved["duplicate"] is True
+    assert len(stub.kwargs_for("batch_create_memory_records")) == 1
+
+
+def test_a_malformed_threshold_falls_back_to_the_default(monkeypatch) -> None:
+    monkeypatch.setenv("MEMORY_DUPLICATE_SCORE", "not-a-number")
+    assert memory.duplicate_score() == memory.DUPLICATE_SCORE
+    monkeypatch.delenv("MEMORY_DUPLICATE_SCORE")
+    assert memory.duplicate_score() == memory.DUPLICATE_SCORE
+
+
 # --- replaying a write -------------------------------------------------------
 #
 # ``clientToken`` is the idempotency key, so the service rejects a second request

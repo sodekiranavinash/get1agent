@@ -1044,6 +1044,9 @@ docs** — it has its own space on purpose.
   above `DUPLICATE_SCORE`) — the tool write and extraction can both derive the
   same fact, and `clientToken` only deduplicates a byte-identical replay, so
   without this one fact accumulates copies and crowds the injection window.
+  Measured live: identical ≈1.0, a close paraphrase ≈0.76, a same-shaped *different*
+  fact ≈0.56, unrelated ≈0.35, so the default stays high (near-identical only) and
+  `MEMORY_DUPLICATE_SCORE` tunes it without a deploy.
 - **Context management.** Every run restores the conversation's message history
   from the session and passes the **full text history** (user/assistant turns,
   capped to the last `AGENT_PLANNER_HISTORY_TURNS` = 6 turns) to the planner so

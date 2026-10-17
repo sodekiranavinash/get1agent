@@ -38,6 +38,15 @@ MAX_RECORD_CHARS = 2000
 #: again, so the writer leaves the stored copy in place instead of filing a
 #: second one. Exact restatements (after normalisation) are caught regardless of
 #: score, because a duplicate the embedder scores low is still a duplicate.
+#:
+#: Measured against the live service: an identical record scores ~1.0, a close
+#: paraphrase ~0.76, a *different* fact of the same shape ("favourite colour is
+#: red and white" vs "…is blue") ~0.56, and an unrelated one ~0.35. The default
+#: sits near the top of that range on purpose — dropping a genuinely new fact is
+#: worse than keeping a duplicate — so it catches exact and near-identical
+#: restatements (which is what the tool write and server-side extraction produce
+#: for the same sentence). Lower it with ``MEMORY_DUPLICATE_SCORE`` to also
+#: collapse looser paraphrases.
 DUPLICATE_SCORE = 0.9
 
 #: The strategy namespaces provisioned by Terraform, by kind of memory. Writing
@@ -205,6 +214,24 @@ def _normalized(text: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", (text or "").lower()))
 
 
+def duplicate_score() -> float:
+    """The relevance score at or above which a stored record counts as a restatement.
+
+    ``MEMORY_DUPLICATE_SCORE`` overrides :data:`DUPLICATE_SCORE` so the boundary
+    can be tuned against real traffic without a deploy — the measured separation
+    between a paraphrase and a same-shaped different fact is only ~0.2. Set it
+    above 1 to deduplicate exact restatements only. A malformed value falls back
+    to the default rather than disabling the guard.
+    """
+    raw = (os.environ.get("MEMORY_DUPLICATE_SCORE") or "").strip()
+    if not raw:
+        return DUPLICATE_SCORE
+    try:
+        return float(raw)
+    except ValueError:
+        return DUPLICATE_SCORE
+
+
 def find_duplicate(user_id: str, text: str, *, limit: int = 5) -> dict[str, Any] | None:
     """The stored record that already says this, if there is one.
 
@@ -214,10 +241,10 @@ def find_duplicate(user_id: str, text: str, *, limit: int = 5) -> dict[str, Any]
     ``clientToken`` only deduplicates a byte-identical replay, so a near
     duplicate has to be spotted before writing.
 
-    A semantic hit at or above :data:`DUPLICATE_SCORE`, or an exact match after
-    normalisation, counts. Best effort by design: a search that fails returns
-    ``None`` and the write proceeds, because losing a memory is worse than
-    filing it twice.
+    A semantic hit at or above :func:`duplicate_score` (default
+    :data:`DUPLICATE_SCORE`), or an exact match after normalisation, counts. Best
+    effort by design: a search that fails returns ``None`` and the write proceeds,
+    because losing a memory is worse than filing it twice.
     """
     needle = _normalized(text)
     if not needle:
@@ -226,6 +253,7 @@ def find_duplicate(user_id: str, text: str, *, limit: int = 5) -> dict[str, Any]
         found = list_records(user_id, limit=limit, query=text)
     except Exception:  # noqa: BLE001 - a failed lookup must not block the write
         return None
+    threshold = duplicate_score()
     best: dict[str, Any] | None = None
     for record in found.get("records") or []:
         other = _normalized(str(record.get("text") or ""))
@@ -234,7 +262,7 @@ def find_duplicate(user_id: str, text: str, *, limit: int = 5) -> dict[str, Any]
         if other == needle:
             return record
         score = record.get("score")
-        if isinstance(score, (int, float)) and float(score) >= DUPLICATE_SCORE:
+        if isinstance(score, (int, float)) and float(score) >= threshold:
             # Records come back best-first, so the first qualifying hit wins.
             best = best or record
     return best
