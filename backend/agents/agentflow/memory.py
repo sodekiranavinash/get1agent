@@ -222,6 +222,74 @@ def memory_can_save(manager: Any) -> bool:
     return False
 
 
+def save_memories(user_id: str, entries: list[str], *, kind: str = "preference") -> dict[str, Any]:
+    """Write each entry as its own durable record.
+
+    Every entry is attempted independently, so one bad sentence does not lose the
+    rest, and every failure is reported rather than raised — the tool's caller is
+    a model, and a raised exception would surface as a broken run.
+    """
+    items = [str(entry).strip() for entry in (entries or []) if str(entry).strip()]
+    if not items:
+        return {"saved": 0, "error": "entries is required"}
+    stored: list[str] = []
+    errors: list[str] = []
+    for item in items:
+        try:
+            result = core_memory.save_record(user_id, item, kind=kind)
+        except Exception as exc:  # noqa: BLE001 - report, never raise at the model
+            errors.append(f"{item[:60]}: {exc}")
+            continue
+        if result.get("failed"):
+            errors.append(f"{item[:60]}: memory write failed")
+            continue
+        stored.append(str(result.get("id") or ""))
+    payload: dict[str, Any] = {"saved": len(stored)}
+    if errors:
+        payload["error"] = "; ".join(errors)
+    return payload
+
+
+def build_save_memory_tool(user_id: str) -> Any:
+    """A Strands tool that writes one durable memory record, or ``None``.
+
+    The managed store has no ``add``: it only ingests whole invocations
+    (``add_messages``) and then waits for **asynchronous** extraction, so a
+    "remember this" cannot be confirmed inside the conversation. This tool writes
+    the consolidated record directly, which is recallable within seconds.
+
+    Returns ``None`` for the local Dynamo backend, where the manager already
+    registers its own ``add_memory`` — two tools with one name would collide, and
+    the local store's write path is already synchronous.
+    """
+    if not core_memory.is_agentcore():
+        return None
+    from strands import tool
+
+    def add_memory(entries: list[str], kind: str = "preference") -> str:
+        """Remember something about the user, permanently.
+
+        Use whenever the user asks you to remember, note, keep or note down
+        something about themselves — a preference, a fact, a decision ("my
+        favourite colour is red and white", "I work at Acme", "we settled on the
+        Mumbai launch date"). Save it here and not as a file or a knowledge-base
+        document.
+
+        Args:
+            entries: One or more self-contained sentences about the user, written
+                in the third person so they still make sense on their own. Keep
+                each one short.
+            kind: "preference" for what the user likes, wants or prefers;
+                "fact" for anything else true about them.
+
+        Returns:
+            A JSON summary of what was stored.
+        """
+        return json.dumps(save_memories(user_id, entries, kind=kind))
+
+    return tool(add_memory)
+
+
 def build_forget_tool(user_id: str) -> Any:
     """A Strands tool that lets the user erase a memory by asking the agent."""
     from strands import tool

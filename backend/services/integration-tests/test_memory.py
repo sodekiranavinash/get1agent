@@ -5,6 +5,10 @@ The namespace semantics here are load-bearing and **silent** when wrong:
 record lives one level below the user root. An exact match on the root therefore
 returns nothing at all — the Memory page looks empty, the DPDP export omits
 memory, and an account deletion leaves every long-term record behind.
+
+Writes are pinned too: the direct record write is what makes "remember this"
+recallable in the same conversation, and ``clientToken`` is the only idempotency
+key (``requestIdentifier`` is not one — reusing it creates a second record).
 """
 
 from __future__ import annotations
@@ -48,10 +52,20 @@ def agentcore(monkeypatch: pytest.MonkeyPatch):
 
 
 def _client_error(code: str, message: str, operation: str) -> Exception:
-    """A botocore error shaped the way the erase guard inspects it."""
+    """A botocore error shaped the way the retry/erase guards inspect it."""
     from botocore.exceptions import ClientError
 
     return ClientError({"Error": {"Code": code, "Message": message}}, operation)
+
+
+# --- namespaces --------------------------------------------------------------
+
+
+def test_record_namespace_files_by_kind() -> None:
+    assert memory.record_namespace("u_1") == "/users/u_1/preferences/"
+    assert memory.record_namespace("u_1", "fact") == "/users/u_1/facts/"
+    # An unknown kind files as a preference rather than failing the run.
+    assert memory.record_namespace("u_1", "nonsense") == "/users/u_1/preferences/"
 
 
 # --- reads use the subtree ---------------------------------------------------
@@ -123,6 +137,164 @@ def test_erase_uses_the_subtree_and_deletes_the_records_own_namespace(agentcore)
         {"memoryRecordId": "mem-1", "namespace": "/users/u_1/facts/"}
     ]
     assert erased["records"] == 1
+
+
+# --- writes ------------------------------------------------------------------
+
+
+def test_save_record_writes_a_consolidated_record_directly(agentcore) -> None:
+    stub = agentcore(
+        batch_create_memory_records={
+            "successfulRecords": [{"memoryRecordId": "mem-9", "status": "SUCCEEDED"}]
+        }
+    )
+
+    saved = memory.save_record("u_1", "  The user's favourite colour is red.  ")
+
+    (kwargs,) = stub.kwargs_for("batch_create_memory_records")
+    assert kwargs["memoryId"] == "mem-123"
+    (record,) = kwargs["records"]
+    assert record["namespaces"] == ["/users/u_1/preferences/"]
+    assert record["content"]["text"] == "The user's favourite colour is red."
+    assert record["timestamp"] is not None
+    # The idempotency token is also the request identifier.
+    assert kwargs["clientToken"] == record["requestIdentifier"]
+    assert saved == {
+        "id": "mem-9",
+        "namespace": "/users/u_1/preferences/",
+        "text": "The user's favourite colour is red.",
+        "failed": [],
+    }
+
+
+def test_save_record_files_a_fact_under_facts(agentcore) -> None:
+    stub = agentcore(batch_create_memory_records={"successfulRecords": []})
+
+    memory.save_record("u_1", "The user works at Acme.", kind="fact")
+
+    (kwargs,) = stub.kwargs_for("batch_create_memory_records")
+    assert kwargs["records"][0]["namespaces"] == ["/users/u_1/facts/"]
+
+
+def test_save_record_is_idempotent_for_a_retry(agentcore) -> None:
+    stub = agentcore(
+        batch_create_memory_records={
+            "successfulRecords": [{"memoryRecordId": "mem-9", "status": "SUCCEEDED"}]
+        }
+    )
+
+    memory.save_record("u_1", "The user likes red.")
+    memory.save_record("u_1", "The user likes red.")
+
+    first, second = stub.kwargs_for("batch_create_memory_records")
+    assert first["clientToken"] == second["clientToken"]
+
+
+def test_save_record_token_distinguishes_different_text(agentcore) -> None:
+    stub = agentcore(batch_create_memory_records={"successfulRecords": []})
+
+    memory.save_record("u_1", "The user likes red.")
+    memory.save_record("u_1", "The user likes blue.")
+
+    first, second = stub.kwargs_for("batch_create_memory_records")
+    assert first["clientToken"] != second["clientToken"]
+
+
+def test_save_record_caps_the_text(agentcore) -> None:
+    stub = agentcore(batch_create_memory_records={"successfulRecords": []})
+
+    memory.save_record("u_1", "x" * (memory.MAX_RECORD_CHARS + 500))
+
+    (kwargs,) = stub.kwargs_for("batch_create_memory_records")
+    text = kwargs["records"][0]["content"]["text"]
+    assert len(text) == memory.MAX_RECORD_CHARS
+
+
+def test_save_record_names_the_failed_records(agentcore) -> None:
+    agentcore(batch_create_memory_records={"failedRecords": [{"requestIdentifier": "x"}]})
+
+    saved = memory.save_record("u_1", "The user likes red.")
+
+    assert saved["failed"] == [{"requestIdentifier": "x"}]
+
+
+def test_save_record_rejects_an_empty_body(agentcore) -> None:
+    agentcore(batch_create_memory_records={"successfulRecords": []})
+
+    with pytest.raises(ValueError):
+        memory.save_record("u_1", "   ")
+
+
+def test_save_record_needs_the_managed_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The local Dynamo backend owns its own write path.
+    monkeypatch.setenv("AGENT_MEMORY_BACKEND", "dynamo")
+    monkeypatch.delenv("AGENTCORE_MEMORY_ID", raising=False)
+
+    with pytest.raises(RuntimeError):
+        memory.save_record("u_1", "The user likes red.")
+
+
+# --- replaying a write -------------------------------------------------------
+#
+# ``clientToken`` is the idempotency key, so the service rejects a second request
+# carrying the same token with a *different* body. A legitimate retry always
+# differs — the timestamp is re-read — so the refusal means "this exact memory was
+# already written": a no-op, not a failure the user should hear about.
+
+
+def test_save_record_treats_a_replayed_write_as_already_saved(agentcore) -> None:
+    def refuse(_kwargs: dict) -> dict:
+        raise _client_error(
+            "ValidationException",
+            "Parameter hash does not match existing request",
+            "BatchCreateMemoryRecords",
+        )
+
+    agentcore(batch_create_memory_records=refuse)
+
+    saved = memory.save_record("u_1", "  The user likes red.  ")
+
+    assert saved == {
+        "id": "",
+        "namespace": "/users/u_1/preferences/",
+        "text": "The user likes red.",
+        "failed": [],
+        "duplicate": True,
+    }
+
+
+def test_save_record_reraises_anything_else(agentcore) -> None:
+    def refuse(_kwargs: dict) -> dict:
+        raise _client_error("AccessDeniedException", "not authorized", "BatchCreateMemoryRecords")
+
+    agentcore(batch_create_memory_records=refuse)
+
+    with pytest.raises(Exception) as caught:
+        memory.save_record("u_1", "The user likes red.")
+
+    assert "AccessDeniedException" in str(caught.value)
+
+
+def test_the_duplicate_guard_needs_both_the_code_and_the_message() -> None:
+    assert memory._is_duplicate_write(
+        _client_error(
+            "ValidationException",
+            "Parameter hash does not match existing request",
+            "BatchCreateMemoryRecords",
+        )
+    )
+    # Same code, different reason — must not be swallowed.
+    assert not memory._is_duplicate_write(
+        _client_error("ValidationException", "Some other failure", "BatchCreateMemoryRecords")
+    )
+    assert not memory._is_duplicate_write(
+        _client_error(
+            "AccessDeniedException", "Parameter hash does not match existing request", "X"
+        )
+    )
+
+
+# --- erasing an actor that has no events -------------------------------------
 
 
 def test_erase_tolerates_an_actor_with_no_events(agentcore) -> None:

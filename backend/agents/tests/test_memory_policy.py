@@ -161,6 +161,123 @@ class MemoryCanSaveTests(unittest.TestCase):
         self.assertFalse(memory.memory_can_save(manager))
 
 
+class SaveMemoriesTests(unittest.TestCase):
+    """The explicit save path for the managed backend.
+
+    ``AgentCoreMemoryStore`` has no ``add`` — it ingests invocations and waits for
+    asynchronous extraction — so on that backend the runtime supplies its own
+    ``add_memory`` tool that writes a consolidated record directly.
+    """
+
+    def test_writes_each_entry_with_the_kind(self) -> None:
+        recorded: list[tuple[str, str, str]] = []
+
+        def fake_save(user_id, text, kind="preference"):
+            recorded.append((user_id, text, kind))
+            return {"id": "mem-1", "failed": []}
+
+        with mock.patch.object(memory.core_memory, "save_record", side_effect=fake_save):
+            out = memory.save_memories(
+                "u_1", ["  The user likes red.  ", "The user is in Mumbai."], kind="fact"
+            )
+
+        self.assertEqual(out, {"saved": 2})
+        self.assertEqual(
+            recorded,
+            [
+                ("u_1", "The user likes red.", "fact"),
+                ("u_1", "The user is in Mumbai.", "fact"),
+            ],
+        )
+
+    def test_one_failure_does_not_lose_the_rest(self) -> None:
+        def flaky(_user_id, text, kind="preference"):
+            if "bad" in text:
+                raise RuntimeError("boom")
+            return {"id": "mem-1", "failed": []}
+
+        with mock.patch.object(memory.core_memory, "save_record", side_effect=flaky):
+            out = memory.save_memories("u_1", ["good one", "bad one"])
+
+        self.assertEqual(out["saved"], 1)
+        self.assertIn("boom", out["error"])
+
+    def test_a_rejected_record_is_reported(self) -> None:
+        with mock.patch.object(
+            memory.core_memory,
+            "save_record",
+            return_value={"id": "", "failed": [{"requestIdentifier": "x"}]},
+        ):
+            out = memory.save_memories("u_1", ["The user likes red."])
+
+        self.assertEqual(out["saved"], 0)
+        self.assertIn("memory write failed", out["error"])
+
+    def test_an_already_saved_memory_counts_as_saved(self) -> None:
+        # The service deduplicates a replayed write via the token; the memory is
+        # there, so the model must not be told the save failed.
+        with mock.patch.object(
+            memory.core_memory,
+            "save_record",
+            return_value={"id": "", "text": "x", "failed": [], "duplicate": True},
+        ):
+            out = memory.save_memories("u_1", ["The user likes red."])
+
+        self.assertEqual(out, {"saved": 1})
+
+    def test_no_entries_is_an_error_not_a_write(self) -> None:
+        with mock.patch.object(memory.core_memory, "save_record") as save:
+            out = memory.save_memories("u_1", ["   ", ""])
+
+        save.assert_not_called()
+        self.assertEqual(out, {"saved": 0, "error": "entries is required"})
+
+    def test_no_save_tool_on_the_local_backend(self) -> None:
+        # The Dynamo backend's manager already registers its own `add_memory`;
+        # a second tool with that name would collide.
+        with mock.patch.object(memory.core_memory, "is_agentcore", return_value=False):
+            self.assertIsNone(memory.build_save_memory_tool("u_1"))
+
+    def test_save_tool_is_add_memory_on_the_managed_backend(self) -> None:
+        with mock.patch.object(memory.core_memory, "is_agentcore", return_value=True):
+            tool_obj = memory.build_save_memory_tool("u_1")
+
+        self.assertEqual(tool_obj.tool_name, "add_memory")
+        # `entries` is the same primary argument the manager's own add tool takes,
+        # so the model's call shape is identical on both backends.
+        schema = tool_obj.tool_spec["inputSchema"]
+        inner = schema.get("json") or schema
+        self.assertEqual(inner["required"], ["entries"])
+        self.assertIn("kind", inner["properties"])
+
+    def test_tool_writes_through_with_the_bound_user(self) -> None:
+        import asyncio
+
+        recorded: list[tuple[str, str, str]] = []
+
+        def fake_save(user_id, text, kind="preference"):
+            recorded.append((user_id, text, kind))
+            return {"id": "mem-1", "failed": []}
+
+        with mock.patch.object(
+            memory.core_memory, "is_agentcore", return_value=True
+        ), mock.patch.object(memory.core_memory, "save_record", side_effect=fake_save):
+            tool_obj = memory.build_save_memory_tool("u_1")
+
+            async def run() -> None:
+                tool_use = {
+                    "toolUseId": "1",
+                    "name": "add_memory",
+                    "input": {"entries": ["The user likes red."]},
+                }
+                async for _ in tool_obj.stream(tool_use, {}):
+                    pass
+
+            asyncio.run(run())
+
+        self.assertEqual(recorded, [("u_1", "The user likes red.", "preference")])
+
+
 class GuardTests(unittest.TestCase):
     def test_no_checker_admits_everything(self) -> None:
         guard = memory.build_guard(None)

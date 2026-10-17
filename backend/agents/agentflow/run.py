@@ -28,6 +28,7 @@ from agentflow.memory import (
     build_forget_tool,
     build_guard,
     build_memory_manager,
+    build_save_memory_tool,
     memory_can_save,
     memory_enabled as memory_is_enabled,
 )
@@ -405,6 +406,9 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
         from strands.agent.conversation_manager import SummarizingConversationManager
 
         memory_enabled = memory_is_enabled(user_id)
+        # Set for real once the tools exist: whether this run can *save* a memory
+        # on demand (the manager's own add tool, or one appended below).
+        can_save_memory = False
         if memory_enabled:
             # AgentCore Memory when configured (AGENT_MEMORY_BACKEND=agentcore),
             # otherwise the in-app DynamoMemoryStore. A misconfigured memory
@@ -452,7 +456,17 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
         # Let the user erase a memory by asking the agent ("forget my favorite
         # color"). Bound to the caller's own namespace only.
         if memory_manager is not None:
+            can_save_memory = memory_can_save(memory_manager)
             tools.append(build_forget_tool(user_id))
+            if not can_save_memory:
+                # The managed store has no add tool of its own (only ingest +
+                # asynchronous extraction), so the run supplies one that writes the
+                # consolidated record directly. None on the local Dynamo backend,
+                # where the manager already registers `add_memory`.
+                save_tool = build_save_memory_tool(user_id)
+                if save_tool is not None:
+                    tools.append(save_tool)
+                    can_save_memory = True
         # Chat-only: let the agent pause and ask the user when uncertain. On a
         # resume the tool must be present again so the paused call can replay,
         # even if auto-approve was turned on after the question was asked.
@@ -460,10 +474,6 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
             # On a resume the user has already answered once: keep the tool so
             # the paused call can replay, but refuse a *new* ask (anti-loop cap).
             tools.append(build_ask_user_tool(allow_new_questions=not resume_responses))
-        # Memory can only be saved on demand when the manager actually exposes an
-        # add tool (the Dynamo backend does; the AgentCore store has no ``add`` and
-        # relies on server-side extraction), so the prompt must not promise one.
-        can_save_memory = memory_can_save(memory_manager)
         system_prompt = build_system_prompt(
             agent_config,
             skills,

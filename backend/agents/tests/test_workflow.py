@@ -12,9 +12,58 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT.parent / "packages"))
 
 from workflow import events  # noqa: E402
-from workflow.build import _graph_block, _host_config, _team_block  # noqa: E402
+from workflow.build import _graph_block, _host_config, _memory_tools, _team_block  # noqa: E402
 from workflow.run import _final_answer, _node_payload, _sink_nodes  # noqa: E402
 from workflow.store import merge_config, resolve_agent_nodes  # noqa: E402
+
+
+class MemoryToolTests(unittest.TestCase):
+    """Every workflow node shares the user's memory, so each one needs its tools.
+
+    The managed store has no add tool of its own, so a node on that backend must
+    be given one — otherwise a member agent cannot act on "remember this" at all,
+    and the prompt's save instruction would name a tool that does not exist.
+    """
+
+    class _Manager:
+        def __init__(self, *tool_names: str) -> None:
+            from types import SimpleNamespace
+
+            self.tools = [SimpleNamespace(tool_name=name) for name in tool_names]
+
+    def test_no_memory_means_no_tools(self) -> None:
+        self.assertEqual(_memory_tools(None, "u_1"), ([], False))
+
+    def test_a_node_without_a_user_id_gets_nothing(self) -> None:
+        self.assertEqual(_memory_tools(self._Manager("add_memory"), ""), ([], False))
+
+    def test_local_manager_supplies_its_own_save_tool(self) -> None:
+        tools, can_save = _memory_tools(self._Manager("search_memory", "add_memory"), "u_1")
+
+        self.assertTrue(can_save)
+        self.assertEqual([tool.tool_name for tool in tools], ["forget_memory"])
+
+    def test_managed_backend_gets_an_explicit_save_tool(self) -> None:
+        with mock.patch(
+            "agentflow.memory.core_memory.is_agentcore", return_value=True
+        ):
+            tools, can_save = _memory_tools(self._Manager("search_memory"), "u_1")
+
+        self.assertTrue(can_save)
+        self.assertEqual(
+            [tool.tool_name for tool in tools], ["forget_memory", "add_memory"]
+        )
+
+    def test_a_managed_manager_without_the_capability_is_not_promised_one(self) -> None:
+        # AgentCore store, but the tool could not be built: never claim a save
+        # tool the node does not have.
+        with mock.patch(
+            "agentflow.memory.core_memory.is_agentcore", return_value=False
+        ):
+            tools, can_save = _memory_tools(self._Manager("search_memory"), "u_1")
+
+        self.assertFalse(can_save)
+        self.assertEqual([tool.tool_name for tool in tools], ["forget_memory"])
 
 
 class WorkflowEventTests(unittest.TestCase):

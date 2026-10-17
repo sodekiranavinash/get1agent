@@ -1,4 +1,4 @@
-"""AgentCore Memory read/erase helpers, shared by ``user-api`` and the runtime.
+"""AgentCore Memory read/write/erase helpers, shared by ``user-api`` and the runtime.
 
 The deployed backend is Amazon **Bedrock AgentCore Memory** (managed long-term
 memory, one resource per deployment). ``MEMORY_BACKEND=dynamo`` selects the
@@ -12,6 +12,7 @@ dependency. Every record lives under the caller's own namespace
 AgentCore Memory APIs used:
 
 * ``list_memory_records`` / ``retrieve_memory_records`` (read)
+* ``batch_create_memory_records`` (write a consolidated record directly)
 * ``delete_memory_record`` / ``batch_delete_memory_records`` (erase long term)
 * ``list_sessions`` / ``list_events`` / ``delete_event`` (erase short term)
 
@@ -23,9 +24,19 @@ live one level below the user root (``/users/<id>/facts/``,
 
 from __future__ import annotations
 
+import hashlib
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
+
+#: ``content.text`` is capped at 16000 by the service. A memory should be a
+#: sentence, not a document, so we keep the tool honest at a much smaller size.
+MAX_RECORD_CHARS = 2000
+
+#: The strategy namespaces provisioned by Terraform, by kind of memory. Writing
+#: to one does not gate retrieval (both live under the user root and rank
+#: together) — it only decides how the record is filed.
+_KIND_LEAF = {"preference": "preferences", "fact": "facts"}
 
 MEMORY_DYNAMO = "dynamo"
 MEM_PREFIX = "MEM#"
@@ -60,6 +71,17 @@ def is_agentcore() -> bool:
 def user_namespace(user_id: str) -> str:
     """The user-scoped namespace prefix every record for this user lives under."""
     return f"/users/{user_id}/"
+
+
+def record_namespace(user_id: str, kind: str = "preference") -> str:
+    """The namespace a new record is filed under for this kind of memory.
+
+    These are the templates provisioned as AgentCore Memory strategies
+    (``/users/{actorId}/preferences/`` for USER_PREFERENCE, ``/users/{actorId}/``
+    ``facts/`` for SEMANTIC). An unknown kind falls back to preferences.
+    """
+    leaf = _KIND_LEAF.get((kind or "").strip().lower(), "preferences")
+    return f"{user_namespace(user_id)}{leaf}/"
 
 
 def memory_enabled(user_id: str) -> bool:
@@ -128,6 +150,20 @@ def _is_not_found(exc: Exception) -> bool:
     return _error_code(exc) == "ResourceNotFoundException"
 
 
+def _is_duplicate_write(exc: Exception) -> bool:
+    """A replayed ``clientToken`` whose body differs only by its timestamp.
+
+    ``clientToken`` is the idempotency key, so the service refuses a second
+    request carrying the same token with a different body — the earlier write
+    already succeeded and the record exists, so this is a no-op rather than an
+    error. (``timestamp`` is the only field that differs on a legitimate retry:
+    the token itself is a hash of user, namespace and text.)
+    """
+    return _error_code(exc) == "ValidationException" and (
+        "Parameter hash does not match" in _error_message(exc)
+    )
+
+
 def _agentcore_list(user_id: str, *, cursor: str | None, limit: int, query: str | None) -> dict[str, Any]:
     client = _data_client()
     mid = memory_id()
@@ -154,6 +190,63 @@ def _agentcore_list(user_id: str, *, cursor: str | None, limit: int, query: str 
     return {
         "records": [_shape(record) for record in records],
         "nextCursor": None if query else response.get("nextToken"),
+    }
+
+
+def save_record(user_id: str, text: str, *, kind: str = "preference") -> dict[str, Any]:
+    """Write one durable long-term record, readable within a couple of seconds.
+
+    ``batch_create_memory_records`` writes the consolidated record **directly**
+    instead of waiting for the asynchronous extraction that ``create_event``
+    triggers, which is what makes "remember this" recallable in the same
+    conversation rather than minutes later.
+
+    The ``clientToken`` is a deterministic hash of (user, namespace, text), so a
+    retried write is deduplicated by the service. ``requestIdentifier`` alone is
+    **not** an idempotency key — reusing it creates a second record.
+
+    AgentCore only: the local DynamoDB fallback writes through its own store.
+    """
+    if not is_agentcore():
+        raise RuntimeError(
+            "save_record needs the managed AgentCore backend (AGENTCORE_MEMORY_ID)"
+        )
+    body = (text or "").strip()
+    if not body:
+        raise ValueError("text is required")
+    body = body[:MAX_RECORD_CHARS]
+    namespace = record_namespace(user_id, kind)
+    token = hashlib.sha256(f"{user_id}\x00{namespace}\x00{body}".encode()).hexdigest()
+    try:
+        response = _data_client().batch_create_memory_records(
+            memoryId=memory_id(),
+            clientToken=token,
+            records=[
+                {
+                    "requestIdentifier": token,
+                    "namespaces": [namespace],
+                    "content": {"text": body},
+                    "timestamp": datetime.now(timezone.utc),
+                }
+            ],
+        )
+    except Exception as exc:  # noqa: BLE001 - reported to the caller below
+        if _is_duplicate_write(exc):
+            # The same memory was written before; it is already there.
+            return {
+                "id": "",
+                "namespace": namespace,
+                "text": body,
+                "failed": [],
+                "duplicate": True,
+            }
+        raise
+    created = (response.get("successfulRecords") or [{}])[0]
+    return {
+        "id": str(created.get("memoryRecordId") or ""),
+        "namespace": namespace,
+        "text": body,
+        "failed": response.get("failedRecords") or [],
     }
 
 

@@ -179,6 +179,9 @@ resource "aws_iam_role_policy" "runtime" {
           "bedrock-agentcore:RetrieveMemoryRecords",
           "bedrock-agentcore:ListMemoryRecords",
           "bedrock-agentcore:GetMemoryRecord",
+          # The runtime writes a memory directly on the user's "remember this"
+          # (the managed store has no add tool of its own).
+          "bedrock-agentcore:BatchCreateMemoryRecords",
           "bedrock-agentcore:DeleteMemoryRecord",
           "bedrock-agentcore:GetMemory",
           "bedrock-agentcore:GetMemoryStrategy",

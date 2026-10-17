@@ -160,19 +160,29 @@ def _build_memory(
         return None
 
 
-def _can_save_memory(manager: Any) -> bool:
-    """Whether this node's memory manager exposes an on-demand save tool.
+def _memory_tools(memory: Any, user_id: str) -> tuple[list[Any], bool]:
+    """The memory tools a node adds on top of its MCP tools.
 
-    ``agentflow.memory`` is imported lazily here for the same reason
-    :func:`_build_memory` does it: the manager pulls in boto3/strands, and a
-    workflow run must not pay that cost (or fail) just to shape a prompt.
+    A node that shares the user's memory gets the erase tool and, on the managed
+    backend, an explicit save tool: the AgentCore store has no ``add`` of its own,
+    so without it a member agent cannot act on "remember this" at all.
+
+    Returns the tools plus whether the node can save (either because the manager
+    registers its own add tool or because one was appended here), which is what
+    the prompt's save instruction is gated on.
     """
-    try:
-        from agentflow.memory import memory_can_save
+    if memory is None or not user_id:
+        return [], False
+    from agentflow.memory import build_forget_tool, build_save_memory_tool, memory_can_save
 
-        return memory_can_save(manager)
-    except Exception:  # noqa: BLE001 - a prompt hint must never break a run
-        return False
+    tools: list[Any] = [build_forget_tool(user_id)]
+    can_save = memory_can_save(memory)
+    if not can_save:
+        save_tool = build_save_memory_tool(user_id)
+        if save_tool is not None:
+            tools.append(save_tool)
+            can_save = True
+    return tools, can_save
 
 
 def _collect(managers: list[Any] | None, manager: Any) -> Any:
@@ -265,11 +275,9 @@ def _make_host(
         if human_in_loop
         else []
     )
-    # The host owns the final answer; let it erase a memory on request too.
-    if memory is not None and user_id:
-        from agentflow.memory import build_forget_tool
-
-        tools.append(build_forget_tool(user_id))
+    # The host owns the final answer; it erases and saves memories on request too.
+    memory_tools, can_save_memory = _memory_tools(memory, user_id)
+    tools.extend(memory_tools)
     return Agent(
         name=name,
         model=TruncatingModel(
@@ -284,7 +292,7 @@ def _make_host(
             output_format=output_format,
             human_in_loop=human_in_loop,
             memory_enabled=memory is not None,
-            memory_can_save=_can_save_memory(memory),
+            memory_can_save=can_save_memory,
         ),
         memory_manager=memory,
         callback_handler=None,
@@ -347,12 +355,14 @@ def build_node_agents(
             if memory
             else None
         )
+        # Every member shares the user's memory, so each one can erase and save.
+        member_memory_tools, member_can_save = _memory_tools(member_memory, user_id)
         prompt = _build_prompt(
             effective,
             skills,
             extra=extra,
             memory_enabled=member_memory is not None,
-            memory_can_save=_can_save_memory(member_memory),
+            memory_can_save=member_can_save,
         )
         skills_plugin = build_skills_plugin(skills)
         # A member uses its own agent guardrail, falling back to the workflow's.
@@ -370,6 +380,7 @@ def build_node_agents(
             guard,
             conversation_id,
         )
+        tools.extend(member_memory_tools)
         agent = Agent(
             name=spec["nodeId"],
             model=TruncatingModel(
