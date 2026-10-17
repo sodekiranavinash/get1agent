@@ -14,6 +14,11 @@ AgentCore Memory APIs used:
 * ``list_memory_records`` / ``retrieve_memory_records`` (read)
 * ``delete_memory_record`` / ``batch_delete_memory_records`` (erase long term)
 * ``list_sessions`` / ``list_events`` / ``delete_event`` (erase short term)
+
+**``namespace`` is an exact match, ``namespacePath`` is the subtree.** Records
+live one level below the user root (``/users/<id>/facts/``,
+``/users/<id>/preferences/``), so every read and erase here must pass
+``namespacePath`` — an exact match on the root matches nothing.
 """
 
 from __future__ import annotations
@@ -103,19 +108,45 @@ def _shape(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _error_code(exc: Exception) -> str:
+    response = getattr(exc, "response", None) or {}
+    return str((response.get("Error") or {}).get("Code") or "")
+
+
+def _error_message(exc: Exception) -> str:
+    response = getattr(exc, "response", None) or {}
+    return str((response.get("Error") or {}).get("Message") or "")
+
+
+def _is_not_found(exc: Exception) -> bool:
+    """A missing actor/session/record is an empty result, not a failure.
+
+    ``list_sessions`` raises ``ResourceNotFoundException`` for an actor that has
+    no short-term events — which is the normal case for a user whose memory is
+    only ever written directly — and that must not fail an erasure.
+    """
+    return _error_code(exc) == "ResourceNotFoundException"
+
+
 def _agentcore_list(user_id: str, *, cursor: str | None, limit: int, query: str | None) -> dict[str, Any]:
     client = _data_client()
     mid = memory_id()
-    namespace = user_namespace(user_id)
+    # ``namespacePath`` (subtree), never ``namespace`` (exact): records live one
+    # level down, so an exact match on the user root returns nothing.
+    namespace_path = user_namespace(user_id)
     size = max(1, min(int(limit or 50), 100))
     if query:
         response = client.retrieve_memory_records(
             memoryId=mid,
-            namespace=namespace,
+            namespacePath=namespace_path,
             searchCriteria={"searchQuery": query, "topK": size},
         )
     else:
-        kwargs: dict[str, Any] = {"memoryId": mid, "namespace": namespace, "maxResults": size}
+        kwargs: dict[str, Any] = {
+            "memoryId": mid,
+            "namespacePath": namespace_path,
+            "maxResults": size,
+        }
         if cursor:
             kwargs["nextToken"] = cursor
         response = client.list_memory_records(**kwargs)
@@ -142,7 +173,13 @@ def _agentcore_erase_all(user_id: str) -> dict[str, int]:
     deleted_records = 0
     cursor: str | None = None
     while True:
-        kwargs: dict[str, Any] = {"memoryId": mid, "namespace": namespace, "maxResults": 100}
+        # Subtree, not exact: otherwise erasure silently skips every record and
+        # leaves the user's memory behind after an account deletion.
+        kwargs: dict[str, Any] = {
+            "memoryId": mid,
+            "namespacePath": namespace,
+            "maxResults": 100,
+        }
         if cursor:
             kwargs["nextToken"] = cursor
         response = client.list_memory_records(**kwargs)
@@ -169,7 +206,13 @@ def _agentcore_erase_all(user_id: str) -> dict[str, int]:
         kwargs = {"memoryId": mid, "actorId": user_id, "maxResults": 100}
         if session_cursor:
             kwargs["nextToken"] = session_cursor
-        sessions = client.list_sessions(**kwargs)
+        try:
+            sessions = client.list_sessions(**kwargs)
+        except Exception as exc:  # noqa: BLE001
+            # An actor with no short-term events has no session list at all.
+            if _is_not_found(exc):
+                break
+            raise
         for session in sessions.get("sessionSummaries") or []:
             session_id = str(session.get("sessionId") or "")
             if not session_id:
@@ -184,7 +227,12 @@ def _agentcore_erase_all(user_id: str) -> dict[str, int]:
                 }
                 if event_cursor:
                     event_kwargs["nextToken"] = event_cursor
-                events = client.list_events(**event_kwargs)
+                try:
+                    events = client.list_events(**event_kwargs)
+                except Exception as exc:  # noqa: BLE001
+                    if _is_not_found(exc):
+                        break
+                    raise
                 for event in events.get("events") or []:
                     event_id = str(event.get("eventId") or "")
                     if not event_id:
