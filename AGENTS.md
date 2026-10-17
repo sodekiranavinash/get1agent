@@ -1036,7 +1036,14 @@ docs** — it has its own space on purpose.
   place is recalled everywhere. Memory is on by default and toggled on the
   **Memory** page (workspace setting `memoryEnabled`). The runtime appends a
   `forget_memory` tool so the user can erase a memory by asking the agent, and
-  flushes the manager after each run so extraction writes persist.
+  flushes the manager after each run so extraction writes persist. It also adds an
+  `add_memory` tool, because the managed store has no `add`: a "remember this"
+  would otherwise wait on **asynchronous** extraction and could not be confirmed
+  inside the conversation. `core/memory.py:save_record` **skips a restatement** of
+  a stored memory (an exact match after normalisation, or a semantic hit at or
+  above `DUPLICATE_SCORE`) — the tool write and extraction can both derive the
+  same fact, and `clientToken` only deduplicates a byte-identical replay, so
+  without this one fact accumulates copies and crowds the injection window.
 - **Context management.** Every run restores the conversation's message history
   from the session and passes the **full text history** (user/assistant turns,
   capped to the last `AGENT_PLANNER_HISTORY_TURNS` = 6 turns) to the planner so

@@ -234,6 +234,126 @@ def test_save_record_needs_the_managed_backend(monkeypatch: pytest.MonkeyPatch) 
         memory.save_record("u_1", "The user likes red.")
 
 
+# --- restatements are not written twice --------------------------------------
+#
+# Two writes of one fact are the expected case, not a bug: the model calls
+# ``add_memory`` and the store's extraction derives the same fact from the turn
+# independently. ``clientToken`` only deduplicates a byte-identical replay, so a
+# near duplicate has to be spotted *before* writing — otherwise every copy lands
+# in the injection window and crowds out the memories that matter.
+
+
+def test_save_record_leaves_an_exact_restatement_alone(agentcore) -> None:
+    stub = agentcore(
+        retrieve_memory_records={
+            "memoryRecordSummaries": [
+                {
+                    "memoryRecordId": "mem-1",
+                    "content": {"text": "The user's favourite colour is red."},
+                }
+            ]
+        },
+        batch_create_memory_records={"successfulRecords": [{"memoryRecordId": "mem-9"}]},
+    )
+
+    # Same sentence, different case and punctuation: still the same memory.
+    saved = memory.save_record("u_1", "the user's FAVOURITE colour is red")
+
+    assert stub.kwargs_for("batch_create_memory_records") == []
+    assert saved["duplicate"] is True
+    assert saved["id"] == "mem-1"
+    assert saved["matched"] == "The user's favourite colour is red."
+    assert saved["failed"] == []
+
+
+def test_save_record_skips_a_high_scoring_match(agentcore) -> None:
+    stub = agentcore(
+        retrieve_memory_records={
+            "memoryRecordSummaries": [
+                {
+                    "memoryRecordId": "mem-1",
+                    "content": {"text": "The user's favourite colours are red and white."},
+                    "score": 0.97,
+                }
+            ]
+        },
+        batch_create_memory_records={"successfulRecords": []},
+    )
+
+    saved = memory.save_record("u_1", "The user likes red and white best.")
+
+    assert stub.kwargs_for("batch_create_memory_records") == []
+    assert saved["duplicate"] is True
+
+
+def test_save_record_writes_when_the_closest_match_is_weak(agentcore) -> None:
+    stub = agentcore(
+        retrieve_memory_records={
+            "memoryRecordSummaries": [
+                {
+                    "memoryRecordId": "mem-1",
+                    "content": {"text": "The user works at Acme."},
+                    "score": 0.4,
+                }
+            ]
+        },
+        batch_create_memory_records={"successfulRecords": [{"memoryRecordId": "mem-9"}]},
+    )
+
+    saved = memory.save_record("u_1", "The user lives in Mumbai.")
+
+    assert len(stub.kwargs_for("batch_create_memory_records")) == 1
+    assert "duplicate" not in saved
+
+
+def test_save_record_writes_when_the_lookup_fails(agentcore) -> None:
+    def refuse(_kwargs: dict) -> dict:
+        raise _client_error("AccessDeniedException", "not authorized", "RetrieveMemoryRecords")
+
+    stub = agentcore(
+        retrieve_memory_records=refuse,
+        batch_create_memory_records={"successfulRecords": [{"memoryRecordId": "mem-9"}]},
+    )
+
+    saved = memory.save_record("u_1", "The user likes red.")
+
+    # Losing a memory is worse than filing it twice, so the write proceeds.
+    assert len(stub.kwargs_for("batch_create_memory_records")) == 1
+    assert "duplicate" not in saved
+
+
+def test_save_record_dedupe_can_be_turned_off(agentcore) -> None:
+    stub = agentcore(
+        retrieve_memory_records={
+            "memoryRecordSummaries": [
+                {
+                    "memoryRecordId": "mem-1",
+                    "content": {"text": "The user likes red."},
+                    "score": 0.99,
+                }
+            ]
+        },
+        batch_create_memory_records={"successfulRecords": []},
+    )
+
+    memory.save_record("u_1", "The user likes red.", dedupe=False)
+
+    assert stub.kwargs_for("retrieve_memory_records") == []
+    assert len(stub.kwargs_for("batch_create_memory_records")) == 1
+
+
+def test_normalisation_ignores_case_and_punctuation() -> None:
+    assert (
+        memory._normalized("The user's favourite colour is RED.")
+        == "the user s favourite colour is red"
+    )
+    assert memory._normalized("   ") == ""
+
+
+def test_find_duplicate_returns_none_without_text() -> None:
+    assert memory.find_duplicate("u_1", "   ") is None
+
+
 # --- replaying a write -------------------------------------------------------
 #
 # ``clientToken`` is the idempotency key, so the service rejects a second request

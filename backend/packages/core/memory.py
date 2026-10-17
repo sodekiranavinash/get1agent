@@ -26,12 +26,19 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 
 #: ``content.text`` is capped at 16000 by the service. A memory should be a
 #: sentence, not a document, so we keep the tool honest at a much smaller size.
 MAX_RECORD_CHARS = 2000
+
+#: A semantic match at or above this relevance score is the same memory said
+#: again, so the writer leaves the stored copy in place instead of filing a
+#: second one. Exact restatements (after normalisation) are caught regardless of
+#: score, because a duplicate the embedder scores low is still a duplicate.
+DUPLICATE_SCORE = 0.9
 
 #: The strategy namespaces provisioned by Terraform, by kind of memory. Writing
 #: to one does not gate retrieval (both live under the user root and rank
@@ -193,13 +200,60 @@ def _agentcore_list(user_id: str, *, cursor: str | None, limit: int, query: str 
     }
 
 
-def save_record(user_id: str, text: str, *, kind: str = "preference") -> dict[str, Any]:
+def _normalized(text: str) -> str:
+    """Case- and punctuation-insensitive form, for spotting an exact restatement."""
+    return " ".join(re.findall(r"[a-z0-9]+", (text or "").lower()))
+
+
+def find_duplicate(user_id: str, text: str, *, limit: int = 5) -> dict[str, Any] | None:
+    """The stored record that already says this, if there is one.
+
+    Two writes of one fact are the expected case, not an error: the model calls
+    ``add_memory`` **and** the store's extraction can derive the same fact from
+    the turn independently, and a user restates a preference in new words. The
+    ``clientToken`` only deduplicates a byte-identical replay, so a near
+    duplicate has to be spotted before writing.
+
+    A semantic hit at or above :data:`DUPLICATE_SCORE`, or an exact match after
+    normalisation, counts. Best effort by design: a search that fails returns
+    ``None`` and the write proceeds, because losing a memory is worse than
+    filing it twice.
+    """
+    needle = _normalized(text)
+    if not needle:
+        return None
+    try:
+        found = list_records(user_id, limit=limit, query=text)
+    except Exception:  # noqa: BLE001 - a failed lookup must not block the write
+        return None
+    best: dict[str, Any] | None = None
+    for record in found.get("records") or []:
+        other = _normalized(str(record.get("text") or ""))
+        if not other:
+            continue
+        if other == needle:
+            return record
+        score = record.get("score")
+        if isinstance(score, (int, float)) and float(score) >= DUPLICATE_SCORE:
+            # Records come back best-first, so the first qualifying hit wins.
+            best = best or record
+    return best
+
+
+def save_record(
+    user_id: str, text: str, *, kind: str = "preference", dedupe: bool = True
+) -> dict[str, Any]:
     """Write one durable long-term record, readable within a couple of seconds.
 
     ``batch_create_memory_records`` writes the consolidated record **directly**
     instead of waiting for the asynchronous extraction that ``create_event``
     triggers, which is what makes "remember this" recallable in the same
     conversation rather than minutes later.
+
+    A restatement of a stored memory is **not** written again (see
+    :func:`find_duplicate`), so one fact cannot accumulate copies that crowd the
+    injection window; the result is then reported as a duplicate, which the
+    caller treats as "it is already there" rather than a failure.
 
     The ``clientToken`` is a deterministic hash of (user, namespace, text), so a
     retried write is deduplicated by the service. ``requestIdentifier`` alone is
@@ -216,6 +270,19 @@ def save_record(user_id: str, text: str, *, kind: str = "preference") -> dict[st
         raise ValueError("text is required")
     body = body[:MAX_RECORD_CHARS]
     namespace = record_namespace(user_id, kind)
+
+    if dedupe:
+        existing = find_duplicate(user_id, body)
+        if existing is not None:
+            return {
+                "id": str(existing.get("id") or ""),
+                "namespace": namespace,
+                "text": body,
+                "failed": [],
+                "duplicate": True,
+                "matched": str(existing.get("text") or ""),
+            }
+
     token = hashlib.sha256(f"{user_id}\x00{namespace}\x00{body}".encode()).hexdigest()
     try:
         response = _data_client().batch_create_memory_records(
