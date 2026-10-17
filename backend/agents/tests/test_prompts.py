@@ -73,11 +73,14 @@ class BuildSystemPromptTests(unittest.TestCase):
         prompt = prompts.build_system_prompt(
             {"prompt": "p", "knowledgeBaseIds": ["kb1"]}, []
         )
-        self.assertIn("KNOWLEDGE BASES (primary source)", prompt)
+        # Scoped to the user's documents: an unscoped "primary source" claim made
+        # the model treat a knowledge search as the authority on the user, and
+        # answer a personal question "not found" while the memory block held it.
+        self.assertIn("KNOWLEDGE BASES (primary source for the user's documents)", prompt)
         self.assertIn("search-user-knowledge-bases", prompt)
         # Absent when the agent has no knowledge bases attached.
         self.assertNotIn(
-            "KNOWLEDGE BASES (primary source)",
+            "KNOWLEDGE BASES (primary source",
             prompts.build_system_prompt({"prompt": "p"}, []),
         )
 
@@ -92,8 +95,10 @@ class BuildSystemPromptTests(unittest.TestCase):
         )
         self.assertNotIn("over your own memory", prompt)
         self.assertIn("over your own training knowledge", prompt)
-        self.assertIn("answered from the `<memory>` block", prompt)
-        self.assertIn("Never report such a question as not found", prompt)
+        # The exception has to be attached to the rule that forces the search.
+        self.assertIn("The one exception is a question about the user personally", prompt)
+        self.assertIn("with no knowledge-base search", prompt)
+        self.assertIn("never report such a question as not found", prompt)
 
     def test_answers_are_grounded_in_tools_only(self) -> None:
         prompt = prompts.build_system_prompt({"prompt": "p"}, [])
@@ -116,15 +121,15 @@ class BuildSystemPromptTests(unittest.TestCase):
     def test_a_memory_answer_carries_no_citation_marker(self) -> None:
         # Memory has no source index, but GROUNDING insists every factual
         # sentence carry one — so the model invented a literal `[memory]` tag.
-        # The carve-out has to sit on the citation rule itself, not in a trailing
-        # parenthetical, or the mandatory rule wins.
+        # Each instruction carries only the short clause it needs: the citation
+        # rule says a memory fact is uncited, the memory rule names the tag to
+        # avoid.
         grounded = prompts.build_system_prompt({"prompt": "p"}, [])
-        self.assertIn("carries no marker at all", grounded)
-        self.assertIn("write no tag for it, not `[memory]`", grounded)
+        self.assertIn("has no index, so leave it uncited and add no tag", grounded)
+        self.assertIn("answer from that block", grounded)
 
         with_memory = prompts.build_system_prompt({"prompt": "p"}, [], memory_enabled=True)
-        self.assertIn("write no bracketed tag", with_memory)
-        self.assertIn("not `[memory]`", with_memory)
+        self.assertIn("add no `[n]` or `[memory]` tag for it", with_memory)
 
     def test_memory_save_instruction_names_the_add_tool(self) -> None:
         prompt = prompts.build_system_prompt(

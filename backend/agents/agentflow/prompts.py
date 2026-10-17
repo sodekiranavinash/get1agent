@@ -80,11 +80,11 @@ _HITL_ASSUME_INSTRUCTION = (
 _USER_MEMORY_INSTRUCTION = (
     "USER MEMORY (long-term): a `<memory>` block may be injected with durable "
     "facts, preferences and past decisions about this user. Treat it as the "
-    "user's own context. Answer personal questions (\"what is my favorite "
+    "user's own context: answer personal questions (\"what is my favorite "
     "color?\", \"what did we decide?\") directly from it, without a tool call, "
-    "and let it shape your answer. Only use what the block actually contains — "
-    "never invent memories. Do not cite the memory block: write no bracketed tag "
-    "for it — not `[n]` and not `[memory]`."
+    "and never report such a question as not found or as something you could not "
+    "find. Only use what the block actually contains — never invent memories — and "
+    "add no `[n]` or `[memory]` tag for it."
 )
 
 # Only added when the memory manager exposes an add tool, so the prompt never
@@ -143,18 +143,14 @@ def build_system_prompt(
         "calls in this run. Do NOT use your own or training knowledge to state "
         "facts, and never present anything as fact that no tool returned. Every "
         "factual sentence or bullet MUST carry the bracketed `index` of the tool "
-        "source it came from, e.g. [1] or [1][3] — but a sentence taken from the "
-        "user's injected `<memory>` block carries no marker at all: leave it "
-        "uncited and write no tag for it, not `[memory]` and not a number. (The "
-        "`<memory>` block, when present, is the user's own context: use it freely, "
-        "and answer a question about the user themselves — a preference, a "
-        "decision, a personal detail — from that block. Never report such a "
-        "question as not found merely because no tool returned it.) If the tools "
-        "did not return the answer, reply that you could not find it in the "
-        "available sources rather than answering from your own training knowledge. "
-        "Call only tools that actually exist; never invent a tool name. Never "
-        "fabricate sources, source names or citation markers. The only exception "
-        "is a bare greeting or sign-off, which needs no tool."
+        "source it came from, e.g. [1] or [1][3]; a fact taken from the user's "
+        "`<memory>` block has no index, so leave it uncited and add no tag. If the "
+        "tools did not return the answer, reply that you could not find it in the "
+        "available sources rather than answering from your own training knowledge "
+        "— unless the `<memory>` block answers it, in which case answer from that "
+        "block. Call only tools that actually exist; never invent a tool name. "
+        "Never fabricate sources, source names or citation markers. The only "
+        "exception is a bare greeting or sign-off, which needs no tool."
     )
 
     if memory_enabled:
@@ -176,16 +172,17 @@ def build_system_prompt(
 
     if config.get("knowledgeBaseIds"):
         parts.append(
-            "KNOWLEDGE BASES (primary source): the attached knowledge bases hold "
-            "authoritative, user-specific context (a resume/profile, policies, "
-            "uploaded documents). Before answering, call `get-user-knowledge-bases` "
-            "once to see what is available, then ALWAYS call "
-            "`search-user-knowledge-bases` to check them — including when the "
+            "KNOWLEDGE BASES (primary source for the user's documents): the "
+            "attached knowledge bases hold authoritative, user-specific context (a "
+            "resume/profile, policies, uploaded documents). Before answering, call "
+            "`get-user-knowledge-bases` once to see what is available, then ALWAYS "
+            "call `search-user-knowledge-bases` to check them — including when the "
             "request is not phrased as being about them — and prefer their content "
-            "over your own training knowledge. Cite what you use. Knowledge bases "
-            "hold the user's *documents*; a question about the user themselves is "
-            "answered from the `<memory>` block, so do not report it as missing "
-            "just because the knowledge bases do not cover it."
+            "over your own training knowledge. Cite what you use. The one exception "
+            "is a question about the user personally (a preference, a personal "
+            "detail, something they asked you to remember): answer that from the "
+            "`<memory>` block directly, with no knowledge-base search, and never "
+            "report it as not found."
         )
 
     # Chat-only. `None` means the caller did not opt in (builder, automation),
