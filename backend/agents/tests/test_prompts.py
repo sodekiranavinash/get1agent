@@ -92,6 +92,29 @@ class BuildSystemPromptTests(unittest.TestCase):
         prompt = prompts.build_system_prompt({"prompt": "p"}, [])
         self.assertIn("Never include your internal reasoning", prompt)
 
+    def test_memory_is_read_only_without_an_add_tool(self) -> None:
+        # The AgentCore store has no `add` (server-side extraction instead), so
+        # the prompt must not name a tool the run does not have.
+        prompt = prompts.build_system_prompt({"prompt": "p"}, [], memory_enabled=True)
+        self.assertIn("USER MEMORY (long-term)", prompt)
+        self.assertNotIn("add_memory", prompt)
+
+    def test_memory_save_instruction_names_the_add_tool(self) -> None:
+        prompt = prompts.build_system_prompt(
+            {"prompt": "p"}, [], memory_enabled=True, memory_can_save=True
+        )
+        self.assertIn("USER MEMORY (long-term)", prompt)
+        self.assertIn("`add_memory`", prompt)
+        # The failure this guards: saving a preference as a storage file.
+        self.assertIn("Never save it as a storage file", prompt)
+
+    def test_no_memory_instructions_when_memory_is_off(self) -> None:
+        prompt = prompts.build_system_prompt(
+            {"prompt": "p"}, [], memory_enabled=False, memory_can_save=True
+        )
+        self.assertNotIn("USER MEMORY", prompt)
+        self.assertNotIn("add_memory", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,6 +28,7 @@ from agentflow.memory import (
     build_forget_tool,
     build_guard,
     build_memory_manager,
+    memory_can_save,
     memory_enabled as memory_is_enabled,
 )
 from agentflow.models import (
@@ -44,7 +45,7 @@ from agentflow.provider import record_provider_usage, resolve_model_provider
 from agentflow.prompts import build_system_prompt
 from agentflow.sessions import build_session_manager
 from agentflow.store import load_agent, resolve_knowledge_bases, resolve_skills
-from agentflow.tools import build_tools
+from agentflow.tools import build_tools, registered_tool_names
 from agentflow.traces import build_trace, persist_trace
 from data.client import now_iso
 from data.repositories import quotas
@@ -459,6 +460,10 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
             # On a resume the user has already answered once: keep the tool so
             # the paused call can replay, but refuse a *new* ask (anti-loop cap).
             tools.append(build_ask_user_tool(allow_new_questions=not resume_responses))
+        # Memory can only be saved on demand when the manager actually exposes an
+        # add tool (the Dynamo backend does; the AgentCore store has no ``add`` and
+        # relies on server-side extraction), so the prompt must not promise one.
+        can_save_memory = memory_can_save(memory_manager)
         system_prompt = build_system_prompt(
             agent_config,
             skills,
@@ -466,6 +471,7 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
             # try to ask again (the cap above is the hard stop).
             human_in_loop=False if resume_responses else human_in_loop,
             memory_enabled=memory_enabled,
+            memory_can_save=can_save_memory,
         )
         # Progressive disclosure: the plugin injects skill metadata into the system
         # prompt and exposes the `skills` activation tool. The agent decides which
@@ -513,7 +519,16 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
                 "this run — their text is provided automatically, no tool call is "
                 "needed to read them.)"
             )
-        tool_names = [getattr(tool, "tool_name", "") for tool in tools]
+        # The planner may only name tools the agent can actually call, so the list
+        # comes from the agent's own registry, not the MCP ``tools`` list: the
+        # memory manager registers ``search_memory``/``add_memory`` on the agent
+        # (plugin registry), so without this the planner has no way to route
+        # "remember this" and falls back to whatever persistence tool it can see
+        # (a storage file). Falls back to the explicit list if the registry
+        # exposes nothing.
+        tool_names = registered_tool_names(agent_runtime) or [
+            getattr(tool, "tool_name", "") for tool in tools
+        ]
         plan = None
         if config.planner_enabled and budget_ok and not resume_responses:
             try:

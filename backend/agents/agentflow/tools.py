@@ -25,6 +25,32 @@ def _slug(value: str, fallback: str) -> str:
     return slug or fallback
 
 
+def registered_tool_names(agent: Any) -> list[str]:
+    """Every tool the agent can actually call, read from its own registry.
+
+    The planner may only name tools the run offers, and the MCP ``tools`` list is
+    not the whole set: the memory manager registers ``search_memory`` /
+    ``add_memory`` on the agent through Strands' plugin registry, and skills add
+    their own activation tool. Planning from the registry is what lets the
+    planner route "remember this" to ``add_memory`` instead of the only
+    persistence tool it can otherwise see (a storage file). Best-effort: an
+    unreadable registry returns an empty list so planning still proceeds.
+    """
+    registry = getattr(agent, "tool_registry", None)
+    if registry is None:
+        return []
+    try:
+        specs = registry.get_all_tool_specs()
+    except Exception:  # noqa: BLE001 - a registry probe must never break a run
+        return []
+    names: list[str] = []
+    for spec in specs or []:
+        name = str((spec or {}).get("name") or "") if isinstance(spec, dict) else ""
+        if name:
+            names.append(name)
+    return names
+
+
 def _tool_specs(function: str, user_id: str) -> list[dict[str, Any]]:
     _, response = mcp_client.list_tools(function, user_id)
     result = (response or {}).get("result") or {}

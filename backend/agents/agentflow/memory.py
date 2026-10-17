@@ -203,6 +203,25 @@ def memory_enabled(user_id: str) -> bool:
     return core_memory.memory_enabled(user_id)
 
 
+#: The tool name a manager registers for on-demand saves (Dynamo backend).
+MEMORY_ADD_TOOL = "add_memory"
+
+
+def memory_can_save(manager: Any) -> bool:
+    """Whether this manager exposes an on-demand save tool.
+
+    The Dynamo backend registers ``add_memory``; the AgentCore store only has
+    ``add_messages`` (server-side extraction), so a run on it has no save tool
+    the model could call — and the system prompt must not promise one.
+    """
+    if manager is None:
+        return False
+    for tool in getattr(manager, "tools", None) or []:
+        if str(getattr(tool, "tool_name", "") or "") == MEMORY_ADD_TOOL:
+            return True
+    return False
+
+
 def build_forget_tool(user_id: str) -> Any:
     """A Strands tool that lets the user erase a memory by asking the agent."""
     from strands import tool

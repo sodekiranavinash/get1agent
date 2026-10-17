@@ -45,6 +45,64 @@ class SlugTests(unittest.TestCase):
         self.assertEqual(tools._slug("", "server-0"), "server-0")
 
 
+class RegisteredToolNamesTests(unittest.TestCase):
+    """The planner's tool list must come from the agent, not the MCP list.
+
+    The memory manager registers its own tools on the agent (plugin registry), so
+    reading only the MCP ``tools`` list hid ``add_memory`` from the planner — and
+    "remember this" was routed to the only persistence tool it could see, a
+    storage file.
+    """
+
+    class _Registry:
+        def __init__(self, specs: object) -> None:
+            self._specs = specs
+
+        def get_all_tool_specs(self) -> object:
+            return self._specs
+
+    @staticmethod
+    def _agent(specs: object):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(tool_registry=RegisteredToolNamesTests._Registry(specs))
+
+    def test_reads_every_registered_tool(self) -> None:
+        agent = self._agent(
+            [
+                {"name": "search-user-knowledge-bases"},
+                {"name": "search_memory"},
+                {"name": "add_memory"},
+            ]
+        )
+        self.assertEqual(
+            tools.registered_tool_names(agent),
+            ["search-user-knowledge-bases", "search_memory", "add_memory"],
+        )
+
+    def test_plugin_registered_memory_tools_are_visible(self) -> None:
+        self.assertIn("add_memory", tools.registered_tool_names(self._agent([{"name": "add_memory"}])))
+
+    def test_agent_without_a_registry_is_empty(self) -> None:
+        self.assertEqual(tools.registered_tool_names(object()), [])
+
+    def test_unreadable_registry_never_raises(self) -> None:
+        from types import SimpleNamespace
+
+        class _Boom:
+            @staticmethod
+            def get_all_tool_specs() -> object:
+                raise RuntimeError("registry down")
+
+        self.assertEqual(
+            tools.registered_tool_names(SimpleNamespace(tool_registry=_Boom())), []
+        )
+
+    def test_unnamed_and_malformed_specs_are_skipped(self) -> None:
+        agent = self._agent([{"name": "ok"}, {}, {"name": ""}, "junk", {"name": "two"}])
+        self.assertEqual(tools.registered_tool_names(agent), ["ok", "two"])
+
+
 class GatewayNamingTests(unittest.TestCase):
     def test_prefixes_target(self) -> None:
         self.assertEqual(

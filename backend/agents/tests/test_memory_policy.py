@@ -100,6 +100,67 @@ class MemoryBackendTests(unittest.TestCase):
         self.assertIsInstance(manager._stores[0], memory.DynamoMemoryStore)
 
 
+class MemoryCanSaveTests(unittest.TestCase):
+    """Only a manager with a real add tool may be advertised as saving memory.
+
+    The save instruction tells the model to call ``add_memory``, so it is added to
+    the prompt only when that tool exists. The Dynamo backend has it; the
+    AgentCore store does not (``add_messages`` + server-side extraction instead),
+    so a prod run must never be told to call it.
+    """
+
+    @staticmethod
+    def _manager(*tool_names: str):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(tools=[SimpleNamespace(tool_name=n) for n in tool_names])
+
+    def test_true_when_an_add_tool_is_registered(self) -> None:
+        self.assertTrue(
+            memory.memory_can_save(self._manager("search_memory", "add_memory"))
+        )
+
+    def test_false_without_an_add_tool(self) -> None:
+        self.assertFalse(memory.memory_can_save(self._manager("search_memory")))
+
+    def test_false_for_none_and_a_manager_without_tools(self) -> None:
+        self.assertFalse(memory.memory_can_save(None))
+        self.assertFalse(memory.memory_can_save(object()))
+
+    def test_dynamo_backend_exposes_the_add_tool(self) -> None:
+        # The local/dev backend has extraction off, so `add_memory` is the only
+        # write path — nothing is remembered without it.
+        manager = memory.build_memory_manager(
+            _config(memory_backend="dynamo"), "u_1", session_id="7"
+        )
+        self.assertTrue(memory.memory_can_save(manager))
+
+    def test_agentcore_store_does_not_advertise_saving(self) -> None:
+        class _StoreStub:
+            writable = True
+            name = "user_memory"
+            description = ""
+            max_search_results = 5
+            extraction = True
+
+            async def add_messages(self, *_args, **_kwargs):
+                return ""
+
+            async def search(self, *_args, **_kwargs):
+                return []
+
+        with mock.patch(
+            "bedrock_agentcore.memory.integrations.strands.memorystore.AgentCoreMemoryStore",
+            return_value=_StoreStub(),
+        ):
+            manager = memory.build_memory_manager(
+                _config(memory_backend="agentcore", memory_id="mem-123"),
+                "u_1",
+                session_id="7",
+            )
+        self.assertFalse(memory.memory_can_save(manager))
+
+
 class GuardTests(unittest.TestCase):
     def test_no_checker_admits_everything(self) -> None:
         guard = memory.build_guard(None)

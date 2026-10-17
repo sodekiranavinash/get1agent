@@ -86,12 +86,22 @@ _USER_MEMORY_INSTRUCTION = (
     "never invent memories. Do not cite the memory block as a source."
 )
 
+# Only added when the memory manager exposes an add tool, so the prompt never
+# names a tool the run does not have.
+_USER_MEMORY_SAVE_INSTRUCTION = (
+    "When the user asks you to remember, note or keep something about themselves "
+    "(a preference, a fact, a decision), call the `add_memory` tool with it in "
+    "plain language — that is the user's long-term memory. Never save it as a "
+    "storage file or knowledge-base document instead. Confirm briefly afterwards."
+)
+
 
 def build_system_prompt(
     config: dict[str, Any],
     skills: list[dict[str, Any]],
     human_in_loop: bool | None = None,
     memory_enabled: bool = False,
+    memory_can_save: bool = False,
 ) -> str:
     parts: list[str] = []
 
@@ -143,6 +153,8 @@ def build_system_prompt(
 
     if memory_enabled:
         parts.append(_USER_MEMORY_INSTRUCTION)
+        if memory_can_save:
+            parts.append(_USER_MEMORY_SAVE_INSTRUCTION)
 
     if skills:
         # Skills themselves are loaded by the Strands AgentSkills plugin via

@@ -110,6 +110,7 @@ def _build_prompt(
     output_format: str = "markdown",
     human_in_loop: bool | None = None,
     memory_enabled: bool = False,
+    memory_can_save: bool = False,
 ) -> str:
     prompt = dict(base_config)
     if output_instructions:
@@ -122,7 +123,11 @@ def _build_prompt(
         ).strip()
         prompt["output"] = output
     base = build_system_prompt(
-        prompt, skills, human_in_loop=human_in_loop, memory_enabled=memory_enabled
+        prompt,
+        skills,
+        human_in_loop=human_in_loop,
+        memory_enabled=memory_enabled,
+        memory_can_save=memory_can_save,
     )
     return f"{base}\n\n{extra}".strip() if extra else base
 
@@ -153,6 +158,21 @@ def _build_memory(
             flush=True,
         )
         return None
+
+
+def _can_save_memory(manager: Any) -> bool:
+    """Whether this node's memory manager exposes an on-demand save tool.
+
+    ``agentflow.memory`` is imported lazily here for the same reason
+    :func:`_build_memory` does it: the manager pulls in boto3/strands, and a
+    workflow run must not pay that cost (or fail) just to shape a prompt.
+    """
+    try:
+        from agentflow.memory import memory_can_save
+
+        return memory_can_save(manager)
+    except Exception:  # noqa: BLE001 - a prompt hint must never break a run
+        return False
 
 
 def _collect(managers: list[Any] | None, manager: Any) -> Any:
@@ -264,6 +284,7 @@ def _make_host(
             output_format=output_format,
             human_in_loop=human_in_loop,
             memory_enabled=memory is not None,
+            memory_can_save=_can_save_memory(memory),
         ),
         memory_manager=memory,
         callback_handler=None,
@@ -327,7 +348,11 @@ def build_node_agents(
             else None
         )
         prompt = _build_prompt(
-            effective, skills, extra=extra, memory_enabled=member_memory is not None
+            effective,
+            skills,
+            extra=extra,
+            memory_enabled=member_memory is not None,
+            memory_can_save=_can_save_memory(member_memory),
         )
         skills_plugin = build_skills_plugin(skills)
         # A member uses its own agent guardrail, falling back to the workflow's.
