@@ -396,6 +396,148 @@ class PolicyConfigTests(unittest.TestCase):
         self.assertIn("denied", reason)
 
 
+class RunSearchCacheTests(unittest.TestCase):
+    """One run asks the stores for memory on every model call, with one query.
+
+    Injection is an ``InvokeModelStage.Input`` middleware, so it renders before
+    *each* LLM call in the tool loop. Without memoizing, a six-step run embeds
+    and searches the user's memory six times to answer one question, and injects
+    the same block six times. The cache lives on the manager, which is built per
+    run, so the next run still reads fresh.
+    """
+
+    class _CountingStore:
+        writable = True
+        name = "user_memory"
+        description = ""
+        max_search_results = 5
+        extraction = False
+
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        async def search(self, query, options=None):
+            self.queries.append(query)
+            return [memory._entry(f"entry:{query}", {"score": 1.0}, self.name)]
+
+        async def add(self, *_args, **_kwargs):
+            return "mem-1"
+
+    def _manager(self):
+        store = self._CountingStore()
+        return store, memory._run_cached_manager(
+            stores=[store], injection=memory.memory_injection_config()
+        )
+
+    def test_a_repeated_search_hits_the_store_once(self) -> None:
+        import asyncio
+
+        store, manager = self._manager()
+
+        async def run():
+            return [
+                await manager.search("my favourite colour"),
+                await manager.search("my favourite colour"),
+            ]
+
+        first, second = asyncio.run(run())
+
+        self.assertEqual(store.queries, ["my favourite colour"])
+        self.assertEqual([entry.content for entry in first], ["entry:my favourite colour"])
+        self.assertEqual(first, second)
+
+    def test_a_different_query_is_not_a_cache_hit(self) -> None:
+        import asyncio
+
+        store, manager = self._manager()
+
+        async def run():
+            await manager.search("first")
+            await manager.search("second")
+
+        asyncio.run(run())
+        self.assertEqual(store.queries, ["first", "second"])
+
+    def test_the_options_are_part_of_the_key(self) -> None:
+        import asyncio
+
+        store, manager = self._manager()
+
+        async def run():
+            await manager.search("q", {"max_search_results": 5})
+            await manager.search("q", {"max_search_results": 20})
+
+        asyncio.run(run())
+        self.assertEqual(store.queries, ["q", "q"])
+
+    def test_a_write_clears_the_cache(self) -> None:
+        import asyncio
+
+        store, manager = self._manager()
+
+        async def run():
+            await manager.search("q")
+            await manager.add("a new fact")
+            await manager.search("q")
+
+        asyncio.run(run())
+        self.assertEqual(store.queries, ["q", "q"])
+
+    def test_the_injection_path_uses_the_cache(self) -> None:
+        # The end the model actually feels: two rendered injections on one run
+        # cost one search.
+        import asyncio
+
+        store, manager = self._manager()
+        messages = [
+            {"role": "user", "content": [{"text": "what is my favourite colour?"}]},
+            {"role": "assistant", "content": [{"toolUse": {"name": "search"}}]},
+            {"role": "user", "content": [{"toolResult": {"content": []}}]},
+        ]
+
+        async def run():
+            return [
+                await manager._provide_memory_context(messages, manager._injection_config),
+                await manager._provide_memory_context(messages, manager._injection_config),
+            ]
+
+        first, second = asyncio.run(run())
+
+        self.assertEqual(store.queries, ["what is my favourite colour?"])
+        # The block renders both times, from one search.
+        self.assertEqual(first, second)
+        self.assertIn("entry:what is my favourite colour?", first)
+
+    def test_both_backends_get_the_run_scoped_cache(self) -> None:
+        dynamo = memory.build_memory_manager(_config(), "u_1", session_id="7")
+        self.assertIsInstance(dynamo, memory._run_cached_manager_class())
+        self.assertEqual(dynamo._run_search_cache, {})
+
+        class _StoreStub:
+            writable = True
+            name = "user_memory"
+            description = ""
+            max_search_results = 5
+            extraction = True
+
+            async def add_messages(self, *_args, **_kwargs):
+                return ""
+
+            async def search(self, *_args, **_kwargs):
+                return []
+
+        with mock.patch(
+            "bedrock_agentcore.memory.integrations.strands.memorystore.AgentCoreMemoryStore",
+            return_value=_StoreStub(),
+        ):
+            managed = memory.build_memory_manager(
+                _config(memory_backend="agentcore", memory_id="mem-123"),
+                "u_1",
+                session_id="7",
+            )
+        self.assertIsInstance(managed, memory._run_cached_manager_class())
+
+
 class MemoryInjectionQueryTests(unittest.TestCase):
     """The injection query must come from the user's ask, not the last tool step.
 

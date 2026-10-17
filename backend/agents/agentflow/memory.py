@@ -17,6 +17,7 @@ index under ``status="memory"`` so they never leak into knowledge-base search
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import uuid
 from typing import Any, Callable
@@ -180,6 +181,80 @@ def _memory_injection_query(context: Any) -> str:
     return ""
 
 
+def _search_cache_key(query: str, options: Any) -> str:
+    """A stable key for one search request (query + its options)."""
+    try:
+        opts = json.dumps(options, sort_keys=True, default=str) if options else ""
+    except Exception:  # noqa: BLE001 - an unhashable option must not skip caching
+        opts = str(options)
+    return f"{query}\x00{opts}"
+
+
+@functools.lru_cache(maxsize=1)
+def _run_cached_manager_class() -> Any:
+    """The ``MemoryManager`` subclass that memoizes searches for one run.
+
+    Built once, lazily, so importing the runtime stays free of the agent SDK
+    until a run actually builds a manager.
+    """
+    from strands.memory import MemoryManager
+
+    class _RunCachedMemoryManager(MemoryManager):
+        """A ``MemoryManager`` that answers a repeated search once.
+
+        Injection renders memory on **every** model call, always with the same
+        query (the user's latest ask), so an un-memoized run embeds and searches
+        the user's memory once per LLM call in the tool loop — six searches for a
+        six-step run, all identical. A query's results cannot change within a
+        run, so the first result is reused. The cache dies with the manager, so
+        the next run reads fresh.
+
+        The *manager* is wrapped, not the store, because the injection path and
+        the ``search_memory`` tool both reach the stores through
+        ``MemoryManager.search``. A write clears the cache, so a fact added
+        mid-run is visible to a later search in that run.
+        """
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self._run_search_cache: dict[str, list[Any]] = {}
+
+        async def search(self, query: str, options: Any = None) -> list[Any]:
+            key = _search_cache_key(query, options)
+            cached = self._run_search_cache.get(key)
+            if cached is None:
+                cached = await super().search(query, options)
+                self._run_search_cache[key] = cached
+            return cached
+
+        async def add(self, content: str, options: Any = None, **kwargs: Any) -> Any:
+            self._run_search_cache.clear()
+            return await super().add(content, options, **kwargs)
+
+    return _RunCachedMemoryManager
+
+
+def _run_cached_manager(*, stores: list[Any], **kwargs: Any) -> Any:
+    """Build a run-scoped manager over ``stores`` (see the class docstring)."""
+    return _run_cached_manager_class()(stores=stores, **kwargs)
+
+
+def memory_injection_config() -> Any:
+    """The injection policy for every run: every model call, user-anchored query.
+
+    Not Strands' defaults. ``userTurn`` injects only into the latest user ask, and
+    the default query comes from the previous *assistant* step on any other turn —
+    which in a tool loop is a tool-use with no text, so a run that searched a
+    knowledge base wrote its final answer having never seen the memory and
+    reported "I couldn't find it" while the block held the fact.
+
+    One owner, so the runtime and its tests cannot drift apart.
+    """
+    from strands.memory import MemoryInjectionConfig
+
+    return MemoryInjectionConfig(trigger="everyTurn", query=_memory_injection_query)
+
+
 def build_memory_manager(config: RuntimeConfig, user_id: str, *, session_id: str) -> Any:
     """Build the Strands ``MemoryManager`` for this run.
 
@@ -189,19 +264,10 @@ def build_memory_manager(config: RuntimeConfig, user_id: str, *, session_id: str
     service, and a missing ``AGENTCORE_MEMORY_ID`` is a hard error here (the run
     loop degrades gracefully around it).
     """
-    from strands.memory import MemoryInjectionConfig, MemoryManager
-
-    # Not Strands' defaults. ``userTurn`` injects only into the latest user ask, and
-    # the default query comes from the previous *assistant* step on any other turn —
-    # which in a tool loop is a tool-use with no text, so a run that searched a
-    # knowledge base wrote its final answer having never seen the memory and
-    # reported "I couldn't find it" while the block held the fact.
-    injection = MemoryInjectionConfig(
-        trigger="everyTurn", query=_memory_injection_query
-    )
+    injection = memory_injection_config()
 
     if config.memory_backend == core_memory.MEMORY_DYNAMO:
-        return MemoryManager(
+        return _run_cached_manager(
             stores=[DynamoMemoryStore(user_id)],
             add_tool_config=True,
             injection=injection,
@@ -235,7 +301,7 @@ def build_memory_manager(config: RuntimeConfig, user_id: str, *, session_id: str
     # ``add_tool_config`` stays off: ``AgentCoreMemoryStore`` has ``add_messages``
     # (server-side extraction) but no ``add``, so enabling the add tool raises.
     # The search tool and passive memory injection are on by default.
-    return MemoryManager(stores=[store], injection=injection)
+    return _run_cached_manager(stores=[store], injection=injection)
 
 
 def memory_enabled(user_id: str) -> bool:

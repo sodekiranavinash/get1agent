@@ -1705,7 +1705,14 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
   `InvocationTrigger` (extract after every invocation, so a new fact is
   recallable quickly); `MemoryManager`'s search tool + passive `<memory>`
   injection are on (`add_tool_config` stays off — `AgentCoreMemoryStore` has no
-  `add`). One managed resource per deployment (`aws_bedrockagentcore_memory`
+  `add`). Injection renders on **every** model call with the user's latest ask as
+  the query, so `build_memory_manager` returns a run-scoped `MemoryManager`
+  subclass that memoizes `search` — an unmemoized run embeds and searches the
+  user's memory once per LLM call (six searches to answer a six-step question),
+  and a query's results cannot change within a run. `memory_injection_config()` is
+  the single owner of the `everyTurn` + user-anchored-query policy, so the runtime
+  and its tests cannot drift apart. One managed resource per deployment
+  (`aws_bedrockagentcore_memory`
   with `SEMANTIC` `/users/{actorId}/facts/` and `USER_PREFERENCE`
   `/users/{actorId}/preferences/` strategies) and its id is injected as
   `AGENTCORE_MEMORY_ID`. `config.memory.enabled` is legacy and ignored: memory is
