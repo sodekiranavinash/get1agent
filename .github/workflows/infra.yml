@@ -283,7 +283,23 @@ jobs:
           # (REDIS_URL_SSM_PARAM). Unset/empty leaves Redis off and every caller
           # on its DynamoDB / S3 Vectors fallback, so this never blocks a deploy.
           TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
-        run: bash infra/aws/apply-prod.sh
+        run: |
+          # Report whether the optional secrets actually reached this job. A
+          # secret that is missing, misnamed, or created as an Actions
+          # *variable* (vars.*) arrives here as "" and silently leaves the
+          # feature off, so say so in the run summary instead of failing
+          # quietly. Only lengths are printed — never the values.
+          if [ -z "${TF_VAR_redis_url}" ]; then
+            echo "::warning title=Redis disabled::secrets.REDIS_URL is empty in environment 'prod' — the limiter and caches fall back to DynamoDB/S3 Vectors. Check the name and that it is a secret, not a variable."
+          else
+            echo "Redis: secrets.REDIS_URL present (${#TF_VAR_redis_url} chars)"
+          fi
+          if [ -z "${TF_VAR_agent_service_client_secret}" ]; then
+            echo "::warning title=Service auth disabled::secrets.AGENT_SERVICE_CLIENT_SECRET is empty in environment 'prod' — the eval lab's agent task cannot mint a service token."
+          else
+            echo "Service auth: secrets.AGENT_SERVICE_CLIENT_SECRET present (${#TF_VAR_agent_service_client_secret} chars)"
+          fi
+          bash infra/aws/apply-prod.sh
 
       - name: Agent runtime (build + push image, deploy)
         if: inputs.lambdas
