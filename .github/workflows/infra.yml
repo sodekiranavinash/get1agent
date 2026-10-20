@@ -256,20 +256,6 @@ jobs:
         if: inputs.web
         run: bash infra/aws/run-terraform.sh web apply
 
-      - name: Cloudflare
-        if: inputs.cloudflare
-        env:
-          # Legacy Global API Key auth (the same credential .env uses locally).
-          # A scoped CLOUDFLARE_API_TOKEN would also work — providers.tf accepts
-          # either — but with the key there is nothing new to create.
-          TF_VAR_cloudflare_api_key: ${{ secrets.CLOUDFLARE_API_KEY }}
-          TF_VAR_cloudflare_email: ${{ secrets.CLOUDFLARE_EMAIL }}
-          # HSTS must stay off unless deliberately enabled; see infra/CLOUDFLARE.md.
-          ENABLE_HSTS: ${{ vars.CLOUDFLARE_ENABLE_HSTS }}
-        run: |
-          bash infra/aws/write-cloudflare-tfvars.sh
-          bash infra/aws/run-terraform.sh cloudflare apply
-
       - name: Prod
         if: inputs.api_gateway || inputs.lambdas
         env:
@@ -311,6 +297,25 @@ jobs:
           # know which `sub` to trust; it never receives the secret.
           TF_VAR_agent_service_client_id: ${{ secrets.AGENT_SERVICE_CLIENT_ID }}
         run: bash infra/aws/deploy-agent-runtime.sh
+
+      # Cloudflare runs AFTER the AWS stacks: write-cloudflare-tfvars.sh copies
+      # `api_gateway_cname_target`, the ACM validation records and the web
+      # endpoint out of their state, so running it first would read the previous
+      # deploy (and an empty value plans a destroy of live DNS). The script also
+      # re-inits the prod/web backends itself, so a Cloudflare-only run works.
+      - name: Cloudflare
+        if: inputs.cloudflare
+        env:
+          # Legacy Global API Key auth (the same credential .env uses locally).
+          # A scoped CLOUDFLARE_API_TOKEN would also work — providers.tf accepts
+          # either — but with the key there is nothing new to create.
+          TF_VAR_cloudflare_api_key: ${{ secrets.CLOUDFLARE_API_KEY }}
+          TF_VAR_cloudflare_email: ${{ secrets.CLOUDFLARE_EMAIL }}
+          # HSTS must stay off unless deliberately enabled; see infra/CLOUDFLARE.md.
+          ENABLE_HSTS: ${{ vars.CLOUDFLARE_ENABLE_HSTS }}
+        run: |
+          bash infra/aws/write-cloudflare-tfvars.sh
+          bash infra/aws/run-terraform.sh cloudflare apply
 
       - name: Print prod outputs
         if: inputs.api_gateway || inputs.lambdas

@@ -35,7 +35,10 @@ import {
 
 import {
   to = cloudflare_dns_record.acm_validation["api.get1agent.com"]
-  id = "da1e9ec4c1d4e6aec290c70eacad0681/15f1085cf8f58202c777e94c5b49a8f7"
+  # Recreated 2026-10-20 after a Cloudflare plan with an empty tfvars destroyed
+  # it (see write-cloudflare-tfvars.sh). The old id was
+  # da1e9ec4c1d4e6aec290c70eacad0681/15f1085cf8f58202c777e94c5b49a8f7.
+  id = "da1e9ec4c1d4e6aec290c70eacad0681/67a5c196320b6d5656902c983c52742e"
 }
 
 import {

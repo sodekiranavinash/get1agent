@@ -26,14 +26,17 @@ ZONE_NAME="${CLOUDFLARE_ZONE_NAME:-}"
 
 ENABLE_HSTS="${ENABLE_HSTS:-false}"
 
-# Reading `terraform output` needs an initialised working dir. In CI the prod and
-# web stacks have usually already run; a standalone Cloudflare run has not.
+# Reading `terraform output` needs an initialised working dir *whose backend is
+# S3*. Checking for `.terraform` is not enough: the Infra workflow runs
+# `terraform init -backend=false` for validation first, which leaves the
+# directory initialised but state-less. `terraform output` then returns nothing
+# and the tfvars carry empty values — an empty CNAME does not just fail, it
+# deletes the DNS record from the plan. Always re-init against the real backend;
+# it is idempotent and reads only the backend metadata.
 ensure_init() {
   local dir="$1"
-  if [[ ! -d "$dir/.terraform" ]]; then
-    echo "Initialising $dir to read its outputs" >&2
-    (cd "$dir" && terraform init -input=false -no-color -reconfigure >&2)
-  fi
+  echo "Initialising $dir to read its outputs" >&2
+  (cd "$dir" && terraform init -input=false -no-color -reconfigure >&2)
 }
 
 read_output() {
@@ -61,10 +64,23 @@ ACM_HCL="$(printf '%s' "$ACM_JSON" | jq -r '
 [[ -n "$ACM_HCL" ]] || ACM_HCL="  # (no ACM validation records — custom domain disabled in prod)"
 
 if [[ -z "$API_TARGET" ]]; then
-  echo "WARNING: prod output api_gateway_cname_target is empty (custom domain disabled?)" >&2
+  echo "ERROR: prod output api_gateway_cname_target is empty." >&2
+  echo "       Refusing to write terraform.tfvars: an empty CNAME content makes" >&2
+  echo "       Terraform destroy api.get1agent.com. Fix the prod stack (or its" >&2
+  echo "       state/backend) before running Cloudflare." >&2
+  exit 1
 fi
 if [[ -z "$SITE_ENDPOINT" ]]; then
-  echo "WARNING: web output website_endpoint is empty — www origin cannot be resolved" >&2
+  echo "ERROR: web output website_endpoint is empty — www origin cannot be resolved." >&2
+  echo "       Refusing to write terraform.tfvars: an empty CNAME content would" >&2
+  echo "       destroy www.get1agent.com. Apply the Web stack first." >&2
+  exit 1
+fi
+if [[ -z "$ACM_JSON" || "$ACM_JSON" == "null" || "$ACM_JSON" == "{}" ]]; then
+  echo "ERROR: prod output acm_validation_records is empty." >&2
+  echo "       Refusing to write terraform.tfvars: an empty map plans a DESTROY of" >&2
+  echo "       the ACM validation CNAME, and the certificate then fails to renew." >&2
+  exit 1
 fi
 
 # Only emit the ids when they were provided; otherwise the variables.tf defaults win.
