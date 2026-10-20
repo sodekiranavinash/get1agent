@@ -6,6 +6,10 @@ from data.client import is_conditional_failure, now_iso, table
 from data.keys import GSI1, GSI2, KB_PREFIX, META, kb_sk, user_pk
 
 KB_STATUSES = ("processing", "ready", "failed")
+# Retrieval mode a knowledge base is created with. Keep in sync with
+# retrieval.embedding.config.SUPPORTED_RETRIEVAL_MODES and the UI.
+RETRIEVAL_MODES = ("hybrid", "graph")
+DEFAULT_RETRIEVAL_MODE = "hybrid"
 
 
 class DuplicateKnowledgeBase(Exception):
@@ -24,6 +28,7 @@ def _new_item(
     embedding_dim: int,
     chunk_size: int,
     chunk_overlap: int,
+    retrieval_mode: str = DEFAULT_RETRIEVAL_MODE,
 ) -> dict[str, Any]:
     timestamp = now_iso()
     return {
@@ -40,6 +45,8 @@ def _new_item(
         "embeddingDim": embedding_dim,
         "chunkSize": chunk_size,
         "chunkOverlap": chunk_overlap,
+        # hybrid | graph — fixed at creation.
+        "retrievalMode": retrieval_mode,
         "docCount": 0,
         "createdAt": timestamp,
         "updatedAt": timestamp,
@@ -62,6 +69,7 @@ def create_kb(
     embedding_dim: int,
     chunk_size: int,
     chunk_overlap: int,
+    retrieval_mode: str = DEFAULT_RETRIEVAL_MODE,
 ) -> dict[str, Any]:
     item = _new_item(
         sub,
@@ -74,6 +82,7 @@ def create_kb(
         embedding_dim=embedding_dim,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
+        retrieval_mode=retrieval_mode,
     )
     try:
         table().put_item(

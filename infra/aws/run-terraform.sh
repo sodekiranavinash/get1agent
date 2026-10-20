@@ -131,6 +131,7 @@ run_env() {
     check_zip "$ROOT/backend/services/ingestion/ingestion-extract/dist/function.zip" "ingestion-extract" "make -C backend/services/ingestion/ingestion-extract package"
     check_zip "$ROOT/backend/services/ingestion/ingestion-embed/dist/function.zip" "ingestion-embed" "make -C backend/services/ingestion/ingestion-embed package"
     check_zip "$ROOT/backend/services/ingestion/ingestion-index/dist/function.zip" "ingestion-index" "make -C backend/services/ingestion/ingestion-index package"
+    check_zip "$ROOT/backend/services/ingestion/ingestion-graph-extract/dist/function.zip" "ingestion-graph-extract" "make -C backend/services/ingestion/ingestion-graph-extract package"
     check_zip "$ROOT/backend/services/ingestion/ingestion-mark-failed/dist/function.zip" "ingestion-mark-failed" "make -C backend/services/ingestion/ingestion-mark-failed package"
     check_zip "$ROOT/backend/services/ingestion/ingestion-watchdog/dist/function.zip" "ingestion-watchdog" "make -C backend/services/ingestion/ingestion-watchdog package"
     check_zip "$ROOT/backend/services/admin/admin-console/dist/function.zip" "admin-console" "make -C backend/services/admin/admin-console package"

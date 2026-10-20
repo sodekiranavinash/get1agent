@@ -17,6 +17,7 @@ import { CreateKnowledgeBaseDialog } from './CreateKnowledgeBaseDialog'
 import { ApiError, useApiClient } from '../../lib/api'
 import {
   MAX_FILES_PER_KB,
+  RETRIEVAL_MODES,
   deleteDocument,
   deleteKnowledgeBase,
   fetchKnowledgeBase,
@@ -241,9 +242,17 @@ export function KnowledgeBaseDetailDialog({
         <div className="mb-4 rounded-md border border-border bg-raised/30 p-3">
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-subtle">
             <Scissors className="h-3.5 w-3.5" />
-            Chunking
+            Retrieval & chunking
           </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div>
+              <ConfigLabel>Retrieval mode</ConfigLabel>
+              <p className="mt-1 text-sm font-semibold text-foreground">
+                {RETRIEVAL_MODES.find(
+                  (mode) => mode.value === detail.knowledgeBase.retrievalMode,
+                )?.label ?? 'Hybrid RAG'}
+              </p>
+            </div>
             <div>
               <ConfigLabel>Chunk size (tokens)</ConfigLabel>
               <p className="mt-1 text-sm font-semibold tabular-nums text-foreground">

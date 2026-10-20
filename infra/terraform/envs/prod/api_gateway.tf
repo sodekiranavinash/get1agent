@@ -21,6 +21,15 @@ locals {
       lambda_function_name = module.user_api[0].function_name
       authorization_type   = "JWT"
     }
+    # Read-only rate-limit snapshot for the Usage page (backend in force + the
+    # caller's per-policy window headroom). Never consumes a slot.
+    user_ratelimit_usage = {
+      method               = "GET"
+      path                 = "/v1/user/ratelimit"
+      lambda_invoke_arn    = module.user_api[0].invoke_arn
+      lambda_function_name = module.user_api[0].function_name
+      authorization_type   = "JWT"
+    }
     # AI Assistant feedback. The browser cannot reach the agent service's own
     # `POST /feedback` (it would need the MicroVM ingress token), so a thumb is
     # recorded through the ordinary user API into the same AIFEEDBACK# item.

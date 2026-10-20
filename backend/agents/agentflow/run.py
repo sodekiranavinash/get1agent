@@ -108,6 +108,36 @@ def _answer_preview(recorded: list[dict[str, Any]]) -> str:
     return _answer_text(recorded)[:280]
 
 
+def _emit_cache_metric(cache: dict[str, Any], agent_id: str, model: str) -> None:
+    """Emit one CloudWatch EMF line for a cache-hit tool result.
+
+    A cache hit is the platform's clearest latency+cost win, so it is counted
+    under ``get1agent/cache`` (dimensioned by backend + kind) and attributed to
+    the agent/model on the same line. Best-effort: metrics never break a run.
+    """
+    try:
+        payload = {
+            "_aws": {
+                "Timestamp": int(time.time() * 1000),
+                "CloudWatchMetrics": [
+                    {
+                        "Namespace": "get1agent/cache",
+                        "Dimensions": [["backend", "kind"]],
+                        "Metrics": [{"Name": "CacheHit", "Unit": "Count"}],
+                    }
+                ],
+            },
+            "backend": str(cache.get("backend") or "unknown"),
+            "kind": str(cache.get("kind") or "unknown"),
+            "agentId": agent_id or "unknown",
+            "model": model or "unknown",
+            "CacheHit": 1,
+        }
+        print(json.dumps(payload), flush=True)
+    except Exception:  # noqa: BLE001 - a meter must never break a run
+        pass
+
+
 def _trace_tags(
     agent_name: str,
     model: str,
@@ -328,6 +358,11 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
             isinstance(entry, dict) for entry in override_servers
         ):
             agent_config = {**agent_config, "servers": override_servers}
+        # Explicit graph-first request from a run payload. The knowledge base's
+        # own retrieval mode decides otherwise, so this can only force graph on.
+        override_graph = payload.get("knowledgeGraphRag")
+        if isinstance(override_graph, bool):
+            agent_config = {**agent_config, "knowledgeGraphRag": override_graph}
 
         file_ids = resolve_file_ids(payload, agent_config)
 
@@ -675,6 +710,9 @@ async def run_agent_stream(payload: Any, context: Any) -> AsyncIterator[dict[str
                     recorded_input = last_inputs.get(tool_use_id)
                     if recorded_input is not None and not normalized.get("input"):
                         normalized["input"] = recorded_input
+                    cache_info = normalized.get("cache")
+                    if isinstance(cache_info, dict) and cache_info.get("hit"):
+                        _emit_cache_metric(cache_info, agent_id, resolved_model)
                 elif normalized.get("type") == "run.completed":
                     run_usage = normalized.get("usage") or {}
                 _record(recorded, normalized)

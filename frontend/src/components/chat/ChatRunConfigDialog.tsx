@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Check, Bot, FileText, Loader2, Plug, Settings2, Sparkles, Wrench } from 'lucide-react'
+import { Check, Bot, FileText, Loader2, Network, Plug, Settings2, Sparkles, Wrench } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { formatBytes, useStorageFiles, type StorageFile } from '../../lib/storage'
@@ -166,6 +166,11 @@ function RunConfigDialog({
 
   const fileList: StorageFile[] = files.data?.files ?? []
   const kbList = knowledge.data?.knowledgeBases ?? []
+  // A Graph RAG knowledge base is searched through its graph on its own; there is
+  // nothing to toggle per run.
+  const graphKnowledgeBases = kbList.filter(
+    (kb) => selection.knowledgeBaseIds.includes(kb.id) && kb.retrievalMode === 'graph',
+  )
   const skillList = skills.data?.skills ?? []
 
   return (
@@ -231,6 +236,21 @@ function RunConfigDialog({
               ))
             )}
           </Section>
+
+          {graphKnowledgeBases.length > 0 ? (
+            <Section title="Retrieval">
+              <div className="flex items-start gap-2 px-1 py-1 text-[11.5px] leading-relaxed text-subtle">
+                <Network className="mt-0.5 size-3.5 shrink-0" />
+                <p>
+                  Searched through their knowledge graph:{' '}
+                  <span className="text-muted">
+                    {graphKnowledgeBases.map((kb) => kb.name).join(', ')}
+                  </span>
+                  . Hybrid search answers when the graph has no match.
+                </p>
+              </div>
+            </Section>
+          ) : null}
 
           <Section title="Skills">
             {skillList.length === 0 ? (

@@ -39,6 +39,7 @@ TARGETS=()
   TARGETS+=(-target='module.ingestion_extract[0]')
   TARGETS+=(-target='module.ingestion_embed[0]')
   TARGETS+=(-target='module.ingestion_index[0]')
+  TARGETS+=(-target='module.ingestion_graph_extract[0]')
   TARGETS+=(-target='module.ingestion_mark_failed[0]')
   TARGETS+=(-target='module.ingestion_watchdog[0]')
 

@@ -368,6 +368,27 @@ variable "trace_link_secret" {
   description = "HMAC secret for signed, expiring trace links (set via TF_VAR_trace_link_secret)"
 }
 
+# --- Redis (optional infrastructure) -----------------------------------------
+# Redis backs the shared limiter (core.ratelimit) and the caches on the request
+# path. It is the platform's one deliberate non-AWS dependency and is entirely
+# optional: with no URL configured, every caller falls back to its DynamoDB
+# path. The URL carries a password, so it is stored in SSM Parameter Store as a
+# SecureString and read by the Lambdas on first use (REDIS_URL_SSM_PARAM) rather
+# than being placed in a Lambda environment variable.
+
+variable "redis_url" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Redis connection URL (redis:// or rediss://), stored as an SSM SecureString; empty disables Redis (DynamoDB fallback)"
+}
+
+variable "redis_url_ssm_param" {
+  type        = string
+  default     = "/get1agent/prod/redis-url"
+  description = "SSM Parameter Store name holding the Redis URL SecureString"
+}
+
 variable "agent_run_allowed_origins" {
   type        = list(string)
   default     = ["https://www.get1agent.com", "http://localhost:5173"]

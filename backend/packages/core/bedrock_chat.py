@@ -37,10 +37,19 @@ def _client() -> Any:
     import boto3
     from botocore.config import Config
 
+    # A Converse call with a large ``max_tokens`` budget (the graph extractor
+    # asks for 32k) can generate for well over botocore's default 60s read
+    # timeout. A timeout there is retried, so one slow generation looks like a
+    # stuck Lambda. Give long generations room; the caller's own timeout still
+    # bounds the run.
     return boto3.client(
         "bedrock-runtime",
         region_name=region(),
-        config=Config(retries={"max_attempts": 6, "mode": "adaptive"}),
+        config=Config(
+            retries={"max_attempts": 6, "mode": "adaptive"},
+            connect_timeout=float(_env("BEDROCK_CONNECT_TIMEOUT_SECONDS") or 10),
+            read_timeout=float(_env("BEDROCK_READ_TIMEOUT_SECONDS") or 180),
+        ),
     )
 
 
@@ -132,6 +141,7 @@ def converse(
     max_tokens: int = 4096,
     temperature: float = 0.2,
     output_schema: dict[str, Any] | None = None,
+    extra_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One Bedrock Converse call with a message list; returns a result dict.
 
@@ -139,6 +149,9 @@ def converse(
     the model is constrained to emit an object matching the schema, returned as
     ``structured`` alongside the text. Use it for judges and code generation
     instead of prompt-only JSON.
+
+    ``extra_fields`` is forwarded as ``additionalModelRequestFields`` — the
+    model-specific knobs (e.g. ``{"thinking": {"type": "disabled"}}``).
     """
     target = (model or model_id()).strip() or DEFAULT_MODEL
     # Apply an application inference profile / intelligent prompt router when set.
@@ -177,6 +190,8 @@ def converse(
                 },
             }
         }
+    if extra_fields:
+        kwargs["additionalModelRequestFields"] = extra_fields
     tier = _service_tier()
     if tier:
         kwargs["serviceTier"] = {"type": tier}
@@ -223,6 +238,7 @@ def chat_result(
     max_tokens: int = 4096,
     temperature: float = 0.2,
     output_schema: dict[str, Any] | None = None,
+    extra_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One single-turn Bedrock Converse call; returns ``{text, stopReason, usage}``.
 
@@ -236,6 +252,7 @@ def chat_result(
         max_tokens=max_tokens,
         temperature=temperature,
         output_schema=output_schema,
+        extra_fields=extra_fields,
     )
 
 

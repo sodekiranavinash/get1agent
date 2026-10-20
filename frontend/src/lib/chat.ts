@@ -3,6 +3,8 @@ import type {
   AgentAttachmentRef,
   AgentSkillRef,
   AgentSource,
+  AgentToolCache,
+  AgentToolGraph,
   AgentUsage,
   RunContext,
 } from './agentRun'
@@ -22,6 +24,10 @@ export type ChatToolCall = {
   output?: string
   /** Citation sources extracted from the tool result. */
   sources?: ChatSource[]
+  /** How the result was served: cache provenance when the payload carries it. */
+  cache?: AgentToolCache
+  /** Knowledge-graph provenance when a graph knowledge base answered the search. */
+  graph?: AgentToolGraph
   /** Set on the synthetic `ask_user` step: the human-in-the-loop question. */
   question?: ChatQuestion
 }

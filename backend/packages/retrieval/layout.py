@@ -12,6 +12,12 @@ index/<userId>/catalog/<c0>.json                  token strings per first char
 index/<userId>/docs/<docId>/manifest.json         chunkIds, parentIds, tokens
 index/<userId>/stats.json                         chunkCount, totalTokens, avgdl
 index/<userId>/vectors.json                       local vector store (VECTOR_STORE=local)
+index/<userId>/graph/nodes/<nodeId>.json          entity node (name, type, description, provenance)
+index/<userId>/graph/adj/<nodeId>.json            adjacency (both directions) + relationship facts
+index/<userId>/graph/enames/<token>.json          inverted index of entity-name tokens
+index/<userId>/graph/ecat/<c0>.json               entity-name token catalog (prefix expansion)
+index/<userId>/graph/docs/<docId>.json            what one document contributed (idempotent delete)
+index/<userId>/graph/stats.json                   nodeCount, edgeCount, docCount
 ```
 """
 
@@ -167,6 +173,42 @@ def vectors_key(sub: str) -> str:
 
 def index_prefix(sub: str) -> str:
     return f"{INDEX_PREFIX}/{sub}/"
+
+
+# --- Graph RAG (knowledge graph) --------------------------------------------
+# The graph is plain S3 JSON — no external graph database. One object per entity
+# node, one adjacency object per node (both directions of every relationship),
+# an inverted index of entity-name tokens, and one manifest per document so a
+# re-index or delete is exact (manifest-driven, like the term index).
+GRAPH_PREFIX = "graph"
+
+
+def graph_prefix(sub: str) -> str:
+    return f"{INDEX_PREFIX}/{sub}/{GRAPH_PREFIX}/"
+
+
+def graph_node_key(sub: str, node_id: str) -> str:
+    return f"{graph_prefix(sub)}nodes/{node_id}.json"
+
+
+def graph_adjacency_key(sub: str, node_id: str) -> str:
+    return f"{graph_prefix(sub)}adj/{node_id}.json"
+
+
+def graph_entity_term_key(sub: str, token: str) -> str:
+    return f"{graph_prefix(sub)}enames/{token}.json"
+
+
+def graph_entity_catalog_key(sub: str, first_char: str) -> str:
+    return f"{graph_prefix(sub)}ecat/{first_char}.json"
+
+
+def graph_doc_key(sub: str, doc_id: str) -> str:
+    return f"{graph_prefix(sub)}docs/{doc_id}.json"
+
+
+def graph_stats_key(sub: str) -> str:
+    return f"{graph_prefix(sub)}stats.json"
 
 
 def tokenize(text: str) -> list[str]:

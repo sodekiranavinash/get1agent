@@ -9,6 +9,7 @@ import {
   Loader2,
   Radio,
   Scissors,
+  Share2,
   UploadCloud,
   X,
   XCircle,
@@ -25,7 +26,13 @@ import {
   type IngestionStage,
 } from '../../lib/knowledgeBases'
 
-type StageKey = 'uploaded' | 'extracted' | 'chunked' | 'embedding' | 'indexed'
+type StageKey =
+  | 'uploaded'
+  | 'extracted'
+  | 'chunked'
+  | 'embedding'
+  | 'indexed'
+  | 'graph'
 
 const STAGES: { key: StageKey; label: string; icon: LucideIcon }[] = [
   { key: 'uploaded', label: 'Uploaded', icon: UploadCloud },
@@ -33,6 +40,7 @@ const STAGES: { key: StageKey; label: string; icon: LucideIcon }[] = [
   { key: 'chunked', label: 'Chunked', icon: Scissors },
   { key: 'embedding', label: 'Embedded', icon: Boxes },
   { key: 'indexed', label: 'Indexed', icon: Database },
+  { key: 'graph', label: 'Graph', icon: Share2 },
 ]
 
 type StageState = {
@@ -50,6 +58,10 @@ type DocumentActivity = {
   latest: IngestionEvent
   stages: Partial<Record<StageKey, StageState>>
   failed: StageState | null
+  /** True once the document has a graph-stage event (Graph RAG KBs only). */
+  hasGraph: boolean
+  /** The graph stage has started and has not reported a terminal event yet. */
+  pendingGraph: boolean
 }
 
 function formatCount(value: number): string {
@@ -90,11 +102,13 @@ function groupByDocument(events: IngestionEvent[]): DocumentActivity[] {
     const latest = list[0]
     const stages: Partial<Record<StageKey, StageState>> = {}
     let failed: StageState | null = null
+    let hasGraph = false
     for (const event of list) {
       if (event.stage === 'failed') {
         if (!failed) failed = toStageState(event)
         continue
       }
+      if (event.stage === 'graph') hasGraph = true
       if (!(event.stage in STAGE_INDEX)) continue
       const key = event.stage as StageKey
       const existing = stages[key]
@@ -109,6 +123,9 @@ function groupByDocument(events: IngestionEvent[]): DocumentActivity[] {
       latest,
       stages,
       failed,
+      hasGraph,
+      // Rank-merge means `stages.graph` is the terminal event when one exists.
+      pendingGraph: stages.graph?.status === 'started',
     })
   }
   return documents
@@ -120,11 +137,20 @@ const STAGE_INDEX: Record<StageKey, number> = {
   chunked: 2,
   embedding: 3,
   indexed: 4,
+  graph: 5,
+}
+
+/** Hybrid KBs have no graph stage, so it is only shown where one ran. */
+function visibleStages(activity: DocumentActivity): typeof STAGES {
+  return activity.hasGraph
+    ? STAGES
+    : STAGES.filter((stage) => stage.key !== 'graph')
 }
 
 function frontierIndex(activity: DocumentActivity): number {
-  for (let index = 0; index < STAGES.length; index += 1) {
-    if (activity.stages[STAGES[index].key]?.status !== 'succeeded') return index
+  const stages = visibleStages(activity)
+  for (let index = 0; index < stages.length; index += 1) {
+    if (activity.stages[stages[index].key]?.status !== 'succeeded') return index
   }
   return -1
 }
@@ -134,16 +160,18 @@ function failedStageKey(activity: DocumentActivity): StageKey | null {
   if (stage && stage in STAGE_INDEX) return stage as StageKey
   if (!activity.failed) return null
   const index = frontierIndex(activity)
-  return index === -1 ? null : STAGES[index].key
+  const stages = visibleStages(activity)
+  return index === -1 ? null : stages[index].key
 }
 
 type StageView = 'done' | 'active' | 'todo' | 'failed'
 
 function stageView(activity: DocumentActivity, index: number): StageView {
-  const key = STAGES[index].key
+  const key = visibleStages(activity)[index].key
   if (failedStageKey(activity) === key) return 'failed'
   const entry = activity.stages[key]
   if (entry?.status === 'succeeded') return 'done'
+  if (entry?.status === 'failed') return 'failed'
   if (entry?.status === 'started') return 'active'
   if (isActive(activity) && index === frontierIndex(activity)) return 'active'
   return 'todo'
@@ -151,6 +179,9 @@ function stageView(activity: DocumentActivity, index: number): StageView {
 
 function isActive(activity: DocumentActivity): boolean {
   if (activity.failed) return false
+  // The graph stage runs after the document is marked `ready`, so a document
+  // with an unresolved graph stage is still work in progress.
+  if (activity.pendingGraph) return true
   if (activity.documentStatus === 'ready' || activity.documentStatus === 'failed') {
     return false
   }
@@ -160,6 +191,9 @@ function isActive(activity: DocumentActivity): boolean {
 // A document that has not advanced in this long is shown as stalled so it is
 // not mistaken for "ready" (e.g. the S3 event never reached the pipeline).
 const STALL_MS = 5 * 60 * 1000
+// The graph stage is one model pass per batch of chunks, so a large document can
+// legitimately spend a while there without emitting an event.
+const GRAPH_STALL_MS = 15 * 60 * 1000
 
 // Coarse clock so stall detection is pure during render (updated off a timer).
 function useNow(): number | null {
@@ -174,6 +208,9 @@ function useNow(): number | null {
 function statusLabel(activity: DocumentActivity): string {
   if (activity.failed) {
     return activity.failed.message || 'Ingestion failed'
+  }
+  if (activity.pendingGraph) {
+    return 'Building knowledge graph'
   }
   switch (activity.documentStatus) {
     case 'ready':
@@ -264,6 +301,21 @@ function stageDetail(
         parts.push(
           `${formatCount(details.chunks ?? 0)} chunks · ${formatCount(details.images ?? 0)} images`,
         )
+      }
+      return parts.join(' · ') || entry.message
+    }
+    case 'graph': {
+      if (entry.status === 'started') return 'Extracting entities and relationships…'
+      const parts: string[] = []
+      if (details.entities) parts.push(plural(details.entities, 'entity'))
+      if (details.entities !== undefined && !details.entities) parts.push('0 entities')
+      if (details.relationships) {
+        parts.push(plural(details.relationships, 'relationship'))
+      } else if (details.entities !== undefined) {
+        parts.push('0 relationships')
+      }
+      if (details.failedBatches) {
+        parts.push(`${formatCount(details.failedBatches)} batch(es) failed`)
       }
       return parts.join(' · ') || entry.message
     }
@@ -396,13 +448,16 @@ export function IngestionActivity({
 }
 
 function PipelineCard({ activity }: { activity: DocumentActivity }) {
-  const completed = STAGES.filter(
+  const stages = visibleStages(activity)
+  const completed = stages.filter(
     (stage) => activity.stages[stage.key]?.status === 'succeeded',
   ).length
-  const progress = Math.min(99, Math.round((completed / STAGES.length) * 100))
+  const progress = Math.min(99, Math.round((completed / stages.length) * 100))
   const now = useNow()
   const stalled =
-    now !== null && now - new Date(activity.latest.createdAt).getTime() > STALL_MS
+    now !== null &&
+    now - new Date(activity.latest.createdAt).getTime() >
+      (activity.pendingGraph ? GRAPH_STALL_MS : STALL_MS)
 
   return (
     <div className="overflow-hidden rounded-lg border border-accent/25 bg-accent-soft/15">
@@ -492,9 +547,10 @@ function RecentEvent({
 
 function StageTimeline({ activity }: { activity: DocumentActivity }) {
   const chunkCount = activity.stages.chunked?.details?.chunks
+  const stages = visibleStages(activity)
   return (
     <ol>
-      {STAGES.map((stage, index) => {
+      {stages.map((stage, index) => {
         const view = stageView(activity, index)
         const entry = activity.stages[stage.key]
         const detail =
@@ -505,7 +561,7 @@ function StageTimeline({ activity }: { activity: DocumentActivity }) {
         const Icon = stage.icon
         return (
           <li key={stage.key} className="relative flex gap-3 pb-3 last:pb-0">
-            {index < STAGES.length - 1 ? (
+            {index < stages.length - 1 ? (
               <span
                 className={`absolute top-6 left-[10.5px] h-[calc(100%-16px)] w-px ${
                   view === 'done' ? 'bg-success/40' : 'bg-border'

@@ -6,6 +6,7 @@ from typing import Any
 
 from data.repositories import knowledge_bases as kb_repo
 from data.repositories import tags as tags_repo
+from src.search import graph as graph_retrieval
 from src.search.errors import RetrievalError
 from src.search.hybrid import DEFAULT_CANDIDATE_LIMIT, search_candidates
 from retrieval.s3_vectors import vector_store
@@ -14,6 +15,33 @@ from data.repositories.users import get_user_by_id
 
 MAX_CANDIDATE_LIMIT = 200
 VALID_TAG_MATCH = ("any", "all")
+
+
+def _interleave(
+    first: list[dict[str, Any]], second: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Alternate two independently ranked lists, keeping each one's order.
+
+    A mixed request (Graph + Hybrid knowledge bases) must surface both: their
+    scores live on different scales, so concatenating or score-sorting one list
+    would bury the other. Each KB's own strategy still decides its internal rank.
+    """
+    if not first:
+        return list(second)
+    if not second:
+        return list(first)
+    merged: list[dict[str, Any]] = []
+    for index in range(max(len(first), len(second))):
+        if index < len(first):
+            merged.append(first[index])
+        if index < len(second):
+            merged.append(second[index])
+    return merged
+
+
+def _retrieval_mode(kb: dict[str, Any]) -> str:
+    mode = str(kb.get("retrievalMode") or "hybrid").strip().lower()
+    return mode if mode in ("hybrid", "graph") else "hybrid"
 
 
 def _clean_names(names: Any) -> list[str]:
@@ -172,8 +200,17 @@ def search(
     tag_match: str = "any",
     limit: int = DEFAULT_CANDIDATE_LIMIT,
     allowed_doc_ids: set[str] | None = None,
+    graph: bool | None = None,
 ) -> dict[str, Any]:
-    """Run hybrid search and return candidates + per-KB metadata + warnings."""
+    """Run hybrid search and return candidates + per-KB metadata + warnings.
+
+    ``graph`` selects the retrieval strategy for Graph-mode knowledge bases:
+    ``None`` follows each base's own ``retrievalMode`` (a Graph KB answers
+    graph-first), ``True`` forces graph-first, ``False`` forces the hybrid legs.
+    Graph-first means seed entities → traverse → the passages those entities were
+    seen in; when the graph has nothing for the query the hybrid legs answer it
+    instead (``meta.graph.fallback``). Hybrid-mode KBs always use the hybrid legs.
+    """
     user = get_user_by_id(sub)
     if user is None:
         raise RetrievalError("user_not_found", "No account found for this user", 404)
@@ -205,6 +242,8 @@ def search(
             "knowledgeBases": [],
             "notFound": not_found,
             "warnings": warnings,
+            "relationships": [],
+            "graph": {"enabled": False},
         }
 
     tag_list = [str(tag) for tag in tags] if isinstance(tags, (list, tuple)) else []
@@ -213,23 +252,110 @@ def search(
 
     storage = Storage()
     store = vector_store(storage)
-    candidates = search_candidates(
-        storage,
-        store,
-        sub,
-        kb_ids=[kb["kbId"] for kb in eligible],
-        query=query,
-        query_vector=query_vector,
-        limit=limit,
-        allowed_doc_ids=allowed_doc_ids,
+
+    # Each knowledge base is searched the way it was created: a Graph-mode KB
+    # through its graph, a Hybrid-mode KB through the vector + BM25 legs. The two
+    # are **separate paths** (nothing is fused): a Graph KB only falls back to the
+    # hybrid legs when its graph has nothing for this query, and a Hybrid KB never
+    # touches the graph. When a request spans both kinds, each contributes its own
+    # results (interleaved, so neither list is buried by the other).
+    graph_kbs = [kb for kb in eligible if _retrieval_mode(kb) == "graph"]
+    hybrid_kbs = [kb for kb in eligible if _retrieval_mode(kb) != "graph"]
+    graph_ids = [kb["kbId"] for kb in graph_kbs]
+    # ``graph=False`` opts the Graph KBs out for this request: they are searched
+    # with the hybrid legs like any other KB.
+    graph_first = bool(graph_ids) and (graph is None or bool(graph))
+    graph_ran = bool(graph_first) and graph_retrieval.enabled()
+
+    relationships: list[dict[str, Any]] = []
+    graph_meta: dict[str, Any] = {"enabled": False}
+    graph_candidates: list[dict[str, Any]] = []
+
+    if graph_ran:
+        graph_result = graph_retrieval.search_graph(
+            storage,
+            store,
+            sub,
+            query=query,
+            query_vector=query_vector,
+            kb_ids=graph_ids,
+            allowed_doc_ids=allowed_doc_ids,
+            limit=max(limit, 1),
+        )
+        relationships = graph_result.get("relationships") or []
+        graph_meta = {
+            **(graph_result.get("meta") or {"enabled": True}),
+            "requested": True,
+            "strategy": "graph",
+            "fallback": False,
+            "knowledgeBases": graph_ids,
+        }
+        graph_candidates = sorted(
+            graph_result.get("candidates") or [],
+            key=lambda item: float(item.get("rrfScore") or 0.0),
+            reverse=True,
+        )
+
+    # The graph had nothing (or is off/opted out): the Graph KBs join the hybrid
+    # legs so the query is still answered — and the payload says it fell back.
+    graph_fallback = bool(graph_ids) and not graph_candidates
+    hybrid_ids = [kb["kbId"] for kb in hybrid_kbs] + (graph_ids if graph_fallback else [])
+    if graph_fallback:
+        counts = {
+            key: graph_meta[key]
+            for key in ("seeds", "nodes", "edges", "parents")
+            if key in graph_meta
+        }
+        seeds_found = int(graph_meta.get("seeds") or 0)
+        reason = (
+            "graph not requested"
+            if not graph_first
+            else "graph disabled"
+            if not graph_ran
+            else "no linked passages"
+            if seeds_found
+            else "no matching entities"
+        )
+        graph_meta = {
+            **counts,
+            "enabled": graph_ran,
+            "requested": bool(graph_first),
+            "strategy": "graph" if graph_first else "hybrid",
+            # An explicit opt-out is not a fallback: the graph never ran.
+            "fallback": bool(graph_first),
+            "reason": reason,
+            "knowledgeBases": graph_ids,
+        }
+
+    hybrid_candidates = (
+        search_candidates(
+            storage,
+            store,
+            sub,
+            kb_ids=hybrid_ids,
+            query=query,
+            query_vector=query_vector,
+            limit=limit,
+            allowed_doc_ids=allowed_doc_ids,
+        )
+        if hybrid_ids
+        else []
     )
+    candidates = _interleave(graph_candidates, hybrid_candidates)
 
     return {
         "candidates": candidates,
         "knowledgeBases": [
-            {"id": kb["kbId"], "name": kb.get("name"), "status": kb.get("status")}
+            {
+                "id": kb["kbId"],
+                "name": kb.get("name"),
+                "status": kb.get("status"),
+                "retrievalMode": _retrieval_mode(kb),
+            }
             for kb in eligible
         ],
         "notFound": not_found,
         "warnings": warnings,
+        "relationships": relationships,
+        "graph": graph_meta,
     }

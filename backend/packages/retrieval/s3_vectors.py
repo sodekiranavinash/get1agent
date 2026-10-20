@@ -23,7 +23,11 @@ from core.storage import PreconditionFailed, Storage
 
 DEFAULT_DIMENSION = int(os.environ.get("EMBED_DIM", "1024"))
 # Metadata keys S3 Vectors may filter on (equality only, <=2KB / <=50 keys).
-FILTERABLE_KEYS = ("kbId", "status", "page", "parentId", "tokenCount")
+# Everything the store writes outside NON_FILTERABLE_KEYS is filterable; these are
+# the ones actually queried. Graph RAG adds ``kind``/``nodeId``/``nodeType`` on
+# entity vectors (chunk vectors use ``status="ready"``, memory ``status="memory"``
+# and the semantic cache ``kind="semcache"``, so the discriminators never collide).
+FILTERABLE_KEYS = ("kbId", "status", "page", "parentId", "tokenCount", "kind", "nodeId", "nodeType")
 # Metadata returned with a match but not filterable (chunk text + labels).
 NON_FILTERABLE_KEYS = ("text", "kbName", "fileName")
 

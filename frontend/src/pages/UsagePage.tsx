@@ -91,6 +91,39 @@ type NetworkUsage = {
   lastRunAt: string | null
 }
 
+type RateLimitWindow = {
+  name: string
+  limit: number
+  windowSeconds: number
+  used: number
+  remaining: number
+  resetSeconds: number
+  exceeded: boolean
+}
+
+type RateLimitPolicy = {
+  id: string
+  description: string
+  windows: RateLimitWindow[]
+}
+
+type RateLimitSnapshot = {
+  scope: string
+  backend: 'redis' | 'dynamodb' | 'none'
+  backendPreference: string
+  enforced: boolean
+  checkedAt: number
+  policies: RateLimitPolicy[]
+  redis: {
+    configured: boolean
+    reachable: boolean
+    breakerOpen: boolean
+    prefix: string
+    latencyMs: number | null
+    error?: string
+  }
+}
+
 type UsageOverview = {
   metrics: UsageMetrics | null
   vault: VaultList | null
@@ -110,6 +143,7 @@ type UsageOverview = {
   skills: { usage?: { skills: number; limits: { skills: number } } } | null
   mcp: { connections: unknown[] } | null
   network: NetworkUsage | null
+  rateLimits: RateLimitSnapshot | null
 }
 
 function safe<T>(promise: Promise<T>): Promise<T | null> {
@@ -129,6 +163,7 @@ async function loadOverview(api: ApiClient): Promise<UsageOverview> {
     skills,
     mcp,
     network,
+    rateLimits,
   ] = await Promise.all([
     safe(api.get<UsageMetrics>('/v1/lab/metrics?days=30')),
     safe(api.get<VaultList>('/v1/vault/secrets')),
@@ -141,6 +176,7 @@ async function loadOverview(api: ApiClient): Promise<UsageOverview> {
     safe(api.get<UsageOverview['skills']>('/v1/agent-skills')),
     safe(api.get<{ connections: unknown[] }>('/v1/mcp/connections')),
     safe(api.get<NetworkUsage>('/v1/user/network')),
+    safe(api.get<RateLimitSnapshot>('/v1/user/ratelimit')),
   ])
   return {
     metrics,
@@ -154,6 +190,7 @@ async function loadOverview(api: ApiClient): Promise<UsageOverview> {
     skills,
     mcp,
     network,
+    rateLimits,
   }
 }
 
@@ -226,6 +263,46 @@ function ResourceRow({
   )
 }
 
+function windowLabel(seconds: number): string {
+  if (seconds >= 86_400) return 'day'
+  if (seconds >= 3600) return 'hour'
+  if (seconds >= 60) return `${Math.round(seconds / 60)} min`
+  return `${seconds}s`
+}
+
+function RateLimitRow({ policy }: { policy: RateLimitPolicy }) {
+  const [tightest, ...rest] = policy.windows
+  const percent = tightest ? pct(tightest.used, tightest.limit) : 0
+  const near = percent >= 80
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[13px] font-medium text-foreground">
+          {policy.description || policy.id}
+        </p>
+        {tightest ? (
+          <span className="shrink-0 text-xs tabular-nums text-muted">
+            {tightest.used} / {tightest.limit} per {windowLabel(tightest.windowSeconds)}
+          </span>
+        ) : null}
+      </div>
+      {tightest ? (
+        <Progress
+          value={percent}
+          className={`mt-1.5 ${near ? '[&>[data-slot=progress-indicator]]:bg-warning' : ''}`}
+        />
+      ) : null}
+      {rest.length > 0 ? (
+        <p className="mt-1 text-[11px] text-subtle">
+          {rest
+            .map((win) => `${win.used} / ${win.limit} per ${windowLabel(win.windowSeconds)}`)
+            .join(' · ')}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 function UsageSkeleton() {
   return (
     <PageShell>
@@ -286,6 +363,7 @@ export function UsagePage() {
   const storageUsage = data?.storage?.usage
   const kbUsage = data?.kbs?.usage
   const networkUsage = data?.network ?? null
+  const rateLimits = data?.rateLimits ?? null
 
   const resources: {
     key: string
@@ -644,6 +722,39 @@ export function UsagePage() {
                         : 'A workspace admin has disabled network access for user tools. Custom tools still run, but without internet.'}
                     </p>
                   </div>
+                </Card>
+              </motion.div>
+            ) : null}
+
+            {rateLimits && (rateLimits.policies?.length ?? 0) > 0 ? (
+              <motion.div variants={fadeUp} className="mt-3">
+                <Card padding="none" className="overflow-hidden">
+                  <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+                    <Gauge className="size-3.5 text-info" strokeWidth={1.75} />
+                    <h2 className="text-[13px] font-semibold text-foreground">Rate limits</h2>
+                    <span
+                      className={`ml-auto rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                        rateLimits.enforced
+                          ? 'border-accent text-accent'
+                          : 'border-border text-subtle'
+                      }`}
+                    >
+                      {!rateLimits.enforced
+                        ? 'Off'
+                        : rateLimits.backend === 'redis'
+                          ? 'Redis'
+                          : 'DynamoDB'}
+                    </span>
+                  </div>
+                  <div className="divide-y divide-border">
+                    {rateLimits.policies.map((policy) => (
+                      <RateLimitRow key={policy.id} policy={policy} />
+                    ))}
+                  </div>
+                  <p className="border-t border-border px-4 py-2.5 text-[11px] text-subtle">
+                    Per-identity limits on the requests that spend money — agent runs, evaluations,
+                    tool generation. Read requests rely on API Gateway throttling instead.
+                  </p>
                 </Card>
               </motion.div>
             ) : null}

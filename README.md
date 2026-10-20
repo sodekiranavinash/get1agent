@@ -39,6 +39,7 @@ machine, and the same API routes as production.
   - [How a request flows](#how-a-request-flows)
   - [Components](#components)
   - [Data & retrieval design](#data--retrieval-design)
+  - [Caching & rate limiting](#caching--rate-limiting)
 - [Feature tour](#feature-tour)
 - [Tech stack](#tech-stack)
 - [Repository layout](#repository-layout)
@@ -96,7 +97,9 @@ strands-format skills.
 Every model call, embedding, rerank and trace runs on AWS: **Amazon Bedrock** for inference, and
 **AgentCore** for the managed agent platform (runtime, memory, policy, gateway, identity, registry,
 evaluations, browser). OpenTelemetry → CloudWatch + X-Ray, an AI-credit budget, an offline
-evaluation lab with LLM judges and a marketplace-style agent store.
+evaluation lab with LLM judges and a marketplace-style agent store. The only non-AWS dependency is
+an **optional Redis** backing the caches and the rate limiter — remove it and every caller falls
+back to DynamoDB.
 
 </td><td width="50%" valign="top">
 
@@ -144,6 +147,18 @@ can never drift from the product. Regenerate them with **`make architecture`**.
 
 <p align="center">
   <img src="docs/assets/architecture-knowledge.svg" alt="get1agent hybrid retrieval: knowledge search runs a semantic leg over S3 Vectors and a lexical BM25 leg over S3 postings in parallel, fuses with RRF, optionally reranks and hydrates parents" width="100%">
+</p>
+
+**Graph RAG ingestion** — one extra, gated stage builds the entity/relationship graph
+
+<p align="center">
+  <img src="docs/assets/architecture-graph-ingestion.svg" alt="get1agent Graph RAG ingestion: after the document is indexed, a retrieval-mode gate runs only for Graph-mode knowledge bases — a Bedrock model extracts typed entities and relationships from each batch of chunks, the entities are embedded, and the result is merged into an S3-hosted knowledge graph; hybrid KBs skip the stage" width="100%">
+</p>
+
+**Graph RAG retrieval** — additive on the hybrid legs, with the relationships that explain a hit
+
+<p align="center">
+  <img src="docs/assets/architecture-graph-retrieval.svg" alt="get1agent Graph RAG retrieval: a query seeds entities by entity-vector search and an entity-name lookup, a bounded BFS traverses the graph with hop decay, visited entities resolve to the same parent passages the hybrid legs hydrate, the walked relationships ride along and graph candidates fuse with the hybrid list" width="100%">
 </p>
 
 **Data plane** — one item per entity, never a Scan
@@ -234,6 +249,64 @@ The data model is the part most worth reading. It is a set of deliberate, docume
 
 The full rationale lives in [`docs/design/design-b-dynamodb-s3.md`](docs/design/design-b-dynamodb-s3.md).
 
+### Caching & rate limiting
+
+Redis (`core.redis_client`) is the platform's one deliberate non-AWS dependency — and it is
+**optional**. The URL is a SecureString in SSM (`REDIS_URL`, or `REDIS_URL_SSM_PARAM` in prod) and
+every caller falls back to its managed AWS store when Redis is absent, unreachable, or lacks the
+RediSearch module. One instance backs the three caches on the normal request path and the
+per-identity limiter. A dead Redis degrades a request; it can never fail one.
+
+**Caches.** Each backend is chosen by an `auto` value meaning "Redis when it answers, the managed
+store otherwise".
+
+| Cache | Key (Redis) | Backend (`auto`) | TTL | Notes |
+|---|---|---|---|---|
+| Exact (search) | `g1a:search:<sha256>` | Redis `SET … EX` → DynamoDB `CACHE#…` | `CACHE_SEARCH_TTL_SECONDS` (300) | one whole search payload per query, per user |
+| Embeddings | `g1a:emb:<sha256>` | Redis `SET … EX` / `MGET` → DynamoDB TTL item | `CACHE_EMBEDDING_TTL_SECONDS` (2592000) | keyed `(mode, model, text)`; read/written in batches |
+| Semantic | index `g1a:semcache:{<userId>}:<dim>`, payload `g1a:semcache:<sha256>` | Redis RediSearch `FT.SEARCH` (COSINE) → S3 Vectors (`kind="semcache"`) | `SEMANTIC_CACHE_TTL_SECONDS` (600) | a near-duplicate query reuses the payload; needs similarity ≥ `SEMANTIC_CACHE_THRESHOLD` (0.95) **and** the same KB set |
+| Single-flight | `g1a:sf:<sha256>` | Redis `SET NX EX` → DynamoDB conditional `PutItem` | `SINGLE_FLIGHT_LOCK_SECONDS` (20) | N concurrent identical searches compute once; **not** rate limiting |
+
+The semantic cache's Redis path is one RediSearch index **per user per embedding dimension**, with a
+`kbTag` TAG holding a hash of the knowledge-base set (so the TAG query never needs escaping) and a
+`FLOAT32` vector field scored with cosine distance — similarity is `1 − distance`, the same scale and
+threshold as the S3 Vectors path. Hits are visible: `knowledge-mcp` stamps `meta.cache`
+(`{hit, kind, backend, similarity?}`) and the run timeline renders a cache badge on the tool row.
+The Labs (Playground, Evaluations) are **never** cached.
+
+**Rate limiting.** Two layers. API Gateway throttles volumetrically *before* Lambda — a stage
+default (burst 100 / 50 rps) plus per-route overrides on the heavy MCP and agent-run routes — but it
+cannot tell one caller from another. Inside Lambda, `core.ratelimit` enforces per-identity fairness
+with **GCRA** (Redis-backed): one atomic Lua round trip consumes every window of a policy at once,
+the clock is read from Redis `TIME`, and a denial commits nothing. When Redis is unavailable the
+DynamoDB fixed-window counter takes over. **Reads are never limited** — the limiter bounds work that
+spends (a model call, an upload, a sandbox run), keyed on the internal `userId`.
+
+| Policy | Windows | Applies to |
+|---|---|---|
+| `api.default` | 600/min + 10 000/hour | any other mutating call |
+| `agent.session` | 10/min + 120/hour | `POST /v1/agent-run/session` |
+| `knowledge.write` | 300/hour + 2000/day | KB document presign / complete / delete |
+| `custom-tools.generate` | 30/hour + 200/day | MCP Builder generation (and session turns) |
+| `custom-tools.test` | 30/min + 300/hour | MCP Builder test run |
+| `evals.run` | 10/hour + 50/day | `POST /v1/evals/runs` |
+| `playground.run` | 120/hour | Playground replay / judge |
+| `mcp.call` | 120/min + 2000/hour | remote MCP tool call / token |
+| `vault.test` | 20/min + 120/hour | provider-key test / model list |
+| `storage.upload` | 120/hour | storage presign / complete |
+| `skills.import` | 30/hour | skill import / resolve-repo |
+| `guardrail.test` | 60/hour | `POST /v1/guardrails/test` |
+| `tool.call` | 240/min + 4000/hour | aggregate agent tool calls (declared; the per-tool windows above are what is route-mapped) |
+| `ai-assistant` | burst (3 min) + hour + day | AI Assistant (windows are admin-editable) |
+
+Every limited response carries `ratelimit-limit`, `ratelimit-remaining`, `ratelimit-reset`,
+`ratelimit-policy` and `x-ratelimit-backend` (plus `retry-after` on a `429`), and
+`GET /v1/user/ratelimit` returns the
+caller's live headroom for the Usage page. The per-model Bedrock token bucket
+(`core.ratelimit_bedrock`, a 1-second window) shares the same store, so all concurrent Lambdas stay
+within the account quota. Any policy is overridable at runtime with the `RATELIMIT_POLICY` JSON env
+(an empty list means no cap) — no deploy needed.
+
 ## Feature tour
 
 <details>
@@ -250,9 +323,13 @@ The full rationale lives in [`docs/design/design-b-dynamodb-s3.md`](docs/design/
 - **Config per KB.** Embedding model and chunk size/overlap are set per knowledge base.
 - **Idempotent.** The index stage is delete-then-write per document (manifest-driven), so retries
   and re-uploads re-index cleanly.
-- **Caching.** Best-effort embedding and search caches (DynamoDB TTL), plus a semantic cache
-  (S3 Vectors) that reuses a cached answer for a near-duplicate query. Single-flight dedupes
-  concurrent identical searches. Labs are never cached.
+- **Caching.** Redis-first, DynamoDB/S3 Vectors fallback: an exact search cache, an embedding cache
+  and a semantic cache that reuses a cached result for a near-duplicate query (see
+  [Caching & rate limiting](#caching--rate-limiting)). Single-flight dedupes concurrent identical
+  searches. Labs are never cached.
+- **Rate limiting.** Coarse throttling at API Gateway plus per-identity GCRA in Redis (DynamoDB
+  fallback) that bounds only the calls which spend — never reads. Every response reports its
+  remaining headroom.
 </details>
 
 <details>
@@ -338,6 +415,7 @@ The full rationale lives in [`docs/design/design-b-dynamodb-s3.md`](docs/design/
 | **Agent platform** | Amazon Bedrock AgentCore — Runtime, Code Interpreter, Memory, Policy, Gateway, Identity, Registry, Evaluations, Optimization, Browser |
 | **AI inference** | Amazon Bedrock — Titan Embeddings V2 + Titan Multimodal, Bedrock Rerank, curated models (Nova, DeepSeek, Qwen, GLM, Nemotron), Guardrails, prompt caching, structured outputs, batch inference |
 | **Data** | DynamoDB (single table), Amazon S3, S3 Vectors, AWS KMS |
+| **Cache & rate limiting** | Redis (optional): per-identity GCRA limiter, exact + embedding caches, RediSearch semantic cache — each with a DynamoDB / S3 Vectors fallback |
 | **Async** | EventBridge, SQS (+ DLQ), Step Functions, EventBridge Scheduler |
 | **Auth** | Auth0 (Google OIDC/JWT) |
 | **Observability** | CloudWatch + X-Ray (OpenTelemetry via ADOT), AgentCore Evaluations |

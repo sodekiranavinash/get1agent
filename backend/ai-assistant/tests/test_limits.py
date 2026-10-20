@@ -21,7 +21,6 @@ So these tests pin the contract, not the integers:
 from __future__ import annotations
 
 import sys
-import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -35,27 +34,52 @@ from data.repositories import ai_assistant_settings as config_defaults  # noqa: 
 from src import limits  # noqa: E402
 
 
-class _FixedWindowCounter:
-    """In-memory stand-in for `core.ratelimit`'s DynamoDB counter.
+class _GcraCounter:
+    """In-memory stand-in for `core.ratelimit`'s Redis GCRA check.
 
-    Mimics the real semantics exactly: one atomic increment per call, allowed while
-    the count is within the limit for the current fixed window.
+    Mimics the real semantics the AI Assistant relies on:
+
+    * all windows are consumed in **one** call, in the order given;
+    * the first window with nothing left is the one that refuses, and its wait
+      is the emission interval (`window / limit`) — the time until one slot
+      frees, exactly what GCRA reports;
+    * a refusal consumes nothing.
     """
 
     def __init__(self) -> None:
-        self.counts: dict[tuple[str, str, int], int] = {}
+        self.buckets: dict[tuple[str, str, int], int] = {}
         self.windows_asked: list[tuple[str, int]] = []
 
-    def allow(self, user_id: str, *, kind: str, limit: int, window_seconds: int) -> bool:
-        window = int(time.time() // window_seconds)
-        key = (user_id, kind, window)
-        self.counts[key] = self.counts.get(key, 0) + 1
-        self.windows_asked.append((kind, window_seconds))
-        return self.counts[key] <= limit
+    def check_windows(self, identity, windows, *, policy="", scope="user"):
+        self.windows_asked.extend((window.name, window.seconds) for window in windows)
+        allowed = True
+        retry = 0
+        denied = ""
+        limit = 0
+        for window in windows:
+            key = (identity, window.name, window.seconds)
+            used = self.buckets.get(key, 0)
+            if used >= window.limit:
+                if allowed:
+                    allowed = False
+                    retry = max(1, -(-window.seconds // max(window.limit, 1)))
+                    denied = window.name
+                    limit = window.limit
+        if allowed:
+            for window in windows:
+                key = (identity, window.name, window.seconds)
+                self.buckets[key] = self.buckets.get(key, 0) + 1
+        return SimpleNamespace(
+            allowed=allowed,
+            retry_after=retry,
+            window=denied,
+            limit=limit,
+            remaining=0,
+            backend="test",
+        )
 
-    def current(self, user_id: str, *, kind: str, window_seconds: int) -> int:
-        window = int(time.time() // window_seconds)
-        return self.counts.get((user_id, kind, window), 0)
+    def current(self, identity, *, kind, window_seconds, limit=0, policy=""):
+        return self.buckets.get((identity, kind, window_seconds), 0)
 
 
 GUEST_DEFAULTS = {
@@ -70,11 +94,13 @@ USER_DEFAULTS = {
 }
 
 
-def _ask(surface: str, config: dict, times: int) -> tuple[list[tuple[bool, int]], _FixedWindowCounter]:
-    counter = _FixedWindowCounter()
+def _ask(surface: str, config: dict, times: int) -> tuple[list[tuple[bool, int]], _GcraCounter]:
+    counter = _GcraCounter()
     caller = limits.Caller(key="caller-1", surface=surface)
     with mock.patch.object(limits.settings, "live", lambda: config), mock.patch.object(
-        limits, "ratelimit", SimpleNamespace(allow=counter.allow, current=counter.current)
+        limits,
+        "ratelimit",
+        SimpleNamespace(check_windows=counter.check_windows, current=counter.current),
     ):
         results = [limits.check_and_count(caller) for _ in range(times)]
     return results, counter
@@ -149,10 +175,12 @@ class SignedInTest(unittest.TestCase):
 
 class UsageTest(unittest.TestCase):
     def test_usage_reports_every_window(self) -> None:
-        counter = _FixedWindowCounter()
+        counter = _GcraCounter()
         caller = limits.Caller(key="caller-1", surface="guest")
         with mock.patch.object(limits.settings, "live", lambda: GUEST_DEFAULTS), mock.patch.object(
-            limits, "ratelimit", SimpleNamespace(allow=counter.allow, current=counter.current)
+            limits,
+            "ratelimit",
+            SimpleNamespace(check_windows=counter.check_windows, current=counter.current),
         ):
             limits.check_and_count(caller)
             report = limits.usage(caller)

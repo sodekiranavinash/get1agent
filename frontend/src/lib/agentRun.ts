@@ -85,6 +85,47 @@ export type AgentAttachmentRef = {
   chars?: number
 }
 
+/**
+ * Cache provenance for a tool result: whether it was served from a cache
+ * (and which one) instead of being recomputed.
+ */
+export type AgentToolCache = {
+  hit: boolean
+  /** How the result was served: an exact key hit, a semantic (nearest-query) hit, or not cached. */
+  kind?: 'exact' | 'semantic' | 'none'
+  /** The backend that answered: `redis`, `s3vectors`, `dynamodb` or `none`. */
+  backend?: string
+  /** Semantic hits only: cosine similarity of the matched query. */
+  similarity?: number
+}
+
+/** One walked knowledge-graph relationship: subject → predicate → object. */
+export type AgentToolGraphRelationship = {
+  subject: string
+  predicate: string
+  object: string
+  /** 0 = the entity matched the question; higher = reached by traversal. */
+  hop?: number | null
+}
+
+/**
+ * Graph provenance for a knowledge search: how the graph produced the passages
+ * (and whether the hybrid legs answered instead because the graph had nothing).
+ */
+export type AgentToolGraph = {
+  enabled?: boolean
+  /** `graph` = the graph answered; `hybrid` = a hybrid knowledge base or an opt-out. */
+  strategy?: 'graph' | 'hybrid'
+  /** True when the graph found nothing and the hybrid legs answered the query. */
+  fallback?: boolean
+  reason?: string
+  seeds?: number
+  nodes?: number
+  edges?: number
+  parents?: number
+  relationships?: AgentToolGraphRelationship[]
+}
+
 export type AgentRunEvent =
   | {
       type: 'run.started'
@@ -114,6 +155,10 @@ export type AgentRunEvent =
       data?: string
       input?: unknown
       sources?: AgentSource[]
+      /** Whether the result came from a cache (and which one). */
+      cache?: AgentToolCache
+      /** Knowledge-graph provenance (only on a Graph RAG knowledge search). */
+      graph?: AgentToolGraph
     }
   | {
       /** Human-in-the-loop: the run paused for the user's answer. */

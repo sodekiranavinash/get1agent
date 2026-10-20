@@ -21,6 +21,7 @@ type DemoAgentConfig = {
   output: { format: string; instructions: string }
   knowledgeBaseIds: string[]
   knowledgeRerank: boolean
+  knowledgeGraphRag: boolean
   skillIds: string[]
   servers: { id: string; name: string; source: string; tools: string[] | null }[]
   memory: { enabled: boolean }
@@ -46,6 +47,7 @@ const researchConfig: DemoAgentConfig = {
   output: { format: 'markdown', instructions: '' },
   knowledgeBaseIds: [IDS.kbProductDocs, IDS.kbResearchPapers],
   knowledgeRerank: true,
+  knowledgeGraphRag: true,
   skillIds: [IDS.skillSummarise, IDS.skillCite],
   servers: [
     { id: 'web-search', name: 'Web Search', source: 'builtin', tools: null },
@@ -71,6 +73,7 @@ const supportConfig: DemoAgentConfig = {
   output: { format: 'markdown', instructions: '' },
   knowledgeBaseIds: [IDS.kbSupportHandbook],
   knowledgeRerank: false,
+  knowledgeGraphRag: false,
   skillIds: [IDS.skillTriage],
   servers: [{ id: 'web-search', name: 'Web Search', source: 'builtin', tools: null }],
   memory: { enabled: false },
@@ -96,6 +99,7 @@ const contractConfig: DemoAgentConfig = {
   },
   knowledgeBaseIds: [IDS.kbProductDocs],
   knowledgeRerank: true,
+  knowledgeGraphRag: false,
   skillIds: [IDS.skillCite],
   servers: [{ id: 'http-fetch', name: 'HTTP Fetch', source: 'builtin', tools: null }],
   memory: { enabled: true },
@@ -117,6 +121,7 @@ const analystConfig: DemoAgentConfig = {
   output: { format: 'markdown', instructions: '' },
   knowledgeBaseIds: [IDS.kbResearchPapers],
   knowledgeRerank: false,
+  knowledgeGraphRag: false,
   skillIds: [IDS.skillSql, IDS.skillSummarise],
   servers: [{ id: 'code-interpreter', name: 'Code Interpreter', source: 'builtin', tools: null }],
   memory: { enabled: false },

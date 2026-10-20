@@ -17,6 +17,7 @@ const productDocs = {
   embeddingDim: 1024,
   chunkSize: 512,
   chunkOverlap: 64,
+  retrievalMode: 'hybrid',
   createdAt: daysAgo(88),
   updatedAt: hoursAgo(5),
 }
@@ -32,6 +33,7 @@ const supportHandbook = {
   embeddingDim: 1024,
   chunkSize: 384,
   chunkOverlap: 48,
+  retrievalMode: 'hybrid',
   createdAt: daysAgo(61),
   updatedAt: daysAgo(3),
 }
@@ -47,6 +49,7 @@ const researchPapers = {
   embeddingDim: 1024,
   chunkSize: 512,
   chunkOverlap: 64,
+  retrievalMode: 'graph',
   createdAt: daysAgo(34),
   updatedAt: daysAgo(9),
 }

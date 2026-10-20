@@ -6,5 +6,9 @@ requires-python = ">=3.14"
 dependencies = [
     "boto3>=1.43.31",
     "python-dateutil>=2.8.2",
+    # Optional infrastructure: the shared limiter/cache (core.ratelimit,
+    # core.cache) use Redis when REDIS_URL is configured and fall back to
+    # DynamoDB otherwise. Absent the extra, every path degrades safely.
+    "redis>=5.0",
     "tzdata>=2024.1",
 ]

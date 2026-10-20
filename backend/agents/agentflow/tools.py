@@ -218,6 +218,7 @@ def _knowledge_caller(
     gateway_url: str = "",
     session_id: str = "",
     gateway_tool_name: str = "",
+    graph: bool | None = None,
 ) -> Callable[[dict[str, Any]], str]:
     """Call a knowledge MCP tool scoped to the agent's attached KBs.
 
@@ -230,6 +231,11 @@ def _knowledge_caller(
         payload["knowledgeBaseNames"] = knowledge_names
         if tool_name == "search-user-knowledge-bases":
             payload["rerank"] = rerank
+            if graph is not None:
+                # An explicit request only ever *forces* graph-first; the
+                # knowledge base's own retrieval mode decides otherwise, so a
+                # graph base is never silently downgraded to hybrid.
+                payload["graph"] = bool(graph)
         if guard is not None:
             allowed, reason = guard(tool_name, payload)
             if not allowed:
@@ -352,6 +358,12 @@ def build_tools(
 
     if knowledge_names and config.knowledge_function:
         rerank = bool(agent_config.get("knowledgeRerank"))
+        # A Graph-mode knowledge base answers graph-first on its own: the mode
+        # decides. The agent/run toggle only *forces* it on, so an unset toggle is
+        # ``None`` ("let the knowledge base decide") rather than an explicit
+        # hybrid opt-out — otherwise every agent would silently downgrade a graph
+        # knowledge base to plain hybrid search.
+        graph = True if agent_config.get("knowledgeGraphRag") else None
         # Expose the knowledge server's real tools under their exact names
         # (``get-user-knowledge-bases`` + ``search-user-knowledge-bases``),
         # scoped to the agent's attached knowledge bases.
@@ -377,6 +389,7 @@ def build_tools(
                         gateway_url,
                         session_id,
                         _gateway_tool_name("knowledge", tool_name),
+                        graph,
                     ),
                     schema,
                 )

@@ -102,6 +102,7 @@ resource "aws_iam_role_policy" "sfn" {
           var.extract_function_arn,
           var.embed_function_arn,
           var.index_function_arn,
+          var.graph_function_arn,
           var.mark_failed_function_arn,
         ]
       },
@@ -143,6 +144,7 @@ resource "aws_sfn_state_machine" "this" {
     extract_function_arn     = var.extract_function_arn
     embed_function_arn       = var.embed_function_arn
     index_function_arn       = var.index_function_arn
+    graph_function_arn       = var.graph_function_arn
     mark_failed_function_arn = var.mark_failed_function_arn
   })
 

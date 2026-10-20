@@ -1,0 +1,14 @@
+[project]
+name = "get1agent-ingestion-graph-extract"
+version = "0.1.0"
+description = "Ingestion graph stage: LLM entity/relationship extraction for Graph RAG"
+requires-python = ">=3.14"
+dependencies = [
+    "boto3>=1.43.31",
+    "python-dateutil>=2.8.2",
+    # Optional infrastructure: the embedding cache and the Bedrock token bucket
+    # (core.cache / core.ratelimit_bedrock) use Redis when REDIS_URL is
+    # configured and fall back to DynamoDB otherwise.
+    "redis>=5.0",
+    "tzdata>=2024.1",
+]

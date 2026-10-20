@@ -22,6 +22,7 @@ import {
   type AgentSchedule,
 } from '../../lib/agents'
 import type { FlowStatus } from '../../lib/builderFlow'
+import type { KnowledgeBase } from '../../lib/knowledgeBases'
 import { useAgentBuilder } from './AgentBuilderContext'
 
 export type AgentFlowNode = Node<AgentNodeData>
@@ -92,7 +93,7 @@ const OUTPUT_FORMAT_LABELS: Record<string, string> = {
 }
 
 type Lookups = {
-  knowledgeBases: { id: string; name: string }[]
+  knowledgeBases: KnowledgeBase[]
   skills: { id: string; name: string }[]
 }
 
@@ -120,11 +121,19 @@ function cardSubtitle(data: AgentNodeData, { knowledgeBases, skills }: Lookups):
       return data.outputInstructions?.trim() ? `${format} · Custom instructions` : format
     }
     case 'knowledge': {
-      const names = (data.knowledgeBaseIds ?? []).map(
-        (id) => knowledgeBases.find((kb) => kb.id === id)?.name ?? id.slice(0, 8),
+      const attached = (data.knowledgeBaseIds ?? []).map((id) =>
+        knowledgeBases.find((kb) => kb.id === id),
       )
+      const names = attached.map((kb, index) => kb?.name ?? (data.knowledgeBaseIds ?? [])[index])
       const label = summarize(names, 'No knowledge bases attached')
-      return names.length > 0 && data.rerank ? `${label} · rerank` : label
+      // Retrieval is the knowledge base's own mode: a Graph RAG base is searched
+      // through its graph, so the card states it rather than offering a toggle.
+      const graphCount = attached.filter((kb) => kb?.retrievalMode === 'graph').length
+      const tags = [
+        names.length > 0 && data.rerank ? 'rerank' : null,
+        graphCount > 0 ? (graphCount === 1 ? 'graph' : `graph ×${graphCount}`) : null,
+      ].filter(Boolean)
+      return tags.length > 0 ? `${label} · ${tags.join(' · ')}` : label
     }
     case 'skills':
       return summarize(

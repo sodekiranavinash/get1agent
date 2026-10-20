@@ -17,6 +17,7 @@ locals {
   ingestion_extract_zip    = abspath("${path.module}/../../../../backend/services/ingestion/ingestion-extract/dist/function.zip")
   ingestion_embed_zip      = abspath("${path.module}/../../../../backend/services/ingestion/ingestion-embed/dist/function.zip")
   ingestion_index_zip      = abspath("${path.module}/../../../../backend/services/ingestion/ingestion-index/dist/function.zip")
+  ingestion_graph_zip      = abspath("${path.module}/../../../../backend/services/ingestion/ingestion-graph-extract/dist/function.zip")
   ingestion_fail_zip       = abspath("${path.module}/../../../../backend/services/ingestion/ingestion-mark-failed/dist/function.zip")
   ingestion_watchdog_zip   = abspath("${path.module}/../../../../backend/services/ingestion/ingestion-watchdog/dist/function.zip")
   agent_run_zip            = abspath("${path.module}/../../../../backend/services/agent-run/dist/function.zip")
@@ -59,6 +60,28 @@ locals {
     local.bedrock_embed_model_arns,
     local.bedrock_llm_model_arns,
   )
+
+  # Redis (optional): the SSM parameter ARNs the rate-limiting Lambdas may read,
+  # and the parameter name they resolve at runtime. Empty until a URL is supplied
+  # (TF_VAR_redis_url), so no IAM policy is created and every caller uses the
+  # DynamoDB fallback.
+  redis_ssm_parameter_arns = (
+    var.redis_url != "" ? [aws_ssm_parameter.redis_url[0].arn] : []
+  )
+  redis_ssm_param_name = var.redis_url != "" ? var.redis_url_ssm_param : ""
+}
+
+# The Redis URL is a secret, so it is a SecureString parameter read on first use
+# (not a Lambda environment variable). Created only when a URL is supplied.
+resource "aws_ssm_parameter" "redis_url" {
+  count = var.redis_url != "" ? 1 : 0
+
+  name        = var.redis_url_ssm_param
+  description = "Redis connection URL for the shared limiter/cache (g1a: namespace)"
+  type        = "SecureString"
+  value       = var.redis_url
+
+  tags = { Name = "get1agent-prod-redis-url" }
 }
 
 # --- AgentCore Gateway (phase A3) --------------------------------------------
@@ -191,11 +214,15 @@ resource "aws_bedrockagentcore_gateway" "agents" {
   }
 
   # Deterministic tool-call policy applies at the gateway as well as in-process.
+  # Policy is default-deny: an engine with no Cedar policies denies every call,
+  # so it is attached in LOG_ONLY until the permit set is authored. Flip to
+  # ENFORCE only once `aws_bedrockagentcore_policy` rules exist (otherwise every
+  # tool call returns "AuthorizeActionException - Tool Execution Denied").
   dynamic "policy_engine_configuration" {
     for_each = length(aws_bedrockagentcore_policy_engine.agents) > 0 ? [1] : []
     content {
       arn  = aws_bedrockagentcore_policy_engine.agents[0].policy_engine_arn
-      mode = "ENFORCE"
+      mode = "LOG_ONLY"
     }
   }
 }
@@ -683,6 +710,13 @@ locals {
   # The runtime always enforces the managed engine.
   agent_policy_engine_id = length(aws_bedrockagentcore_policy_engine.agents) > 0 ? aws_bedrockagentcore_policy_engine.agents[0].policy_engine_id : ""
   agentcore_memory_id    = length(aws_bedrockagentcore_memory.agents) > 0 ? aws_bedrockagentcore_memory.agents[0].id : ""
+  # Gateways reached over `MCP_TRANSPORT=gateway`. Every caller needs
+  # `bedrock-agentcore:InvokeGateway` on the gateway ARN itself (the Web Search
+  # connector lives on its own cross-Region gateway).
+  mcp_gateway_arns = compact([
+    length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_arn : "",
+    length(aws_bedrockagentcore_gateway.web_search) > 0 ? aws_bedrockagentcore_gateway.web_search[0].gateway_arn : "",
+  ])
 }
 
 # check "layer_base_zip_exists" {
@@ -871,6 +905,8 @@ module "user_api" {
   dynamodb_table_arns   = [module.database[0].table_arn]
   # Vault: encrypts each user's stored secrets with a dedicated KMS key.
   kms_key_arns = [module.vault_kms[0].key_arn]
+  # Redis (optional): read the URL SecureString from SSM on first use.
+  ssm_parameter_arns = local.redis_ssm_parameter_arns
   # Amazon Titan embeddings (KB creation) + Bedrock models for the Labs.
   bedrock_model_arns = local.bedrock_lab_model_arns
   # Guardrails page: the user creates/queries/tests their own Bedrock guardrails.
@@ -968,6 +1004,11 @@ module "user_api" {
     VAULT_KMS_KEY_ARN          = module.vault_kms[0].key_arn
     VAULT_TEST_TIMEOUT_SECONDS = "15"
     VAULT_ALLOW_PRIVATE_URLS   = "false"
+    # Rate limiting + caches: Redis GCRA when the URL is configured (read from
+    # SSM), DynamoDB when it is not. `auto` is the safe default — a dead Redis
+    # cannot become an open door.
+    REDIS_URL_SSM_PARAM = local.redis_ssm_param_name
+    RATELIMIT_BACKEND   = "auto"
   }
 
   depends_on = [
@@ -1018,6 +1059,9 @@ module "knowledge_mcp" {
   # Query embeddings (Titan) + opt-in Bedrock Rerank (cross-region).
   bedrock_model_arns  = local.bedrock_embed_model_arns
   bedrock_rerank_arns = local.bedrock_rerank_model_arns
+  # Redis (optional): the query/KB caches, the semantic cache and the Bedrock
+  # token bucket all read the URL SecureString from SSM on first use.
+  ssm_parameter_arns = local.redis_ssm_parameter_arns
 
   environment = {
     DYNAMODB_TABLE    = module.database[0].table_name
@@ -1035,20 +1079,40 @@ module "knowledge_mcp" {
     RERANK_MODE      = "bedrock"
     RERANK_REGION    = var.rerank_region
     RERANK_MODEL_ARN = "arn:aws:bedrock:${var.rerank_region}::foundation-model/${var.rerank_model}"
-    # Best-effort cache for query embeddings + search results (DynamoDB TTL).
-    CACHE_BACKEND               = "dynamodb"
+    # Best-effort cache for query embeddings + search results. `auto` is Redis
+    # when the URL is configured (read from SSM) and the DynamoDB TTL item
+    # otherwise, so a dead Redis degrades the cache but never breaks a search.
+    CACHE_BACKEND               = "auto"
     CACHE_SEARCH_TTL_SECONDS    = "300"
     CACHE_EMBEDDING_TTL_SECONDS = "2592000"
-    # Semantic cache: S3 Vectors ANN (per-user) + DynamoDB payload.
+    # Semantic cache: Redis RediSearch ANN (per-user, per-dimension) when it
+    # answers, the S3 Vectors store otherwise; the payload rides the cache
+    # backend above.
+    SEMANTIC_CACHE_BACKEND     = "auto"
     SEMANTIC_CACHE_ENABLED     = "true"
     SEMANTIC_CACHE_THRESHOLD   = "0.95"
     SEMANTIC_CACHE_TTL_SECONDS = "600"
     SEMANTIC_CACHE_MAX_BYTES   = tostring(var.semantic_cache_max_bytes)
-    # Per-user rate limits + single-flight locks.
-    # Single-flight locks (dedupe concurrent identical searches).
+    # Single-flight locks (dedupe concurrent identical searches) + the limiters.
+    REDIS_URL_SSM_PARAM        = local.redis_ssm_param_name
+    RATELIMIT_BACKEND          = "auto"
     SINGLE_FLIGHT_ENABLED      = "true"
     SINGLE_FLIGHT_LOCK_SECONDS = "20"
     SINGLE_FLIGHT_WAIT_SECONDS = "6"
+    # Graph RAG augmentation: additive to the hybrid legs and scoped to the
+    # knowledge bases created in Graph mode, so a hybrid-only search is
+    # byte-identical to before. The knobs bound the traversal's cost.
+    GRAPH_RETRIEVAL_ENABLED = "true"
+    GRAPH_HOPS              = "2"
+    GRAPH_SEED_TOP_K        = "12"
+    GRAPH_SEED_TOP_N        = "8"
+    GRAPH_MAX_NODES         = "60"
+    GRAPH_MAX_EDGES         = "120"
+    GRAPH_MAX_FANOUT        = "24"
+    GRAPH_DECAY             = "0.7"
+    GRAPH_WEIGHT            = "0.5"
+    GRAPH_MAX_RELATIONSHIPS = "40"
+    GRAPH_MAX_PARENTS       = "30"
   }
 
   depends_on = [
@@ -1093,6 +1157,10 @@ module "admin_console" {
     module.http_fetch[0].function_arn,
     module.storage[0].function_arn,
   ]
+
+  # `MCP_TRANSPORT=gateway` below: the console calls the tools through the main
+  # gateway, so its role needs InvokeGateway on that gateway ARN.
+  gateway_arns = length(aws_bedrockagentcore_gateway.agents) > 0 ? [aws_bedrockagentcore_gateway.agents[0].gateway_arn] : []
 
   # Admin → AI Assistant re-ingest starts the ingestion state machine directly. This
   # is the same state machine `ingestion-dispatcher` starts from its SQS event, so
@@ -1356,6 +1424,8 @@ module "custom_tools" {
   ]
   s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
   dynamodb_table_arns = [module.database[0].table_arn]
+  # Redis (optional): the per-user network-run limiter uses the shared limiter.
+  ssm_parameter_arns = local.redis_ssm_parameter_arns
 
   environment = {
     CUSTOM_TOOLS_MODE = "agentcore"
@@ -1379,6 +1449,9 @@ module "custom_tools" {
     CUSTOM_TOOLS_MAX_CODE_BYTES            = "65536"
     CUSTOM_TOOLS_MAX_OUTPUT_CHARS          = "50000"
     CUSTOM_TOOLS_MAX_RESULT_CHARS          = "20000"
+    # Rate limiting: Redis GCRA when configured (SSM), DynamoDB otherwise.
+    REDIS_URL_SSM_PARAM = local.redis_ssm_param_name
+    RATELIMIT_BACKEND   = "auto"
   }
 
   depends_on = [
@@ -1462,6 +1535,9 @@ module "ingestion_embed" {
 
   s3_bucket_arns      = [module.knowledge_storage[0].bucket_arn]
   dynamodb_table_arns = [module.database[0].table_arn]
+  # Redis (optional): the embedding cache and the Bedrock token bucket read the
+  # URL SecureString from SSM on first use.
+  ssm_parameter_arns = local.redis_ssm_parameter_arns
   # Titan embeddings are produced in this stage.
   bedrock_model_arns = local.bedrock_embed_model_arns
 
@@ -1475,9 +1551,12 @@ module "ingestion_embed" {
     EMBED_DIM         = "1024"
     EMBED_IMAGES      = "false"
     BEDROCK_REGION    = var.aws_region
-    # Best-effort embedding cache (DynamoDB TTL) so re-ingestion is cheap.
-    CACHE_BACKEND               = "dynamodb"
+    # Best-effort embedding cache (Redis when configured, else the DynamoDB TTL
+    # item) so re-ingestion is cheap. `auto` degrades safely on a dead Redis.
+    CACHE_BACKEND               = "auto"
     CACHE_EMBEDDING_TTL_SECONDS = "2592000"
+    REDIS_URL_SSM_PARAM         = local.redis_ssm_param_name
+    RATELIMIT_BACKEND           = "auto"
   }
 
   depends_on = [module.knowledge_storage, module.database]
@@ -1525,6 +1604,66 @@ module "ingestion_index" {
     # knowledge-mcp — the only module that imports core.semantic_cache /
     # core.singleflight — so they are configured there, not on the ingestion
     # workers (setting them here had no effect).
+  }
+
+  depends_on = [
+    module.knowledge_storage,
+    module.database,
+    module.vectors,
+  ]
+}
+
+module "ingestion_graph_extract" {
+  count  = var.enable_backend_lambdas && var.enable_ingestion ? 1 : 0
+  source = "../../modules/lambda_function"
+
+  name             = "get1agent-prod-ingestion-graph-extract"
+  tracing_mode     = var.enable_xray ? "Active" : "PassThrough"
+  filename         = local.ingestion_graph_zip
+  source_code_hash = try(filebase64sha256(local.ingestion_graph_zip), "")
+  handler          = "handler.lambda_handler"
+  runtime          = local.backend_python_runtime
+  layer_arns       = []
+
+  # Graph RAG's only optional stage: it reads chunks.json, calls a Bedrock model
+  # per batch of chunks and embeds the entities. Only Graph RAG knowledge bases
+  # reach it (the state machine gates it), so it is sized like the embed stage.
+  memory_size = 3008
+  timeout     = 900
+
+  s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
+  s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
+  dynamodb_table_arns   = [module.database[0].table_arn]
+  # The extraction model (Converse) and the entity embeddings (Titan).
+  bedrock_model_arns = concat(
+    local.bedrock_llm_model_arns,
+    local.bedrock_embed_model_arns,
+  )
+  # Redis (optional): the embedding cache and the Bedrock token bucket.
+  ssm_parameter_arns = local.redis_ssm_parameter_arns
+
+  environment = {
+    DYNAMODB_TABLE   = module.database[0].table_name
+    S3_BUCKET        = module.knowledge_storage[0].bucket_name
+    S3_REGION        = var.aws_region
+    VECTOR_STORE     = "s3vectors"
+    S3_VECTOR_BUCKET = module.vectors[0].vector_bucket_name
+    EMBED_MODE       = "bedrock"
+    TEXT_EMBED_MODEL = "amazon.titan-embed-text-v2:0"
+    EMBED_DIM        = "1024"
+    BEDROCK_REGION   = var.aws_region
+    # LLM entity/relationship extraction. The extractor also parses prompt-only
+    # JSON, so a model without structured outputs degrades rather than fails.
+    GRAPH_EXTRACT_ENABLED      = "true"
+    GRAPH_EXTRACT_MODEL        = "zai.glm-4.7-flash"
+    GRAPH_EXTRACT_BATCH_CHUNKS = "6"
+    GRAPH_EXTRACT_MAX_CHUNKS   = "400"
+    GRAPH_EXTRACT_MAX_TOKENS   = "16000"
+    # Best-effort embedding cache + Bedrock token bucket (see ingestion_embed).
+    CACHE_BACKEND               = "auto"
+    CACHE_EMBEDDING_TTL_SECONDS = "2592000"
+    REDIS_URL_SSM_PARAM         = local.redis_ssm_param_name
+    RATELIMIT_BACKEND           = "auto"
   }
 
   depends_on = [
@@ -1592,6 +1731,7 @@ module "ingestion" {
   extract_function_arn     = module.ingestion_extract[0].function_arn
   embed_function_arn       = module.ingestion_embed[0].function_arn
   index_function_arn       = module.ingestion_index[0].function_arn
+  graph_function_arn       = module.ingestion_graph_extract[0].function_arn
   mark_failed_function_arn = module.ingestion_mark_failed[0].function_arn
   watchdog_function_arn    = module.ingestion_watchdog[0].function_arn
 
@@ -1681,6 +1821,8 @@ module "ai_assistant" {
   dynamodb_table_arns   = [module.database[0].table_arn]
   s3_bucket_arns        = [module.knowledge_storage[0].bucket_arn]
   s3_vector_bucket_arns = [module.vectors[0].vector_bucket_arn]
+  # Redis (optional): the per-caller fairness limiter uses the shared limiter.
+  ssm_parameter_arns = local.redis_ssm_parameter_arns
   # AI Assistant needs BOTH model families, and getting this wrong fails silently
   # in one direction and hard in the other:
   #   * `bedrock_rerank_arns` — the query reranker (on by default);
@@ -1697,8 +1839,8 @@ module "ai_assistant" {
   bedrock_rerank_arns = local.bedrock_rerank_model_arns
 
   environment = {
-    DYNAMODB_TABLE             = module.database[0].table_name
-    S3_BUCKET                  = module.knowledge_storage[0].bucket_name
+    DYNAMODB_TABLE = module.database[0].table_name
+    S3_BUCKET      = module.knowledge_storage[0].bucket_name
     # The semantic leg is `retrieval.s3_vectors`, so it needs the vector bucket by
     # name, exactly as knowledge-mcp does. Without it `VectorStore()` raises
     # "S3_VECTOR_BUCKET is required for VECTOR_STORE=s3vectors" and the search
@@ -1717,6 +1859,9 @@ module "ai_assistant" {
     VECTOR_STORE               = "s3vectors"
     EMBED_MODE                 = "bedrock"
     CACHE_BACKEND              = "dynamodb"
+    # Per-caller fairness: Redis GCRA when configured (SSM), DynamoDB otherwise.
+    REDIS_URL_SSM_PARAM = local.redis_ssm_param_name
+    RATELIMIT_BACKEND   = "auto"
   }
 
   depends_on = [module.database, module.knowledge_storage, module.vectors]
@@ -1812,6 +1957,10 @@ module "agent_runtime" {
     module.mcp_connections[0].function_arn,
     module.custom_tools[0].function_arn,
   ]
+  # MCP_TRANSPORT=gateway below: every tool call is a signed request to the
+  # gateway, so the runtime role needs InvokeGateway on the main gateway and on
+  # the (cross-Region) Web Search gateway.
+  gateway_arns = local.mcp_gateway_arns
 
   jwt_discovery_url    = "https://${var.auth_domain}/.well-known/openid-configuration"
   jwt_allowed_audience = [var.auth_audience]
@@ -1893,6 +2042,7 @@ module "agent_runtime" {
     module.custom_tools,
     module.vault_kms,
     aws_bedrockagentcore_gateway.agents,
+    aws_bedrockagentcore_gateway.web_search,
   ]
 }
 

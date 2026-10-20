@@ -135,6 +135,31 @@ def test_search_tool(fake_storage, monkeypatch):
     assert body["error"] is None
 
 
+def test_search_reports_cache_provenance(fake_storage, monkeypatch):
+    _setup(fake_storage, monkeypatch)
+    args = {"query": "personal project resume", "knowledgeBaseNames": ["kmcp-kb"]}
+
+    first = _invoke(
+        "tools/call",
+        {"name": "search-user-knowledge-bases", "arguments": args},
+        request_id=4,
+    )
+    first_cache = json.loads(first["result"]["content"][0]["text"])["meta"]["cache"]
+    assert first_cache["hit"] is False
+
+    # A repeated identical search is served from the exact cache, and that must
+    # be visible on the result (the runtime lifts it onto the tool.result frame).
+    second = _invoke(
+        "tools/call",
+        {"name": "search-user-knowledge-bases", "arguments": args},
+        request_id=5,
+    )
+    second_cache = json.loads(second["result"]["content"][0]["text"])["meta"]["cache"]
+    assert second_cache["hit"] is True
+    assert second_cache["kind"] == "exact"
+    assert second_cache["backend"] in {"dynamodb", "redis"}
+
+
 def test_discovery_tool(fake_storage, monkeypatch):
     _setup(fake_storage, monkeypatch)
     response = _invoke(

@@ -11,6 +11,8 @@ import type {
   AgentPlanTodo,
   AgentRunEvent,
   AgentSkillRef,
+  AgentToolCache,
+  AgentToolGraph,
   AgentUsage,
   RunContext,
 } from './agentRun'
@@ -231,6 +233,8 @@ function finishTool(
   data: string | undefined,
   input?: string,
   sources?: ChatSource[],
+  cache?: AgentToolCache,
+  graph?: AgentToolGraph,
 ): ChatPlan | null {
   if (!plan || !toolId) return plan
   let found = false
@@ -239,7 +243,15 @@ function finishTool(
     found = true
     const tools = todo.tools.map((tool) =>
       tool.id === toolId
-        ? { ...tool, status, output: data || tool.output, input: input || tool.input, sources }
+        ? {
+            ...tool,
+            status,
+            output: data || tool.output,
+            input: input || tool.input,
+            sources,
+            cache: cache ?? tool.cache,
+            graph: graph ?? tool.graph,
+          }
         : tool,
     )
     // Keep the step active so further tool calls group under it; it is marked
@@ -383,11 +395,22 @@ function applyToolResult<T extends RunFields>(
             output: event.data || tool.output,
             input: formattedInput || tool.input,
             sources: incoming.length > 0 ? incoming : tool.sources,
+            cache: event.cache ?? tool.cache,
+            graph: event.graph ?? tool.graph,
           }
         : tool,
     ),
     sources: mergeSources(state.sources, incoming),
-    plan: finishTool(state.plan, targetId, status, event.data, formattedInput, incoming),
+    plan: finishTool(
+      state.plan,
+      targetId,
+      status,
+      event.data,
+      formattedInput,
+      incoming,
+      event.cache,
+      event.graph,
+    ),
   }
 }
 

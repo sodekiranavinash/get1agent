@@ -59,6 +59,7 @@ from data.repositories.events import emit_event
 from data.client import now_iso, table
 from retrieval.embedding.config import (
     SUPPORTED_IMAGE_EMBED_MODELS,
+    SUPPORTED_RETRIEVAL_MODES as RETRIEVAL_MODES,
     SUPPORTED_TEXT_EMBED_MODELS,
     load_config,
 )
@@ -120,12 +121,14 @@ from src.skills import (
 )
 from core import usage as core_usage
 from core import memory as core_memory
+from core import ratelimit
 from core.storage import Storage
 from data.repositories.users import (
     delete_identity,
     delete_user_data,
     get_or_create_user,
     get_user_by_id,
+    get_user_by_sub,
 )
 
 # --- limits / supported formats ---------------------------------------------
@@ -514,6 +517,7 @@ def _serialize_knowledge_base(kb: dict[str, Any], file_count: int) -> dict[str, 
         "embeddingDim": kb.get("embeddingDim"),
         "chunkSize": kb.get("chunkSize"),
         "chunkOverlap": kb.get("chunkOverlap"),
+        "retrievalMode": kb.get("retrievalMode") or "hybrid",
         "createdAt": kb.get("createdAt"),
         "updatedAt": kb.get("updatedAt"),
     }
@@ -685,6 +689,12 @@ def _handle_create(claims: dict[str, Any], body: dict[str, Any]) -> dict[str, An
     if chunk_overlap >= chunk_size:
         raise ApiError(400, "chunkOverlap must be smaller than chunkSize")
 
+    # Retrieval mode is fixed at creation: hybrid (vector + BM25) or graph
+    # (hybrid plus the knowledge graph built at ingest).
+    retrieval_mode = _validated_enum(
+        body.get("retrievalMode"), RETRIEVAL_MODES, "retrievalMode", "hybrid"
+    )
+
     kb_id = str(uuid.uuid4())
     try:
         kb = kb_repo.create_kb(
@@ -708,6 +718,7 @@ def _handle_create(claims: dict[str, Any], body: dict[str, Any]) -> dict[str, An
             embedding_dim=defaults.embedding_dim,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            retrieval_mode=retrieval_mode,
         )
     except DuplicateKnowledgeBase as exc:
         raise ApiError(409, f'A knowledge base named "{name}" already exists') from exc
@@ -2592,6 +2603,10 @@ def _validated_agent_config(value: Any) -> dict[str, Any]:
         "knowledgeBaseIds": _validated_id_list(value.get("knowledgeBaseIds"), "knowledgeBaseIds"),
         "knowledgeRerank": _validated_toggle(
             "knowledgeRerank", value.get("knowledgeRerank", False)
+        ),
+        # Graph RAG augmentation for this agent's knowledge searches.
+        "knowledgeGraphRag": _validated_toggle(
+            "knowledgeGraphRag", value.get("knowledgeGraphRag", False)
         ),
         "skillIds": _validated_id_list(value.get("skillIds"), "skillIds"),
         "servers": _validated_agent_servers(value.get("servers")),
@@ -6957,6 +6972,10 @@ def _route_user(
         if method == "GET":
             return _handle_network_usage(claims)
         raise ApiError(405, f"Method not allowed: {method}")
+    if rest == ["ratelimit"]:
+        if method == "GET":
+            return _handle_ratelimit_usage(claims)
+        raise ApiError(405, f"Method not allowed: {method}")
     raise ApiError(404, "Not found")
 
 
@@ -6975,12 +6994,38 @@ def _handle_network_usage(claims: dict[str, Any]) -> dict[str, Any]:
         {
             **policy,
             "usedInWindow": ratelimit.current(
-                user_id, kind="custom-tools", window_seconds=window
+                user_id,
+                kind="custom-tools",
+                window_seconds=window,
+                # The Redis (GCRA) backend derives the count from the remaining
+                # headroom, so it needs the limit; the DynamoDB fallback ignores it.
+                limit=int(policy.get("limitPerWindow") or 0),
             ),
             "runsAllTime": usage["runs"],
             "lastRunAt": usage["lastRunAt"],
         },
     )
+
+
+def _handle_ratelimit_usage(claims: dict[str, Any]) -> dict[str, Any]:
+    """This caller's rate limits, current usage and which store enforced them.
+
+    Read-only (never consumes a slot), so the Usage page can show live headroom
+    for the endpoints that spend real money: agent runs, evaluations, tool
+    generation, provider-key tests.
+    """
+    profile = get_or_create_user(claims)
+    user_id = profile["userId"]
+    snapshot = ratelimit.describe(user_id, scope="user")
+    return _json(
+        200,
+        {
+            **snapshot,
+            "redis": ratelimit.redis_health(),
+            "headers": "ratelimit-limit, ratelimit-remaining, ratelimit-reset, retry-after",
+        },
+    )
+
 
 
 def _route_conversations(
@@ -7324,13 +7369,100 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
     except AuthError as exc:
         return _json(exc.status, {"error": exc.message})
 
+    # Per-identity rate limiting runs after the view check and before any work,
+    # so a throttled caller never reaches DynamoDB or Bedrock. Reads are not
+    # limited (see core.ratelimit.policy); the API Gateway stage throttle is the
+    # volumetric first line.
+    decision = _enforce_ratelimit(claims, method, segments)
+    if decision is not None and not decision.allowed:
+        return _with_ratelimit_headers(
+            _json(
+                429,
+                {
+                    "error": "Rate limit exceeded. Try again shortly.",
+                    "code": "rate_limited",
+                    "policy": decision.policy,
+                    "window": decision.window,
+                    "limit": decision.limit,
+                    "retryAfterSeconds": decision.retry_after,
+                },
+            ),
+            decision,
+        )
+
     try:
-        return _route(claims, method, segments, _body(event), _query(event))
+        response = _route(claims, method, segments, _body(event), _query(event))
     except ApiError as exc:
-        return _json(exc.status, {"error": exc.message})
+        response = _json(exc.status, {"error": exc.message})
     except ValueError as exc:
-        return _json(400, {"error": str(exc)})
+        response = _json(400, {"error": str(exc)})
     except Exception as exc:  # noqa: BLE001
         print(f"user-api error: {exc!r}", file=sys.stderr)
         traceback.print_exc()
-        return _json(500, {"error": "Internal server error"})
+        response = _json(500, {"error": "Internal server error"})
+    return _with_ratelimit_headers(response, decision)
+
+
+# --- rate limiting ------------------------------------------------------------
+
+
+def _ratelimit_identity(claims: dict[str, Any]) -> str:
+    """The internal ``userId`` the limiter is enforced against.
+
+    Resolved with the cheap strongly-consistent ``SUB#<sub>`` lookup rather than
+    ``get_or_create_user``, which would write a profile/settings/quota on every
+    mutating request. A brand-new caller that has no identity binding yet falls
+    back to the Auth0 sub so the limit still holds.
+    """
+    sub = str(claims.get("sub") or "").strip()
+    if not sub:
+        return ""
+    try:
+        profile = get_user_by_sub(sub)
+    except Exception:  # noqa: BLE001 - a failed lookup must not break the request
+        return sub
+    return str((profile or {}).get("userId") or sub)
+
+
+def _enforce_ratelimit(
+    claims: dict[str, Any], method: str, segments: list[str]
+) -> "ratelimit.Decision | None":
+    """Consume one slot for this route, or return ``None`` when it is unlimited."""
+    if not ratelimit.enabled():
+        return None
+    policy_id = ratelimit.policy_id_for_route(method, segments)
+    if not policy_id:
+        return None
+    identity = _ratelimit_identity(claims)
+    if not identity:
+        return None
+    return ratelimit.check(identity, policy=policy_id, scope="user")
+
+
+def _with_ratelimit_headers(
+    response: Any, decision: "ratelimit.Decision | None"
+) -> Any:
+    """Attach the standard rate-limit headers to a Lambda proxy response."""
+    if decision is None or not isinstance(response, dict):
+        return response
+    headers = dict(response.get("headers") or {})
+    headers.update(_ratelimit_headers(decision))
+    response["headers"] = headers
+    return response
+
+
+def _ratelimit_headers(decision: "ratelimit.Decision") -> dict[str, str]:
+    if decision.backend == "none" or decision.limit <= 0:
+        return {}
+    headers = {
+        "ratelimit-limit": str(decision.limit),
+        "ratelimit-remaining": str(max(decision.remaining, 0)),
+        "ratelimit-policy": f"{decision.policy};w={decision.window or 'window'}",
+        "x-ratelimit-backend": decision.backend,
+    }
+    if decision.reset_after > 0:
+        headers["ratelimit-reset"] = str(decision.reset_after)
+    if not decision.allowed and decision.retry_after > 0:
+        headers["retry-after"] = str(decision.retry_after)
+    return headers
+

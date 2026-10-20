@@ -54,6 +54,54 @@ BEDROCK_EMBED_MODEL = os.environ.get("TEXT_EMBED_MODEL", "amazon.titan-embed-tex
 RERANK_MODE = os.environ.get("RERANK_MODE", "none").strip().lower()
 # Local cross-encoder reranker (TEI), mirrors Bedrock Rerank.
 RERANK_URL = os.environ.get("LOCAL_RERANK_URL", "http://reranker:80/rerank")
+# Redis (shared limiter + caches). Always present in the local stack; production
+# reads the URL from SSM instead. An empty URL disables Redis locally.
+REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0").strip()
+RATELIMIT_BACKEND = os.environ.get("RATELIMIT_BACKEND", "auto").strip() or "auto"
+
+
+def redis_env() -> dict[str, str]:
+    """The Redis environment for one Lambda (shared limiter + caches).
+
+    The local stack runs a real Redis, so the GCRA limiter and the Redis caches
+    are exercised the same way they are in production. An empty ``REDIS_URL``
+    leaves ``RATELIMIT_BACKEND`` at ``auto``, which falls back to DynamoDB.
+    """
+    env = {"RATELIMIT_BACKEND": RATELIMIT_BACKEND}
+    if REDIS_URL:
+        env["REDIS_URL"] = REDIS_URL
+    return env
+
+
+def cache_env() -> dict[str, str]:
+    """Best-effort exact + semantic cache env, plus the Redis connection.
+
+    Locally the stack runs the **full Redis Stack** image, so the exact cache
+    (Redis or the DynamoDB item) and the semantic cache (RediSearch vector index
+    or the S3 Vectors store) are exercised on the same paths production uses.
+    """
+    return {
+        **redis_env(),
+        "CACHE_BACKEND": os.environ.get("CACHE_BACKEND", "auto"),
+        "CACHE_SEARCH_TTL_SECONDS": os.environ.get("CACHE_SEARCH_TTL_SECONDS", "300"),
+        "CACHE_EMBEDDING_TTL_SECONDS": os.environ.get(
+            "CACHE_EMBEDDING_TTL_SECONDS", "2592000"
+        ),
+        "SEMANTIC_CACHE_BACKEND": os.environ.get("SEMANTIC_CACHE_BACKEND", "auto"),
+        "SEMANTIC_CACHE_ENABLED": os.environ.get("SEMANTIC_CACHE_ENABLED", "true"),
+        "SEMANTIC_CACHE_THRESHOLD": os.environ.get("SEMANTIC_CACHE_THRESHOLD", "0.95"),
+        "SEMANTIC_CACHE_TTL_SECONDS": os.environ.get(
+            "SEMANTIC_CACHE_TTL_SECONDS", "600"
+        ),
+        "SEMANTIC_CACHE_MAX_BYTES": os.environ.get("SEMANTIC_CACHE_MAX_BYTES", "200000"),
+        "SINGLE_FLIGHT_ENABLED": os.environ.get("SINGLE_FLIGHT_ENABLED", "true"),
+        "SINGLE_FLIGHT_LOCK_SECONDS": os.environ.get(
+            "SINGLE_FLIGHT_LOCK_SECONDS", "20"
+        ),
+        "SINGLE_FLIGHT_WAIT_SECONDS": os.environ.get(
+            "SINGLE_FLIGHT_WAIT_SECONDS", "6"
+        ),
+    }
 
 
 def embedding_env() -> dict[str, str]:
@@ -86,6 +134,7 @@ FUNCTIONS = {
     "extract": "get1agent-local-ingestion-extract",
     "embed": "get1agent-local-ingestion-embed",
     "index": "get1agent-local-ingestion-index",
+    "graph": "get1agent-local-ingestion-graph-extract",
     "mark_failed": "get1agent-local-ingestion-mark-failed",
     "watchdog": "get1agent-local-ingestion-watchdog",
     "dispatcher": "get1agent-local-ingestion-dispatcher",
@@ -107,6 +156,8 @@ ROUTES = {
         ("GET", "/v1/user/settings"),
         ("POST", "/v1/user/settings"),
         ("GET", "/v1/user/network"),
+        # Read-only rate-limit snapshot for the Usage page (never consumes a slot).
+        ("GET", "/v1/user/ratelimit"),
         # AI Assistant feedback. The browser cannot reach the agent service's own
         # `POST /feedback` (it would need the MicroVM ingress token), so a thumb
         # is recorded through the ordinary user API. AI Assistant's *turns* never
@@ -714,6 +765,7 @@ def render_asl() -> str:
         "${extract_function_arn}": function_arn(FUNCTIONS["extract"]),
         "${embed_function_arn}": function_arn(FUNCTIONS["embed"]),
         "${index_function_arn}": function_arn(FUNCTIONS["index"]),
+        "${graph_function_arn}": function_arn(FUNCTIONS["graph"]),
         "${mark_failed_function_arn}": function_arn(FUNCTIONS["mark_failed"]),
     }
     for needle, value in replacements.items():
@@ -875,6 +927,7 @@ def main() -> int:
         f"{ROOT}/backend/services/ingestion/ingestion-extract/dist/function.zip",
         f"{ROOT}/backend/services/ingestion/ingestion-embed/dist/function.zip",
         f"{ROOT}/backend/services/ingestion/ingestion-index/dist/function.zip",
+        f"{ROOT}/backend/services/ingestion/ingestion-graph-extract/dist/function.zip",
         f"{ROOT}/backend/services/ingestion/ingestion-mark-failed/dist/function.zip",
         f"{ROOT}/backend/services/ingestion/ingestion-watchdog/dist/function.zip",
     ]
@@ -912,24 +965,10 @@ def main() -> int:
         "S3_REGION": REGION,
         **embedding_env(),
         "VECTOR_STORE": "local",
-        # Best-effort cache for embeddings + search (DynamoDB TTL).
-        "CACHE_BACKEND": os.environ.get("CACHE_BACKEND", "dynamodb"),
-        "CACHE_SEARCH_TTL_SECONDS": os.environ.get("CACHE_SEARCH_TTL_SECONDS", "300"),
-        "CACHE_EMBEDDING_TTL_SECONDS": os.environ.get(
-            "CACHE_EMBEDDING_TTL_SECONDS", "2592000"
-        ),
-        # Semantic cache: S3 Vectors ANN (per-user) + DynamoDB payload.
-        "SEMANTIC_CACHE_ENABLED": os.environ.get("SEMANTIC_CACHE_ENABLED", "true"),
-        "SEMANTIC_CACHE_THRESHOLD": os.environ.get("SEMANTIC_CACHE_THRESHOLD", "0.95"),
-        "SEMANTIC_CACHE_TTL_SECONDS": os.environ.get("SEMANTIC_CACHE_TTL_SECONDS", "600"),
-        # Single-flight locks (DynamoDB conditional write) dedupe concurrent work.
-        "SINGLE_FLIGHT_ENABLED": os.environ.get("SINGLE_FLIGHT_ENABLED", "true"),
-        "SINGLE_FLIGHT_LOCK_SECONDS": os.environ.get(
-            "SINGLE_FLIGHT_LOCK_SECONDS", "20"
-        ),
-        "SINGLE_FLIGHT_WAIT_SECONDS": os.environ.get(
-            "SINGLE_FLIGHT_WAIT_SECONDS", "6"
-        ),
+        # Exact cache (Redis first, DynamoDB TTL fallback), semantic cache
+        # (Redis RediSearch vector index or the S3 Vectors store) and the
+        # single-flight locks that dedupe concurrent identical work.
+        **cache_env(),
         "AWS_REGION": REGION,
         "AWS_DEFAULT_REGION": REGION,
     }
@@ -961,6 +1000,36 @@ def main() -> int:
         layers=[],
         environment=worker_env,
         timeout=300,
+        memory=1024,
+    )
+    # Graph RAG extraction: LLM entities/relationships (Bedrock Converse) +
+    # entity embeddings. Reached only by knowledge bases created in graph mode.
+    ensure_function(
+        lm,
+        FUNCTIONS["graph"],
+        f"{ROOT}/backend/services/ingestion/ingestion-graph-extract/dist/function.zip",
+        handler="handler.lambda_handler",
+        layers=[],
+        environment={
+            **worker_env,
+            "GRAPH_EXTRACT_ENABLED": os.environ.get("GRAPH_EXTRACT_ENABLED", "true"),
+            "GRAPH_EXTRACT_MODEL": os.environ.get(
+                "GRAPH_EXTRACT_MODEL", "zai.glm-4.7-flash"
+            ),
+            "GRAPH_EXTRACT_BATCH_CHUNKS": os.environ.get(
+                "GRAPH_EXTRACT_BATCH_CHUNKS", "6"
+            ),
+            "GRAPH_EXTRACT_MAX_CHUNKS": os.environ.get(
+                "GRAPH_EXTRACT_MAX_CHUNKS", "400"
+            ),
+            "GRAPH_EXTRACT_MAX_TOKENS": os.environ.get(
+                "GRAPH_EXTRACT_MAX_TOKENS", "16000"
+            ),
+        },
+        # Matches the prod module: a whole document is extracted in one
+        # invocation (one Converse call per batch), so the default 300s is too
+        # tight once a document has more than a handful of chunks.
+        timeout=900,
         memory=1024,
     )
     ensure_function(
@@ -1021,6 +1090,7 @@ def main() -> int:
         # The **query** embedder: it has to match whatever wrote the corpus, so it
         # comes from the same helper the ingestion workers use.
         **embedding_env(),
+        **cache_env(),
         "TRACE_LINK_SECRET": os.environ.get("TRACE_LINK_SECRET", ""),
         # Evaluation lab: run agents server-side via service auth. Locally the
         # AgentCore runtime is not emulated, so agent-task runs are unavailable.
@@ -1135,6 +1205,16 @@ def main() -> int:
             "RERANK_MODE": RERANK_MODE,
             # Optional offline cross-encoder; used when RERANK_MODE=local.
             "LOCAL_RERANK_URL": RERANK_URL,
+            # Graph RAG augmentation (mirrors the deployed knobs).
+            "GRAPH_RETRIEVAL_ENABLED": os.environ.get("GRAPH_RETRIEVAL_ENABLED", "true"),
+            "GRAPH_HOPS": os.environ.get("GRAPH_HOPS", "2"),
+            "GRAPH_SEED_TOP_K": os.environ.get("GRAPH_SEED_TOP_K", "12"),
+            "GRAPH_SEED_TOP_N": os.environ.get("GRAPH_SEED_TOP_N", "8"),
+            "GRAPH_MAX_NODES": os.environ.get("GRAPH_MAX_NODES", "60"),
+            "GRAPH_MAX_EDGES": os.environ.get("GRAPH_MAX_EDGES", "120"),
+            "GRAPH_MAX_FANOUT": os.environ.get("GRAPH_MAX_FANOUT", "24"),
+            "GRAPH_DECAY": os.environ.get("GRAPH_DECAY", "0.7"),
+            "GRAPH_WEIGHT": os.environ.get("GRAPH_WEIGHT", "0.5"),
         },
         timeout=300,
         memory=1024,
@@ -1180,6 +1260,7 @@ def main() -> int:
             "CUSTOM_TOOLS_MAX_CODE_BYTES": "65536",
             "CUSTOM_TOOLS_MAX_OUTPUT_CHARS": "50000",
             "CUSTOM_TOOLS_MAX_RESULT_CHARS": "20000",
+            **redis_env(),
             "DYNAMODB_TABLE": DYNAMODB_TABLE,
             "DYNAMODB_ENDPOINT_URL": DYNAMODB_ENDPOINT_URL,
             "S3_BUCKET": BUCKET,

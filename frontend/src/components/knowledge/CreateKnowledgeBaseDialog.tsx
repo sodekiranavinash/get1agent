@@ -22,11 +22,13 @@ import {
   CHUNK_SIZE_POINTS,
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CHUNK_SIZE,
+  DEFAULT_RETRIEVAL_MODE,
   MAX_DESCRIPTION_LENGTH,
   MAX_FILES_PER_KB,
   MAX_FILE_BYTES,
   MAX_NAME_LENGTH,
   MAX_OVERLAP_RATIO,
+  RETRIEVAL_MODES,
   completeUpload,
   createInlineDocument,
   createKnowledgeBase,
@@ -40,6 +42,7 @@ import {
   validateFile,
   validateKnowledgeBaseName,
   type DocumentTag,
+  type RetrievalMode,
 } from '../../lib/knowledgeBases'
 
 type Tab = 'write' | 'upload'
@@ -167,6 +170,9 @@ export function CreateKnowledgeBaseDialog({
   const [chunkOverlap, setChunkOverlap] = useState<number>(
     DEFAULT_CHUNK_OVERLAP,
   )
+  const [retrievalMode, setRetrievalMode] = useState<RetrievalMode>(
+    DEFAULT_RETRIEVAL_MODE,
+  )
 
   const maxOverlap = Math.floor(chunkSize * MAX_OVERLAP_RATIO)
 
@@ -197,6 +203,7 @@ export function CreateKnowledgeBaseDialog({
     setTab(initialTab)
     setChunkSize(DEFAULT_CHUNK_SIZE)
     setChunkOverlap(DEFAULT_CHUNK_OVERLAP)
+    setRetrievalMode(DEFAULT_RETRIEVAL_MODE)
 
     const files = initialFiles ?? []
     if (files.length > 0) {
@@ -396,6 +403,7 @@ export function CreateKnowledgeBaseDialog({
           description: description.trim() || undefined,
           chunkSize,
           chunkOverlap,
+          retrievalMode,
         })
         targetKbId = created.id
         setKbId(created.id)
@@ -547,6 +555,54 @@ export function CreateKnowledgeBaseDialog({
               className="h-[3.75rem] w-full resize-none rounded-md border border-border bg-canvas px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-subtle focus:border-accent/50 disabled:opacity-60 scrollbar-thin"
             />
           </label>
+        </div>
+        ) : null}
+
+        {!addingToExisting && !kbId ? (
+        <div className="space-y-2">
+          <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted">
+            Retrieval mode
+          </span>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {RETRIEVAL_MODES.map((mode) => {
+              const active = retrievalMode === mode.value
+              return (
+                <button
+                  key={mode.value}
+                  type="button"
+                  onClick={() => setRetrievalMode(mode.value)}
+                  disabled={submitting}
+                  className={`rounded-lg border p-3 text-left transition-colors ${
+                    active
+                      ? 'border-accent/40 bg-accent-soft/50'
+                      : 'border-border bg-raised/30 hover:border-accent/25'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span
+                      className={`flex h-4 w-4 items-center justify-center rounded-full border ${
+                        active ? 'border-accent' : 'border-border-strong'
+                      }`}
+                    >
+                      {active ? (
+                        <span className="h-2 w-2 rounded-full bg-accent" />
+                      ) : null}
+                    </span>
+                    <span className="text-sm font-semibold text-foreground">
+                      {mode.label}
+                    </span>
+                  </span>
+                  <span className="mt-1.5 block text-[11px] leading-relaxed text-muted">
+                    {mode.description}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-[11px] text-subtle">
+            Fixed at creation — it decides whether ingest also builds a knowledge
+            graph.
+          </p>
         </div>
         ) : null}
 

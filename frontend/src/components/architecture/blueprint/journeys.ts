@@ -6,8 +6,10 @@ import {
   ClipboardCheck,
   Fingerprint,
   KeyRound,
+  Network,
   Plug,
   Search,
+  Share2,
   Sparkles,
   Workflow,
   type LucideIcon,
@@ -341,6 +343,67 @@ const RETRIEVAL: Journey = {
   ),
 }
 
+const GRAPH_INGESTION: Journey = {
+  id: 'graph-ingestion',
+  label: 'Graph RAG ingestion',
+  icon: Share2,
+  summary:
+    'A knowledge base created in Graph RAG mode pays one extra, gated stage after the hybrid index is ready. A Bedrock model reads each batch of chunks under a JSON schema, extracts typed entities and relationships, embeds each entity and merges the result into an S3-hosted graph — no external graph database. Hybrid-mode knowledge bases skip the stage entirely, and it is best-effort: a model hiccup is counted, never fatal, so the document keeps its hybrid index.',
+  spec: compose('graph-ingestion', [
+    stage('ready', 'Indexed', 'data', [{ kind: 'data', title: 'Document indexed', code: 'status = ready' }], 'vectors · postings written'),
+    stage('gate', 'Mode gate', 'async', [{ kind: 'edge', title: 'Retrieval mode', code: 'retrievalMode = graph' }], 'hybrid KBs skip the stage'),
+    stage(
+      'extract',
+      'Extract',
+      'ai',
+      [
+        { kind: 'lambda', title: 'Graph extract stage', code: 'ingestion-graph-extract', aws: 'lambda' },
+        { kind: 'ai', title: 'Entities + relationships', code: '1 Converse call / batch', aws: 'bedrock' },
+      ],
+      'JSON schema · typed triples',
+    ),
+    stage('embed', 'Entity vectors', 'ai', [{ kind: 'ai', title: 'Embed entities', code: 'name + description', aws: 'bedrock' }], 'Titan Text V2 · kind=entity'),
+    stage('store', 'Graph store', 'data', [{ kind: 'data', title: 'Knowledge graph', code: 'index/<userId>/graph/', aws: 's3' }], 'S3 JSON · delete-then-write'),
+  ]),
+}
+
+const GRAPH_RETRIEVAL: Journey = {
+  id: 'graph-retrieval',
+  label: 'Graph RAG retrieval',
+  icon: Network,
+  summary:
+    'Graph RAG is its own retrieval path, not an add-on: a Graph-mode knowledge base never runs the hybrid legs unless the graph has nothing. Seeds are found two ways — a vector search over entity embeddings and a lexical lookup of the query terms in the entity-name index — then a bounded BFS walks the graph, resolving every visited entity to the same parent passages hybrid would hydrate. The walked relationships ride along, so a result can show why it is relevant. When no entity or no linked passage matches, the hybrid legs answer the query and the payload says it fell back.',
+  spec: compose(
+    'graph-retrieval',
+    [
+      stage('client', 'Client', 'request', [{ kind: 'client', title: 'Query', code: 'retrievalMode = graph' }], 'Graph-mode KBs · automatic'),
+      stage(
+        'seed',
+        'Seed entities',
+        'ai',
+        [
+          { kind: 'vector', title: 'Entity vector search', code: 'paraphrase-tolerant' },
+          { kind: 'lambda', title: 'Entity-name lookup', code: 'precise · cheap', aws: 'lambda' },
+        ],
+        'top-K seeds',
+      ),
+      stage('walk', 'Traverse', 'ai', [{ kind: 'lambda', title: 'Bounded BFS', code: 'hop decay · caps', aws: 'lambda' }], 'node / edge / fan-out caps'),
+      stage('resolve', 'Resolve', 'data', [{ kind: 'data', title: 'Entities → parents', code: 'parentIds → content' }], 'same parents as hybrid'),
+      stage(
+        'fuse',
+        'Answer',
+        'ai',
+        [
+          { kind: 'lambda', title: 'Graph passages', code: 'no hybrid merge', aws: 'lambda' },
+          { kind: 'data', title: 'Relationships', code: 'subject · predicate · object' },
+        ],
+        'hybrid only as fallback',
+      ),
+    ],
+    [back('fuse', 'client', 'grounded answer · [n] · why', 'request')],
+  ),
+}
+
 /* -------------------------------------------------------------------------- */
 /* Identity                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -538,7 +601,12 @@ const METRICS: Journey = {
 export const REQUEST_JOURNEYS: Journey[] = [AGENT_RUN, WORKFLOW, SCHEDULED]
 export const RUNTIME_JOURNEYS: Journey[] = [AGENT_LIFECYCLE]
 export const AI_ASSISTANT_JOURNEYS: Journey[] = [AI_QUESTION, AI_CORPUS, AI_EVALUATION]
-export const KNOWLEDGE_JOURNEYS: Journey[] = [INGESTION, RETRIEVAL]
+export const KNOWLEDGE_JOURNEYS: Journey[] = [
+  INGESTION,
+  RETRIEVAL,
+  GRAPH_INGESTION,
+  GRAPH_RETRIEVAL,
+]
 export const IDENTITY_JOURNEYS: Journey[] = [SIGN_IN, MCP_OAUTH, SERVICE_M2M, DELEGATED_IDENTITY]
 export const OBSERVABILITY_JOURNEYS: Journey[] = [TRACING, ONLINE_EVALS, OFFLINE_EVALS, METRICS]
 

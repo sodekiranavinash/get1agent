@@ -73,10 +73,12 @@ shared modules it uses, **and all third-party dependencies** to the zip root and
 
 | Lambda | Key Dependencies |
 |---|---|
-| `user-api` | `python-dateutil`, `tzdata` |
-| `knowledge-mcp`, `code-interpreter`, `http-fetch`, `storage`, `mcp-connections`, `browser` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata` |
-| `custom-tools` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata`, `requests`, `beautifulsoup4` (the last two mirror the AgentCore sandbox so `CUSTOM_TOOLS_MODE=local` behaves like prod; `lxml` is intentionally omitted — its native wheel isn't portable, so tools parse HTML with `BeautifulSoup(..., "html.parser")`) |
+| `user-api` | `python-dateutil`, `tzdata`, `redis` |
+| `knowledge-mcp` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata`, `redis` (the exact cache, the semantic cache and the Bedrock token bucket all use Redis when `REDIS_URL` is set) |
+| `code-interpreter`, `http-fetch`, `storage`, `mcp-connections`, `browser` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata` |
+| `custom-tools` | `awslabs.mcp-lambda-handler`, `boto3`, `python-dateutil`, `tzdata`, `redis`, `requests`, `beautifulsoup4` (the last two mirror the AgentCore sandbox so `CUSTOM_TOOLS_MODE=local` behaves like prod; `lxml` is intentionally omitted — its native wheel isn't portable, so tools parse HTML with `BeautifulSoup(..., "html.parser")`) |
 | `ingestion-extract` | `pymupdf`, `python-docx`, `openpyxl`, `python-dateutil`, `tzdata` |
+| `ingestion-embed` | `python-dateutil`, `tzdata`, `redis` (embedding cache + Bedrock token bucket) |
 | `admin-console`, `scheduler` | `python-dateutil`, `tzdata` |
 | Other ingestion Lambdas | None (lightweight) |
 
@@ -119,6 +121,7 @@ chunks or postings in DynamoDB.
 | Conversation counter | `COUNTER#conversations` | `#SEQ` | — |
 | Platform settings | `PLATFORM#SETTINGS` | `#FLAGS` | — (admin flags incl. the network kill switch) |
 | Network rate window | `RATE#custom-tools#<userId>` | `W#<window>` | — (TTL; atomic per-window counter) |
+| Rate window (HTTP API) | `RATE#<policy>:<window>#<userId>` | `W#<window>` | — (TTL; DynamoDB fallback when Redis is down) |
 | Run feedback | `USER#<userId>` | `FEEDBACK#<runId>` | — |
 | MCP connection | `USER#<userId>` | `MCPCONN#<connId>` | — |
 | MCP OAuth state | `USER#<userId>` | `MCPSTATE#<state>` | — (TTL, single-use) |
@@ -133,7 +136,7 @@ chunks or postings in DynamoDB.
 | AI Assistant feedback | `USER#<userId>` | `AIFEEDBACK#<runId>` | — |
 | AI Assistant trace index | `USER#<userId>` | `AITRACE#<traceId>` | `byUser`; TTL 90d |
 | AI Assistant eval run | `USER#<userId>` | `AIEVAL#<runId>` | `byUser` |
-| AI Assistant guest rate window | `RATE#ai-assistant` | `W#<window>` | — (TTL; per-IP-hash counter) |
+| AI Assistant rate window | `RATE#ai-assistant:<kind>#<bucket>` | `W#<window>` | — (TTL; per-IP-hash or per-user counter; DynamoDB fallback) |
 | AI Assistant settings | `PLATFORM#SETTINGS` | `#AI_ASSISTANT` | — (kill switch, models, limits) |
 
 AI Assistant (the in-product assistant, `docs/design/ai-assistant-architecture.md`) owns the
@@ -218,12 +221,16 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   (`ingestion-docs` + DLQ) → `ingestion-dispatcher` (batch 5, partial batch
   failures) → **Step Functions Standard** (`ingest-{docId}-{eventToken}`) →
   `ingestion-extract` → `ingestion-embed` → `ingestion-index` (any stage failure
-  → `ingestion-mark-failed`). Each stage is its own Lambda.
-- **3 stages**: `ingestion-extract` downloads + parses + **chunks** (writes
-  `derived/` + `chunks.json`); `ingestion-embed` reads `chunks.json`, calls
-  Titan on Bedrock (or Ollama locally), writes `embeddings.json`; `ingestion-index` writes
-  vectors (S3 Vectors / local), parent objects, term postings, catalog, stats and
-  the manifest, then sets `documents.status=ready`.
+  → `ingestion-mark-failed`). Each stage is its own Lambda. A Graph RAG
+  knowledge base runs one more optional stage after Index — see "Graph RAG".
+- **3 stages** (+1 optional): `ingestion-extract` downloads + parses + **chunks**
+  (writes `derived/` + `chunks.json`); `ingestion-embed` reads `chunks.json`,
+  calls Titan on Bedrock (or Ollama locally), writes `embeddings.json`;
+  `ingestion-index` writes vectors (S3 Vectors / local), parent objects, term
+  postings, catalog, stats and the manifest, then sets `documents.status=ready`.
+  For a **Graph RAG** knowledge base, `ingestion-graph-extract` then LLM-extracts
+  the document's entities/relationships into the graph (state machine `Choice`,
+  best-effort).
 - The pipeline lives in the `ingestion` package
   (`backend/packages/ingestion/`, import `ingestion.*`); each
   `ingestion-*` Lambda is a thin handler that calls one stage action. Embedding
@@ -236,10 +243,11 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   bedrock-only. Image embeddings are **opt-in**
   (`EMBED_IMAGES=false` by default) because they are computed but not searched
   and Titan Multimodal is rate-limited to 20 RPM. Embedding calls are admitted
-  through `core.ratelimit_bedrock` (global per-model token bucket) before hitting
-  Bedrock.
-- Ingestion config (embedding model + chunk size/overlap) is **per knowledge
-  base**, set at creation (`knowledge_bases` columns); the page-level "Workspace
+  through `core.ratelimit_bedrock` (global per-model token bucket, Redis-backed
+  when available) before hitting Bedrock.
+- Ingestion config (embedding model + chunk size/overlap + **retrieval mode**) is
+  **per knowledge base**, set at creation (`knowledge_bases` columns; the UI
+  calls it Hybrid RAG vs Graph RAG); the page-level "Workspace
   defaults" card only pre-fills the create dialog.
 - `ingestion_events` (DynamoDB) is the append-only timeline the UI reads
   (`GET /v1/knowledge-bases/events`). The index stage updates `documents.status`
@@ -309,14 +317,125 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   a duplicate. Per-user limits: **30 knowledge bases, 50 files each, 100 MB
   storage** (`packages/data/.../repositories/quotas.py`).
 
+### Graph RAG (Hybrid vs Graph retrieval)
+
+Retrieval is **selectable per knowledge base**, and the two are **separate
+paths**: the create dialog offers **Hybrid RAG** (vector + BM25 fusion) or
+**Graph RAG** (a knowledge graph of the entities/relationships the documents
+state, searched graph-first). A Graph KB pays a one-off extraction cost at
+ingest; a hybrid search path is byte-identical to before, because graph
+retrieval only ever reads the Graph-mode KBs in scope. **Graph is not fused with
+hybrid** — it is its own retriever, and the hybrid legs answer only as its
+fallback (see "Graph-first retrieval").
+
+- **What the graph models.** Entities are typed nodes (`Person`, `Organization`,
+  `Location`, `Product`, `Technology`, `Concept`, `Method`, `Metric`, `Date`,
+  `Document`, `Other`) with a `name`, a one-line `description` and the
+  `chunkIds`/`parentIds` where they were seen (**`MENTIONED_IN` is implicit** —
+  no edges wasted on it). Relationships are **one generic edge per triple**
+  carrying a typed `type` predicate (`WORKS_AT`, `PARTNERS_WITH`, `PRODUCES`,
+  `DEPENDS_ON`, …), the **LightRAG/FalkorDB shape** rather than one graph
+  relationship per predicate. This is the vocabulary GraphRAG systems model: the
+  *relationships between the things* a corpus names, so a fact split across
+  pages (Alice → Acme, Acme → Beta) is reachable as one connected unit instead
+  of only by lexical/vector overlap.
+- **Storage — no external graph database.** The graph is plain S3 JSON under
+  `index/<userId>/graph/`: `nodes/<nodeId>.json`, `adj/<nodeId>.json` (both
+  directions + relationship facts), `enames/<token>.json` (entity-name inverted
+  index), `ecat/<c0>.json` (token catalog for prefix expansion),
+  `docs/<docId>.json` (what one document contributed, for idempotent delete) and
+  `stats.json`. Node ids are deterministic and **type-qualified**
+  (`e_<sha1(type:name)[:16]>`, so "Jordan" (Person) ≠ "Jordan" (Location)); edge
+  ids are `r_<sha1(from|REL|to)[:20]>`. Writes are read-modify-write with a
+  conditional `If-Match` PUT. Entity **vectors** live in the same per-user S3
+  Vectors index as the chunks but carry `kind="entity"` (and `status="entity"`),
+  so chunk search — which filters `status="ready"` — can never surface them.
+  Code: `backend/packages/retrieval/graph.py`.
+- **Ingest stage (gated).** `ingestion-graph-extract`
+  (`backend/packages/ingestion/graph.py`, `graph_extract_action`) reads the
+  staged `chunks.json`, batches chunks, and makes **one Bedrock Converse call per
+  batch** with a JSON Schema (structured outputs; prompt-only JSON on fallback)
+  to extract entities + relationships. It then embeds each entity
+  (`"<name> (<type>): <description>"`) and merges the document's contribution
+  into the graph (**delete-then-write**, so a re-index/retry is clean). It runs
+  **after Index** — `delete_document_index` now also clears a document's graph
+  contribution, so the graph stage must not run before it — and it is **the last
+  stage and best-effort**: the state machine's `GraphMode` `Choice` skips it for
+  hybrid KBs, a per-batch model failure is counted (`failedBatches`) not raised,
+  and any error records a `graph` event and leaves the document's hybrid index
+  intact. Env: `GRAPH_EXTRACT_MODEL`, `GRAPH_EXTRACT_BATCH_CHUNKS`,
+  `GRAPH_EXTRACT_MAX_CHUNKS`, `GRAPH_EXTRACT_MAX_TOKENS` (16000 — reasoning is
+  disabled for this call, and a batch that still truncates is split and retried).
+- **Graph-first retrieval** (`knowledge-mcp/src/search/graph.py` +
+  `src/search/service.py`). A Graph-mode KB is answered by the graph, **not** by
+  hybrid: `service.search` runs `search_graph` and **skips**
+  `search_candidates` entirely, so no embedding/BM25 leg is paid for. Seeds are
+  found two ways — a vector search over entity embeddings (paraphrase-tolerant)
+  and a lexical lookup of the query's tokens in the entity-name index (precise) —
+  then a bounded BFS traverses the graph (hop/score decay, node/edge/fan-out
+  caps). Every visited node resolves to the parent chunks it was seen in
+  (hydrated exactly as before), candidates carry
+  `rrfScore = GRAPH_WEIGHT × decayed seed score` and `source: "graph"` (hybrid
+  candidates carry `source: "hybrid"`), and the walked relationships
+  (`subject/predicate/object`) ride along on the payload as `relationships` so
+  the client can show *why* a passage is relevant.
+- **Mixed selections.** A request that spans Graph and Hybrid KBs runs **each KB
+  its own way** and **interleaves** the two ranked lists (round-robin, each list
+  keeping its own order) — the scores live on different scales, so concatenating
+  or score-sorting one list would bury the other. Nothing is fused across
+  strategies.
+- **Hybrid fallback.** When the graph has nothing (`GRAPH_RETRIEVAL_ENABLED` off,
+  no seed entity, or no node resolves to a passage) the hybrid legs answer the
+  query and the payload says so: `meta.graph.fallback = true` with a `reason`
+  (`graph disabled` | `no matching entities` | `no linked passages`).
+  `graph: false` on the call forces the hybrid path even on a Graph KB
+  (`reason: "graph not requested"`); the runtime omits the flag (letting the KB
+  mode decide) unless a run explicitly forces graph on, so an agent can never
+  silently downgrade a graph KB. The `graph` flag is part of the exact- and
+  semantic-cache keys. Env:
+  `GRAPH_RETRIEVAL_ENABLED`, `GRAPH_HOPS`, `GRAPH_SEED_TOP_K`,
+  `GRAPH_SEED_TOP_N`, `GRAPH_MAX_NODES`, `GRAPH_MAX_EDGES`, `GRAPH_MAX_FANOUT`,
+  `GRAPH_DECAY`, `GRAPH_WEIGHT`, `GRAPH_MAX_RELATIONSHIPS`, `GRAPH_MAX_PARENTS`.
+- **Surfaces.** A KB stores `retrievalMode` (`hybrid` | `graph`, fixed at
+  creation) and returns it on list/detail; the ingestion Activity panel shows a
+  **Graph** stage (entities · relationships) only for documents that ran one. The
+  mode is the whole switch: the agent builder's knowledge card labels a Graph KB
+  (`graph`) and explains that it is searched through its graph, and the chat's
+  **Run settings** dialog names the selected Graph KBs — there is **no per-agent
+  or per-run toggle** anymore (`config.knowledgeGraphRag` /
+  `RunResourceOverrides.knowledgeGraphRag` are legacy: a `true` forces graph on,
+  an absent/false value follows the KB). The run timeline shows the graph
+  provenance from `tool.result.graph` — strategy, seed/node/passage counts, and
+  the walked `subject → predicate → object` paths (capped at 12) — so a graph
+  answer never looks like a plain hybrid hit. Frontend types live in
+  `frontend/src/lib/knowledgeBases.ts` (`RETRIEVAL_MODES`),
+  `frontend/src/lib/agents.ts`, `frontend/src/lib/agentRun.ts`
+  (`AgentToolGraph`) and `frontend/src/lib/runState.ts`.
+- **Local.** `ingestion-graph-extract` is provisioned by Floci like the other
+  workers (real Bedrock Converse + Titan via the forwarded credentials); the
+  local vector store is used for entity vectors and `RERANK_MODE=none`.
+  Integration coverage: `backend/services/integration-tests/test_graph_rag.py`
+  (store, traversal, extraction, the gated stage, and graph-first search with the
+  hybrid fallback and the explicit `graph: false` opt-out).
+
 ### Caching (embeddings + knowledge search)
 
-- A best-effort cache lives in **`core.cache`**
-  (`backend/packages/core/cache.py`). Default backend **`dynamodb`**: one item
-  per entry in the shared table (`pk=CACHE#<prefix><kind>`, `sk=<sha256>`, TTL
-  `expiresAt`), read with `BatchGetItem` and written with a `batch_writer`.
-  `CACHE_BACKEND=none` disables it. Every call is a no-op when unavailable and
-  all operations swallow errors, so the cache can never break a request. Keys are
+All three caches are **Redis-first on the normal request path**: the same Redis
+instance (`core.redis_client`) backs the exact cache, the semantic cache and the
+limiter, so one dependency covers all of them. Every backend is chosen by an
+`auto` value that means "Redis when it answers, the managed AWS store
+otherwise", and every cache operation swallows errors — a cache can never break
+a request.
+
+- The exact cache lives in **`core.cache`** (`backend/packages/core/cache.py`).
+  Backend `CACHE_BACKEND` (default **`auto`**):
+  - `auto` — **Redis** when it answers, the DynamoDB TTL item otherwise. A Redis
+    miss is a miss; the DynamoDB store is consulted only when Redis is
+    unavailable (so there is no per-key DynamoDB read on the hot path).
+  - `redis` / `dynamodb` / `none` pin one backend (or disable it).
+  Items are `pk=CACHE#<prefix><kind>`, `sk=<sha256>`, TTL `expiresAt` in
+  DynamoDB; in Redis they are a plain `SET … EX` (batched with `MGET`/pipelines).
+  Every call is a no-op when unavailable. Keys are
   `g1a:<kind>:<sha256(parts)>`; per-kind TTLs come from
   `CACHE_<KIND>_TTL_SECONDS` (`CACHE_SEARCH_TTL_SECONDS` 300,
   `CACHE_EMBEDDING_TTL_SECONDS` 2592000).
@@ -328,31 +447,120 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
     `(userId, query, kbNames, tags, rerank, topK, maxPerDocument)` so a repeated
     question skips embed + search + rerank (per-user scope; short TTL).
   - **Semantic cache** (`core.semantic_cache`): a near-duplicate query reuses the
-    cached search payload. It uses the platform **S3 Vectors** store (one index
-    per user — the same store as the knowledge index) as the ANN index; entries
-    carry `kind="semcache"` so they never surface in knowledge search, and the
-    payload lives in a DynamoDB TTL cache item referenced by the vector key. A hit
-    requires cosine score ≥ `SEMANTIC_CACHE_THRESHOLD` (0.95), a non-expired
-    entry, and the same knowledge-base set. Flow in `knowledge-mcp._search`:
-    exact cache → embed → semantic lookup → real search → store exact + semantic.
-    Env: `SEMANTIC_CACHE_ENABLED`, `SEMANTIC_CACHE_THRESHOLD`,
-    `SEMANTIC_CACHE_TTL_SECONDS` (600), `SEMANTIC_CACHE_MAX_BYTES` (200000).
-    Stale vectors are ignored via `expiresAt`.
-- **Single-flight** (`core.singleflight`, reuses the configured cache backend — a
-  DynamoDB conditional `PutItem` in production — and fails open): the knowledge
-  search path is wrapped in a lock so N concurrent identical requests compute
-  once and the rest wait for the cached result. This
-  is cost deduplication — **not** rate limiting (rate limiting lives at the API
-  Gateway). Env: `SINGLE_FLIGHT_ENABLED` (default true),
+    cached search payload. Backend `SEMANTIC_CACHE_BACKEND` (default **`auto`**):
+    - `auto` — **Redis** when it answers, the platform **S3 Vectors** store
+      otherwise; `redis` / `s3vectors` / `none` pin one.
+    - **Redis path** (`core.semantic_cache_redis`): one **RediSearch** index per
+      user per embedding dimension (`FT.CREATE`/`FT.SEARCH`, a `FLOAT32` vector
+      field with `DISTANCE_METRIC COSINE` plus a `kbTag` TAG) holding the cached
+      queries' embeddings — an in-memory ANN, far faster than the S3 Vectors
+      round trip. It uses the raw `FT.*` commands, **not** `redisvl` (keeps numpy
+      and its tree out of the Lambda zip). `kbTag` is a hash of the requirement
+      set, so the TAG query never needs escaping. The returned score is cosine
+      **distance**, so similarity = `1 − distance` and the same threshold
+      applies.
+    - **S3 Vectors path**: one index per user (the same store as the knowledge
+      index); entries carry `kind="semcache"` so they never surface in knowledge
+      search, and the payload lives in a cache TTL item referenced by the vector
+      key. Stale vectors are ignored via `expiresAt`.
+    - A hit requires similarity ≥ `SEMANTIC_CACHE_THRESHOLD` (0.95 — near
+      identical only, measured: identical ≈1.0, close paraphrase ≈0.76) and the
+      same knowledge-base set. Flow in `knowledge-mcp._search`: exact cache →
+      embed → semantic lookup → real search → store exact + semantic.
+      Env: `SEMANTIC_CACHE_ENABLED`, `SEMANTIC_CACHE_BACKEND`,
+      `SEMANTIC_CACHE_THRESHOLD`, `SEMANTIC_CACHE_TTL_SECONDS` (600),
+      `SEMANTIC_CACHE_MAX_BYTES` (200000).
+- **Cache hits are visible.** `knowledge-mcp` stamps `meta.cache`
+  (`{hit, kind, backend, similarity?}`) on every search result — `kind` is
+  `exact` / `semantic` / `none` and `backend` is the store that answered
+  (`redis` / `dynamodb` / `s3vectors`). The agent runtime lifts it onto the
+  `tool.result` frame (`cache`) so the run timeline shows a **cache badge on the
+  tool call** (e.g. "redis", with a match % for a semantic hit), and emits a
+  CloudWatch EMF metric (`get1agent/cache`, `CacheHit`) so hit rate is visible
+  without reading a transcript.
+- **Single-flight** (`core.singleflight`, reuses the configured cache backend —
+  a Redis `SET NX EX` lock in production, a DynamoDB conditional `PutItem`
+  otherwise — and fails open): the knowledge search path is wrapped in a lock so
+  N concurrent identical requests compute once and the rest wait for the cached
+  result. This
+  is cost deduplication — **not** rate limiting (see "Rate limiting (Redis GCRA
+  + DynamoDB fallback)" below). Env: `SINGLE_FLIGHT_ENABLED` (default true),
   `SINGLE_FLIGHT_LOCK_SECONDS` (20), `SINGLE_FLIGHT_WAIT_SECONDS` (6).
 - **API Gateway throttling** (coarse, common to all clients): the HTTP API has a
   stage-level default (`stage_throttle_burst_limit` / `stage_throttle_rate_limit`,
   defaults 100 / 50) plus per-route overrides on the heavy MCP routes and
   `/v1/agent-run/session` (`throttle_burst_limit` / `throttle_rate_limit` in
   `lambda_routes`). This is volumetric protection **before** Lambda; per-user
-  fairness is `core.ratelimit`.
+  fairness is `core.ratelimit` (Redis GCRA, DynamoDB fallback) — see "Rate
+  limiting (Redis GCRA + DynamoDB fallback)".
 - **Not cached:** the Playground, Evaluations/judges, and anything with tool
   calls or side effects — Labs must show fresh, uncached output.
+
+### Rate limiting (Redis GCRA + DynamoDB fallback)
+
+Per-identity request limiting lives in **`core.ratelimit`** — a package whose
+parts are one concern each: `policy.py` (the shapes and the route map), `gcra.py`
+(the Redis primitive), `fixed.py` (the DynamoDB fallback) and `__init__.py` (the
+public API: `check`, `check_windows`, `allow`, `current`, `describe`). It is one
+implementation for the three surfaces that need it — the HTTP API, AI Assistant
+and the custom-tool sandbox — so an identity can never be judged differently by
+each.
+
+- **Primitive: GCRA** (a leaky-bucket-with-tolerance, i.e. one timestamp per
+  identity + window) running as an atomic **Lua** script in **Redis**. One
+  round-trip consumes every window of a policy at once, so a refusal is exact: a
+  caller stopped by the day cap is not also charged against the hour cap. Reads
+  (`describe` / `current`) use a second Lua script (`PEEK`) that never consumes a
+  slot. Key layout: `g1a:rl:{<identity>}:<policy>:<window>`.
+- **Backend `RATELIMIT_BACKEND`** (default **`auto`**): Redis when it answers, the
+  DynamoDB fixed-window counter (`fixed.py`) otherwise — a dead cache degrades the
+  limiter, it can never become an open door. `redis` fails **open** when
+  unreachable (a single-backend deployment must not block traffic on an optional
+  dependency), `dynamodb` is the original behaviour, `none` disables it. Every
+  call returns a decision rather than raising; the limiter can never take a
+  request down with it.
+- **The Bedrock token bucket shares the same backend.** `core.ratelimit_bedrock`
+  (which admits every model/embedding call) is Redis-first too
+  (`BEDROCK_RATELIMIT_BACKEND`, defaulting to `RATELIMIT_BACKEND`): it consumes a
+  **1-second** Redis GCRA window (`g1a:rl:{model:<id>}:bedrock:second`) so a
+  throttle reports a sub-second `wait`, and falls back to the DynamoDB
+  per-model counter. Per-model RPMs come from `BEDROCK_RATELIMIT_<MODEL>_RPM` /
+  `BEDROCK_RATELIMIT_<MODEL>_PER_WINDOW`.
+- **Redis URL** is a **SSM Parameter Store SecureString** (`REDIS_URL_SSM_PARAM`),
+  fetched once per container and cached. The client (`core.redis_client`) is lazy,
+  uses sub-second timeouts, a couple of pooled connections and a circuit breaker,
+  and returns `None` on any failure so a Redis problem adds no request latency
+  (`health()` reports it).
+- **Policies** (`policy.py:DEFAULTS`) are per surface, not one flat number: each
+  is an ordered list of windows (shortest first). E.g. `agent.session` 10/min +
+  120/hour, `evals.run` 10/hour + 50/day, `knowledge.write` 300/hour + 2000/day,
+  `api.default` 600/min + 10 000/hour. `ROUTE_RULES` maps `(method, path)` to a
+  policy; **only mutating verbs are limited** (`SAFE_METHODS` = GET/HEAD/OPTIONS),
+  because the limiter bounds work that *spends* (a model call, an upload, a
+  sandbox run) and leaving reads out keeps the Redis op count low on a small
+  instance. `v1/traces` and `v1/ai-assistant` are exempt. Any policy is
+  overridable at runtime with the `RATELIMIT_POLICY` JSON object
+  (`{"evals.run": [[10, 3600]], "api.default": []}` — an empty list means no
+  cap); `RATELIMIT_<KIND>_PER_WINDOW` sets one window's limit.
+- **The HTTP API** enforces it in the `user-api` `lambda_handler` middleware
+  (`_enforce_ratelimit`): the identity is the internal `userId`, the policy comes
+  from the route, and every limited response carries
+  `X-RateLimit-Limit/Remaining/Reset` + `Retry-After`; a denial is a `429` with a
+  JSON body naming the window. `GET /v1/user/ratelimit` returns the caller's
+  snapshot (`ratelimit.describe`, read-only) for the **Usage** page's Rate limits
+  card (backend in force + per-policy window progress).
+- **AI Assistant** shares the limiter under policy `ai-assistant` (windows
+  `ai-assistant-burst` 3 min / `-hour` / `-day`) — see its own section.
+- **The API Gateway stage/route throttle stays the volumetric shield in front of
+  Lambda** (see "API Gateway throttling" above); Redis enforcement is the
+  per-identity layer **inside** Lambda, where the JWT's `userId` is known. A
+  gateway-level limiter was rejected: an authorizer cannot return a `429` or rate
+  headers, and it cannot cover the agent-run MicroVM path (below). That path
+  bypasses API Gateway after the control-plane call, so it is bounded by the
+  `agent.session` policy on `POST /v1/agent-run/session` and by AgentCore's own
+  run budget.
+- **Local:** `RATELIMIT_BACKEND=dynamodb` needs nothing extra; `auto`/`redis` use
+  the `redis` compose service (see "Local development").
 
 ### Code interpreter tool
 
@@ -529,8 +737,9 @@ Uploads flow: browser PUTs to S3 via a presigned URL, then calls
   outbound connections per run**; **~90 s per real tool call**
   (`CUSTOM_TOOLS_EXEC_TIMEOUT_SECONDS`) and **180 s while testing**
   (`CUSTOM_TOOLS_TEST_EXEC_TIMEOUT_SECONDS`); a per-user **rate limit of 60
-  network-enabled runs/hour** (`CUSTOM_TOOLS_RUNS_PER_HOUR`, enforced with an
-  atomic `core.ratelimit` counter); heavy ML frameworks are blocked by the guard
+  network-enabled runs/hour** (`CUSTOM_TOOLS_RUNS_PER_HOUR`, enforced through
+  `core.ratelimit` — Redis GCRA when configured, the DynamoDB counter
+  otherwise); heavy ML frameworks are blocked by the guard
   (process spawning and dynamic code are permitted). The custom-tools Lambda
   timeout is 300 s to fit the test budget.
 - **Admin kill switch + usage.** `networkToolsEnabled` on the platform settings
@@ -845,10 +1054,13 @@ docs** — it has its own space on purpose.
   trace list or the agent feedback table. Transcripts and trace trees are S3
   objects; only small metadata items are in DynamoDB. Guests are never persisted.
 - **Rate limiting is layered**, cheapest first: API Gateway route throttles
-  (`/v1/ai-assistant/guest` burst 4/rate 2, `/v1/ai-assistant/ask` 20/10), then a per-caller
-  fixed-window counter (`core.ratelimit`, kinds `ai-assistant-burst` (3 min) /
-  `ai-assistant-hour` / `ai-assistant-day`), then the
-  in-agent turn cap and the 24 s soft turn budget. Every model call also passes
+  (`/v1/ai-assistant/guest` burst 4/rate 2, `/v1/ai-assistant/ask` 20/10), then the
+  shared per-caller limiter (`core.ratelimit` — Redis GCRA when configured, the
+  DynamoDB counter otherwise) under policy `ai-assistant` with kinds
+  `ai-assistant-burst` (3 min) / `ai-assistant-hour` / `ai-assistant-day`, then the
+  in-agent turn cap and the 24 s soft turn budget. All three windows are consumed
+  in one atomic step, so a caller stopped by the day cap is not also charged
+  against the hour cap. Every model call also passes
   `core.ratelimit_bedrock`. The burst window is the one a real visitor meets, and
   it is deliberately short so a refusal reads "try again in a couple of minutes":
   a guest gets **10 per 3 minutes** (defaults `guestPerBurst`), then 60/hour and
@@ -1096,7 +1308,10 @@ docs** — it has its own space on purpose.
   result's sources are tagged with a **run-global `index`** (`tools.py`
   `_number_sources`), the system prompt tells the model to cite them inline as
   `[n]`, and the UI shows the same number in the sources panel (clicking a
-  citation scrolls to its source). The model builds
+  citation scrolls to its source). A `tool.result` also carries `cache` when the
+  payload reports it (`knowledge-mcp` stamps `meta.cache`): `{hit, kind, backend,
+  similarity?}`, which the run timeline renders as a cache badge on the tool row
+  (see "Caching (embeddings + knowledge search)"). The model builds
   a tool's input incrementally, so the runtime emits `tool.start` once per
   `toolUseId` and then `tool.input` snapshots as the arguments stream. The SPA
   consumes them with `frontend/src/lib/agentRun.ts`; the shared reducer
@@ -1941,6 +2156,11 @@ The ingestion timeline refreshes through `useAdaptivePoll`
 
 - Polling only runs while the **Activity panel is open** and something is
   active (`pending`/`uploaded`/`processing`). A closed panel makes zero requests.
+  For a Graph RAG KB the **graph** stage runs *after* the document is `ready`
+  (Index sets the status), so `graphStagesInFlight()`
+  (`frontend/src/lib/knowledgeBases.ts`) also counts an unresolved graph stage —
+  and the short Index → Graph window — as active; document status alone would
+  stop polling before the stage finishes and freeze the card on "Extracting…".
 - Backoff 2s → 15s, reset when a new event arrives; paused while the tab is hidden.
 - Stops after 10 minutes of active polling and shows a manual **Refresh**.
 - Tune it in exactly one spot: the `useAdaptivePoll` call in
@@ -2013,6 +2233,21 @@ make floci-down       # stop and remove (named volumes are kept)
   endpoints for the compose network (`DYNAMODB_ENDPOINT_URL=http://dynamodb:8000`,
   `AWS_ENDPOINT_URL=http://floci:4566`). After agent-side changes:
   `make floci-reload` (rebuilds the image + re-provisions Floci in place).
+- **Rate limiting & Redis.** The stack ships a `redis` compose service — the
+  **full Redis Stack** image (`redis/redis-stack-server`, so `FT.*`/RediSearch is
+  present for the semantic cache, matching a Redis Cloud instance with the search
+  module) with persistence off and an LRU policy sized to mirror the managed
+  instance's shape. `redis-server` flags come from the image's `REDIS_ARGS` env
+  (a compose `command:` would replace `/entrypoint.sh` and drop the modules). The
+  Lambdas run with `RATELIMIT_BACKEND=auto`, `CACHE_BACKEND=auto`,
+  `SEMANTIC_CACHE_BACKEND=auto` and `REDIS_URL=redis://redis:6379/0`, so the
+  limiter (GCRA), the exact cache, the semantic cache and the Bedrock token
+  bucket all run on Redis and fall back to DynamoDB / S3 Vectors if it is
+  unreachable. `make floci`/`floci-up` starts and provisions it alongside the
+  rest; set `RATELIMIT_BACKEND=dynamodb` (or `CACHE_BACKEND=dynamodb`,
+  `SEMANTIC_CACHE_BACKEND=s3vectors`) in the root `.env` to exercise the fallback
+  without Redis. Production gets the URL from the SSM SecureString
+  (`REDIS_URL_SSM_PARAM`), not from the compose env.
 - `infra/local/floci/init/ready.d/10-provision.py` mirrors Terraform: DynamoDB
   table + GSIs, bucket + EventBridge notification (`raw/` prefix) → rule → SQS +
   DLQ → dispatcher → state machine → workers, plus the HTTP API + JWT authorizer

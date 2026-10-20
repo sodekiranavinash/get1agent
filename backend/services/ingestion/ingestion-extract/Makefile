@@ -1,6 +1,19 @@
 PACKAGES=core data retrieval ingestion
 PKG_ROOT=../../../packages
 
+# Native wheels (pymupdf, lxml) must match the Linux Lambda runtime. On macOS
+# `uv sync` installs Mach-O binaries that fail inside the Linux container with
+# "invalid ELF header", so install manylinux wheels for the Docker host instead.
+# CI runs on Linux, where the plain `uv sync` path is used unchanged.
+DEP_PLATFORM :=
+ifeq ($(shell uname -s),Darwin)
+  ifeq ($(shell uname -m),arm64)
+    DEP_PLATFORM := aarch64-manylinux_2_28
+  else
+    DEP_PLATFORM := x86_64-manylinux_2_28
+  endif
+endif
+
 package:
 	rm -rf dist
 	mkdir -p dist
@@ -9,8 +22,14 @@ package:
 	for p in $(PACKAGES); do cp -R "$(PKG_ROOT)/$$p" "dist/$$p"; done
 	# Install Python dependencies into site-packages
 	if [ -f pyproject.toml ]; then \
-		uv sync --project . --no-dev --quiet; \
-		cp -R .venv/lib/python3.14/site-packages/* dist/ 2>/dev/null || true; \
+		if [ -n "$(DEP_PLATFORM)" ]; then \
+			uv export --project . --no-dev --format requirements-txt --no-hashes --no-emit-project -o .requirements.txt --quiet; \
+			uv pip install --target dist --python-platform $(DEP_PLATFORM) --python-version 3.14 -r .requirements.txt --quiet; \
+			rm -f .requirements.txt; \
+		else \
+			uv sync --project . --no-dev --quiet; \
+			cp -R .venv/lib/python3.14/site-packages/* dist/ 2>/dev/null || true; \
+		fi; \
 		rm -rf dist/bin dist/*.pth dist/INSTALLER dist/_virtualenv.py; \
 	fi
 	find dist -type d -name __pycache__ -prune -exec rm -rf {} +

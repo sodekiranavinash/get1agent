@@ -956,6 +956,9 @@ export function AgentNodeDialog({
 
       case 'knowledge': {
         const selected = data.knowledgeBaseIds ?? []
+        const graphKnowledgeBases = knowledgeBases.filter(
+          (kb) => selected.includes(kb.id) && kb.retrievalMode === 'graph',
+        )
         return (
           <>
             <FieldGroup
@@ -995,6 +998,14 @@ export function AgentNodeDialog({
               onChange={(rerank) => patch({ rerank })}
               hint="Re-score the fused results with the rerank model before returning them. Improves ordering; adds latency and cost."
             />
+            {graphKnowledgeBases.length > 0 ? (
+              <p className="rounded-lg border border-border/70 bg-surface/60 px-3 py-2 text-[11.5px] leading-relaxed text-subtle">
+                <span className="font-medium text-muted">Graph RAG.</span>{' '}
+                {graphKnowledgeBases.map((kb) => kb.name).join(', ')} searched through the
+                knowledge graph built at ingest, so facts linked across documents are found.
+                Hybrid search answers when the graph has no match.
+              </p>
+            ) : null}
           </>
         )
       }

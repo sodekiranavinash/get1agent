@@ -27,3 +27,8 @@ pythonpath = [
 ]
 testpaths = ["."]
 addopts = "-q"
+
+[dependency-groups]
+dev = [
+    "fakeredis[lua]>=2.26",
+]

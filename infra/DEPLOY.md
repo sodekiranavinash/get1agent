@@ -110,6 +110,7 @@ Agent run: browser → API Gateway → agent-run control plane → Lambda MicroV
 | **DynamoDB** | Single table `get1agent` — one item per entity (users, KBs, documents, tags, skills, agents, workflows, storage, vault, conversations, evals, support, notifications, feedback) |
 | **S3** | Document uploads, derived artifacts, keyword (BM25) index, parents, manifests, transcripts, storage files, custom tools, sessions |
 | **S3 Vectors** | One vector index per user (`idx-<userId>`) for knowledge + memory + semantic cache |
+| **Redis** (optional) | Per-identity rate limiter (GCRA) + exact/embedding caches + RediSearch semcache; SSM SecureString `REDIS_URL_SSM_PARAM`; DynamoDB / S3 Vectors fallback when unset |
 | **KMS** | Vault secrets and MCP connection credentials (per-`{userId, id, field}` encryption context) |
 | **Amazon Bedrock** | Titan Text Embeddings V2 + Titan Multimodal G1, opt-in Bedrock Rerank (`amazon.rerank-v1:0`, `us-west-2`), the curated model gateway (Nova/DeepSeek/Qwen/GLM/Nemotron), Guardrails, prompt caching, structured outputs |
 | **AgentCore** | Runtime (agentflow + workflow), Memory, Policy, Gateway, Identity, Registry, Evaluations, Optimization, Browser, Code Interpreter |
@@ -240,6 +241,24 @@ Terraform state lives in a dedicated S3 bucket (created automatically before any
 apply). **Web** is a separate bucket for the static site (`www.get1agent.com`).
 After changing the agent runtime code, rebuild + push the ARM64 image and re-apply
 `module.agent_runtime` (`bash infra/aws/deploy-agent-runtime.sh`).
+
+### Optional: Redis (shared limiter + caches)
+
+Redis backs the per-identity rate limiter (`core.ratelimit`, GCRA) and the exact,
+embedding and semantic caches. It is **optional**: when no URL is configured every
+caller falls back to DynamoDB / S3 Vectors, so a deploy never depends on it.
+
+To enable it, add a repository secret **`REDIS_URL`** (`redis://…` or `rediss://…`,
+including a search-capable instance if you want the RediSearch semantic cache) and
+re-run the **Infra** job. Terraform stores it as an SSM **SecureString** at
+`redis_url_ssm_param` (default `/get1agent/prod/redis-url`) — never in a Lambda
+environment variable — and grants `ssm:GetParameter` to `user-api`,
+`knowledge-mcp`, `custom-tools`, `ingestion-embed` and `ai-assistant`, which read
+it once per container. Leaving the secret unset is a supported state: Redis stays
+off and the DynamoDB fallback runs.
+
+Local stack: the `redis` compose service provides the same behaviour on
+`redis://redis:6379/0` (see the root `.env`).
 
 ---
 

@@ -10,7 +10,7 @@ The wire contract (consumed by the builder panel and the chat screen):
     {"type": "tool.start",    "name", "toolUseId", "input"}
     {"type": "tool.input",    "toolUseId", "input"}
     {"type": "tool.stream",   "name", "data"}
-    {"type": "tool.result",   "toolUseId", "status", "data", "sources"}
+    {"type": "tool.result",   "toolUseId", "status", "data", "sources", "cache", "graph"}
     {"type": "question",      "questionId", "question", "options", "allowCustom"}
     {"type": "run.completed", "stopReason", "usage"}
     {"type": "run.error",     "message"}
@@ -32,6 +32,10 @@ _USAGE_KEYS: dict[str, tuple[str, ...]] = {
     "outputTokens": ("outputTokens", "output_tokens"),
     "totalTokens": ("totalTokens", "total_tokens"),
 }
+
+# Cap on the relationships carried on a ``tool.result`` frame: the run timeline
+# shows the walked paths, it does not need the whole traversal.
+_GRAPH_MAX_RELATIONSHIPS = 12
 
 
 def _usage_value(usage: Any, names: tuple[str, ...]) -> Any:
@@ -160,17 +164,118 @@ def _extract_sources(text: str) -> list[dict[str, Any]]:
     return sources
 
 
+def _extract_cache(text: str) -> dict[str, Any] | None:
+    """Cache provenance from a tool result payload's ``meta.cache``.
+
+    Knowledge search stamps how its result was served (exact cache, semantic
+    cache or computed) so the run timeline can label a result that came back
+    from a cache instead of fresh work. Payloads without it yield ``None``.
+    """
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    meta = payload.get("meta")
+    if not isinstance(meta, dict):
+        return None
+    cache = meta.get("cache")
+    if not isinstance(cache, dict):
+        return None
+
+    info: dict[str, Any] = {"hit": bool(cache.get("hit"))}
+    if isinstance(cache.get("kind"), str):
+        info["kind"] = cache["kind"]
+    if isinstance(cache.get("backend"), str):
+        info["backend"] = cache["backend"]
+    similarity = cache.get("similarity")
+    if isinstance(similarity, (int, float)) and not isinstance(similarity, bool):
+        info["similarity"] = float(similarity)
+    return info
+
+
+def _extract_graph(text: str) -> dict[str, Any] | None:
+    """Graph provenance from a knowledge-search payload.
+
+    A Graph-mode knowledge base answers graph-first (or falls back to the hybrid
+    legs); the walked relationships and the seed/node/parent counts ride along so
+    the run timeline can show *why* a passage is relevant instead of looking like
+    a plain hybrid hit. Payloads without a graph run yield ``None``.
+    """
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    meta = payload.get("meta")
+    raw = meta.get("graph") if isinstance(meta, dict) else None
+    relationships = payload.get("relationships")
+
+    info: dict[str, Any] = {}
+    if isinstance(raw, dict):
+        for key in (
+            "enabled",
+            "requested",
+            "strategy",
+            "fallback",
+            "reason",
+            "seeds",
+            "nodes",
+            "edges",
+            "parents",
+        ):
+            if raw.get(key) is not None:
+                info[key] = raw[key]
+    if isinstance(relationships, list):
+        walked: list[dict[str, Any]] = []
+        for item in relationships[:_GRAPH_MAX_RELATIONSHIPS]:
+            if not isinstance(item, dict):
+                continue
+            subject = item.get("subject")
+            predicate = item.get("predicate")
+            target = item.get("object")
+            if not (subject and predicate and target):
+                continue
+            walked.append(
+                {
+                    "subject": str(subject),
+                    "predicate": str(predicate),
+                    "object": str(target),
+                    "hop": item.get("hop"),
+                }
+            )
+        if walked:
+            info["relationships"] = walked
+    if not info.get("enabled") and not info.get("relationships"):
+        return None
+    return info
+
+
 def _result_frame(tool_result: Any) -> dict[str, Any] | None:
     if not isinstance(tool_result, dict):
         return None
     data = _content_text(tool_result.get("content"))
-    return {
+    frame: dict[str, Any] = {
         "type": "tool.result",
         "toolUseId": tool_result.get("toolUseId"),
         "status": tool_result.get("status") or "success",
         "data": data,
         "sources": _extract_sources(data),
     }
+    # Only present when the payload carried it, so ordinary tool results stay lean.
+    cache = _extract_cache(data)
+    if cache is not None:
+        frame["cache"] = cache
+    graph = _extract_graph(data)
+    if graph is not None:
+        frame["graph"] = graph
+    return frame
 
 
 def _tool_results(event: Any) -> list[dict[str, Any]]:

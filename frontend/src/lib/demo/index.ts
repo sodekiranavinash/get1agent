@@ -124,6 +124,98 @@ function match(path: string, params: URLSearchParams): unknown {
       lastRunAt: null,
     }
   }
+  if (path === '/v1/user/ratelimit') {
+    return {
+      scope: 'user',
+      backend: 'redis',
+      backendPreference: 'auto',
+      enforced: true,
+      checkedAt: Math.floor(Date.now() / 1000),
+      policies: [
+        {
+          id: 'agent.session',
+          description: 'Launch an agent-run MicroVM session',
+          windows: [
+            {
+              name: 'minute',
+              limit: 10,
+              windowSeconds: 60,
+              used: 1,
+              remaining: 9,
+              resetSeconds: 0,
+              exceeded: false,
+            },
+            {
+              name: 'hour',
+              limit: 120,
+              windowSeconds: 3600,
+              used: 14,
+              remaining: 106,
+              resetSeconds: 0,
+              exceeded: false,
+            },
+          ],
+        },
+        {
+          id: 'evals.run',
+          description: 'Start an evaluation run',
+          windows: [
+            {
+              name: 'hour',
+              limit: 10,
+              windowSeconds: 3600,
+              used: 2,
+              remaining: 8,
+              resetSeconds: 0,
+              exceeded: false,
+            },
+            {
+              name: 'day',
+              limit: 50,
+              windowSeconds: 86_400,
+              used: 6,
+              remaining: 44,
+              resetSeconds: 0,
+              exceeded: false,
+            },
+          ],
+        },
+        {
+          id: 'custom-tools.generate',
+          description: 'MCP Builder tool generation',
+          windows: [
+            {
+              name: 'hour',
+              limit: 30,
+              windowSeconds: 3600,
+              used: 3,
+              remaining: 27,
+              resetSeconds: 0,
+              exceeded: false,
+            },
+            {
+              name: 'day',
+              limit: 200,
+              windowSeconds: 86_400,
+              used: 11,
+              remaining: 189,
+              resetSeconds: 0,
+              exceeded: false,
+            },
+          ],
+        },
+      ],
+      redis: {
+        configured: true,
+        reachable: true,
+        breakerOpen: false,
+        prefix: 'g1a:',
+        latencyMs: 0.7,
+        error: '',
+      },
+      headers: 'ratelimit-limit, ratelimit-remaining, ratelimit-reset, retry-after',
+    }
+  }
 
   // --- notifications ---------------------------------------------------
   if (path === '/v1/notifications') return demoNotificationsPayload()

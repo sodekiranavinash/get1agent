@@ -410,6 +410,28 @@ images.push({
   svg: renderFlow(layoutFlow(retrieval.spec), journeyTones(retrieval), 'question → answer'),
 })
 
+const graphIngestion =
+  KNOWLEDGE_JOURNEYS.find((j) => j.id === 'graph-ingestion') ?? KNOWLEDGE_JOURNEYS[0]
+images.push({
+  file: 'architecture-graph-ingestion',
+  svg: renderFlow(
+    layoutFlow(graphIngestion.spec),
+    journeyTones(graphIngestion),
+    'one gated stage · hybrid KBs skip',
+  ),
+})
+
+const graphRetrieval =
+  KNOWLEDGE_JOURNEYS.find((j) => j.id === 'graph-retrieval') ?? KNOWLEDGE_JOURNEYS[0]
+images.push({
+  file: 'architecture-graph-retrieval',
+  svg: renderFlow(
+    layoutFlow(graphRetrieval.spec),
+    journeyTones(graphRetrieval),
+    'additive on the hybrid legs',
+  ),
+})
+
 /* -------------------------------------------------------------------------- */
 /* Write SVG + PNG                                                             */
 /* -------------------------------------------------------------------------- */

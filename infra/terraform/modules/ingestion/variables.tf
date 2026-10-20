@@ -23,6 +23,11 @@ variable "index_function_arn" {
   description = "ingestion-index Lambda ARN invoked by the state machine"
 }
 
+variable "graph_function_arn" {
+  type        = string
+  description = "ingestion-graph-extract Lambda ARN invoked by the state machine (Graph RAG KBs only)"
+}
+
 variable "mark_failed_function_arn" {
   type        = string
   description = "ingestion-mark-failed Lambda ARN invoked by the state machine"

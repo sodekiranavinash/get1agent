@@ -44,6 +44,7 @@ import {
   deleteKnowledgeBase,
   formatBytes,
   formatRelative,
+  graphStagesInFlight,
   invalidateKnowledgeBases,
   removeIngestionEvents,
   useIngestionEvents,
@@ -234,10 +235,24 @@ export function KnowledgeBasesPage() {
   const hasActiveIngestion = (ingestionEvents ?? []).some(
     (event) => event.documentStatus !== 'ready' && event.documentStatus !== 'failed',
   )
+  // The graph stage runs after the document is `ready` (see
+  // graphStagesInFlight), so it needs its own liveness signal.
+  const graphInFlight = graphStagesInFlight(
+    ingestionEvents ?? [],
+    new Set(
+      knowledgeBases
+        .filter((kb) => kb.retrievalMode === 'graph')
+        .map((kb) => kb.id),
+    ),
+  )
 
   const pollTick = useRef(0)
   const { cappedOut, reset: resetPoll } = useAdaptivePoll({
-    enabled: activityOpen && (processing.length > 0 || hasActiveIngestion),
+    enabled:
+      activityOpen &&
+      (processing.length > 0 ||
+        hasActiveIngestion ||
+        graphInFlight.size > 0),
     resetKey: ingestionEvents?.[0]?.id,
     onPoll: () => {
       refetchEvents()

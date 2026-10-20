@@ -13,7 +13,11 @@ from data.repositories import events as events_repo
 from data.repositories import knowledge_bases as kb_repo
 from data.repositories import notifications as notifications_repo
 from ingestion.chunking import chunk_parents
-from retrieval.embedding.config import IngestionConfig, load_config
+from retrieval.embedding.config import (
+    SUPPORTED_RETRIEVAL_MODES,
+    IngestionConfig,
+    load_config,
+)
 from retrieval.embedding.embeddings import embed_images, embed_texts
 from ingestion.extractors import Extraction, extract
 from retrieval import layout
@@ -141,6 +145,13 @@ def load_config_for_knowledge_base(knowledge_base_id: str) -> IngestionConfig:
         overrides["image_embed_model"] = (
             knowledge_base.get("imageEmbedModel") or base.image_embed_model
         )
+    # The retrieval mode is fixed per knowledge base at creation (hybrid | graph).
+    mode = (
+        str(knowledge_base.get("retrievalMode") or base.retrieval_mode).strip().lower()
+    )
+    overrides["retrieval_mode"] = (
+        mode if mode in SUPPORTED_RETRIEVAL_MODES else base.retrieval_mode
+    )
     return replace(base, **overrides)
 
 

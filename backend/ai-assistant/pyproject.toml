@@ -15,6 +15,9 @@ dependencies = [
     # The platform's own shared packages need these transitively, and declaring
     # them keeps the lockfile honest for the Lambda zip build too.
     "python-dateutil>=2.9",
+    # The shared limiter (core.ratelimit) uses Redis GCRA when REDIS_URL is
+    # configured and the DynamoDB counter otherwise.
+    "redis>=5.0",
     "tzdata>=2024.1",
 ]
 

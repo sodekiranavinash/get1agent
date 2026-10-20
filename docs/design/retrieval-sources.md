@@ -197,7 +197,109 @@ role is simpler and keeps credentials out of the URL entirely.
 
 ---
 
-## 7. Open questions
+## 7. Graph RAG (shipped)
+
+The query path now has a second, **selectable** retrieval mode. A knowledge base
+is created in **Hybrid RAG** (the vector + BM25 fusion above) or **Graph RAG**
+(a knowledge graph of the entities/relationships the documents state, searched
+**graph-first**). The create dialog calls the pair **Hybrid / Graph**, and the
+two are **separate paths** — graph is not fused into the hybrid list; the hybrid
+legs answer only as its fallback. `AGENTS.md` → "Graph RAG (Hybrid vs Graph
+retrieval)" is authoritative; this section records the retrieval-side design.
+
+**Flows.**
+
+Ingestion — one extra, gated stage after the hybrid index is ready:
+
+```
+ upload → Extract (parse + chunk) → Embed (Titan) → Index (vectors + BM25, ready)
+                                                          │
+                                       config.retrieval_mode = graph? ─ no ─ skip
+                                                          │ graph
+                                                          ▼
+   Graph extract  ─ per batch: 1 Bedrock call (JSON schema) → entities + relationships
+                  ─ embed each entity (name + description)
+                  ─ merge into the S3 graph (delete-then-write, idempotent)
+                  ─ best-effort: a bad batch is counted, never fatal
+```
+
+The gate reads the same `retrieval_mode` key the extract stage emits, and the
+Index stage **merges** its result (`ResultPath`) so the config is still in scope
+when the choice runs. Extraction turns the model's hidden reasoning **off**
+(`additionalModelRequestFields={"thinking": {"type": "disabled"}}`) — left on,
+`zai.glm-4.7-flash` can spend the whole output budget thinking and never emit the
+JSON — and uses `GRAPH_EXTRACT_MAX_TOKENS=16000`. A batch that still truncates is
+split in half and retried instead of being dropped.
+
+Retrieval — the KB's mode picks the path:
+
+```
+ Graph KB (the default path for that KB):
+   query → embed
+     └─ seed entities (entity vectors + entity-name lookup)
+          → bounded BFS (hop decay + node/edge/fan-out caps)
+          → visited nodes resolve to their parent chunks (source: "graph")
+          → relationships (subject·predicate·object) ride along
+     └─ nothing found? → the hybrid legs answer it (meta.graph.fallback)
+
+ Hybrid KB (or an explicit graph:false):
+   query → embed
+     ├─ semantic leg (S3 Vectors)     ┐
+     └─ lexical leg  (BM25 postings)  ├─► RRF fuse ─► hydrate parents ─► rerank (opt)
+```
+
+A Hybrid KB never touches the graph and a Graph KB never runs the hybrid legs
+unless the graph has nothing, so a hybrid search result is byte-identical to
+before. A request spanning both kinds runs each KB its own way and interleaves
+the two ranked lists (nothing is fused across strategies).
+The interactive version of both flows is on the architecture page
+(`/architecture?tab=knowledge` → "Graph RAG ingestion" / "Graph RAG retrieval").
+
+**Why.** Hybrid search finds passages that share vocabulary or meaning with the
+question. A fact split across pages ("Alice works at Acme", "Acme partners with
+Beta") is not one passage; the graph makes the two a connected unit so asking
+about Alice can surface the Beta material too, and returns the relationship
+(`Alice —WORKS_AT→ Acme`) as the reason.
+
+**What is modelled** (the GraphRAG pattern catalog: Microsoft GraphRAG, LightRAG,
+FalkorDB):
+
+- **Entities** — typed nodes (`Person`, `Organization`, `Product`, `Technology`,
+  `Concept`, …) with `name`, `description` and the chunk/parent ids where they
+  appear (`MENTIONED_IN` is implicit provenance, not an edge).
+- **Relationships** — **one generic edge per triple** with a typed `type`
+  predicate (`WORKS_AT`, `PARTNERS_WITH`, `PRODUCES`, …), rather than one graph
+  relationship per predicate.
+
+**Store.** No external graph database: plain S3 JSON under
+`index/<userId>/graph/` (`nodes/`, `adj/`, `enames/`, `ecat/`, `docs/`, plus
+`stats.json`), read with `GetObject`. Node ids are deterministic and
+type-qualified (`e_<sha1(type:name)[:16]>`); entity vectors carry
+`kind="entity"` so the chunk search — which filters `status="ready"` — never
+returns them.
+
+**Ingest.** A gated stage (`ingestion-graph-extract`) extracts entities +
+relationships with one Bedrock-structured-outputs call per batch of chunks,
+embeds the entities and merges them in delete-then-write. It runs **after** the
+index stage (whose cleanup also clears the document's graph contribution) and is
+best-effort: a batch failure is counted, never raised.
+
+**Retrieval.** Seed entities (entity-vector search + a lexical entity-name
+lookup) → bounded BFS with hop decay and node/edge/fan-out caps → each visited
+node resolves to the parent chunks it was seen in (the same small-to-big parent
+hydration hybrid uses), scored `rrfScore = GRAPH_WEIGHT × decayed seed score`.
+The walked relationships ride along on the payload, and the runtime lifts them
+onto the `tool.result` frame so the run timeline shows the path. The hybrid legs
+run only when the graph has nothing (`meta.graph.fallback` with a `reason`), so
+the two strategies never mix results.
+
+**Isolation.** `service.search` skips the hybrid legs entirely for a Graph-mode
+KB, and a Hybrid KB is untouched even when the caller passes `graph: true`; a
+hybrid search result is byte-identical to before.
+
+---
+
+## 8. Open questions
 
 - Query endpoint shape: `POST /v1/knowledge-bases/{id}/query` vs a global
   `/v1/query` with a `knowledgeBaseIds` filter.
@@ -210,7 +312,7 @@ role is simpler and keeps credentials out of the URL entirely.
 
 ---
 
-## 8. References
+## 9. References
 
 - Ingestion rationale: `docs/design/ingestion-logic.md`.
 - Pipeline stages: each `backend/services/ingestion/ingestion-*` Lambda (`handler.py` + `src/`).
@@ -219,4 +321,7 @@ role is simpler and keeps credentials out of the URL entirely.
 - Embedding config/clients: `backend/packages/retrieval/embedding/`.
 - Semantic store: `backend/packages/retrieval/s3_vectors.py` (S3 Vectors) with a
   local brute-force fallback (`VECTOR_STORE=local`).
+- Graph store: `backend/packages/retrieval/graph.py`; extraction:
+  `backend/packages/ingestion/graph.py`; augmentation:
+  `backend/services/mcp/knowledge-mcp/src/search/graph.py`.
 - Current architecture: [`AGENTS.md`](../../AGENTS.md) → "Retrieval & MCP tools".

@@ -52,7 +52,21 @@ class Storage:
                     self._client = boto3.client(
                         "s3",
                         region_name=self.region,
-                        config=Config(s3={"addressing_style": style}),
+                        config=Config(
+                            s3={"addressing_style": style},
+                            # The graph store and the term index fan out writes
+                            # across threads that share this client; the default
+                            # pool of 10 makes boto3 discard and rebuild
+                            # connections under load.
+                            max_pool_connections=int(
+                                os.environ.get("S3_MAX_POOL_CONNECTIONS") or 50
+                            ),
+                            # Retry transient read timeouts / 5xx. A busy
+                            # emulator (Floci) occasionally answers slowly; in
+                            # prod this only makes an already-noisy S3 call
+                            # succeed.
+                            retries={"max_attempts": 10, "mode": "standard"},
+                        ),
                     )
                 client = self._client
         return client

@@ -178,6 +178,21 @@
       "layers": []
     },
     {
+      "name": "ingestion-graph-extract",
+      "group": "ingestion-apis",
+      "dir": "backend/services/ingestion/ingestion-graph-extract",
+      "function_name": "get1agent-prod-ingestion-graph-extract",
+      "handler": "handler.lambda_handler",
+      "runtime": "python3.14",
+      "packages": [
+        "core",
+        "data",
+        "retrieval",
+        "ingestion"
+      ],
+      "layers": []
+    },
+    {
       "name": "ingestion-mark-failed",
       "group": "ingestion-apis",
       "dir": "backend/services/ingestion/ingestion-mark-failed",

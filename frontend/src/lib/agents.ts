@@ -43,6 +43,11 @@ export type RunResourceOverrides = {
   skillIds?: string[]
   servers?: AgentServerSelection[]
   fileIds?: string[]
+  /**
+   * Force graph-first retrieval for this run. A Graph-mode knowledge base does
+   * this on its own, so the chat composer no longer offers it.
+   */
+  knowledgeGraphRag?: boolean
 }
 
 export type AgentSchedule = {
@@ -100,6 +105,11 @@ export type AgentNodeData = {
   knowledgeBaseIds?: string[]
   /** Knowledge node: rerank the hybrid results before returning them. */
   rerank?: boolean
+  /**
+   * Knowledge node: legacy Graph RAG toggle. Retrieval is the knowledge base's
+   * own mode now, so the builder no longer writes this; old configs still load.
+   */
+  graphRag?: boolean
   skillIds?: string[]
   servers?: AgentServerSelection[]
   schedule?: AgentSchedule
@@ -158,6 +168,12 @@ export type AgentConfig = {
   knowledgeBaseIds: string[]
   /** Whether the agent reranks knowledge retrieval results (opt-in). */
   knowledgeRerank: boolean
+  /**
+   * Legacy per-agent Graph RAG flag: a Graph-mode knowledge base is searched
+   * through its graph on its own now, so the runtime treats this as "force"
+   * rather than an opt-in. Kept so old configs load and stay harmless.
+   */
+  knowledgeGraphRag: boolean
   skillIds: string[]
   servers: AgentServerSelection[]
   /**
@@ -646,7 +662,7 @@ export function defaultNodeData(kind: AgentNodeKind): AgentNodeData {
         outputInstructions: '',
       }
     case 'knowledge':
-      return { kind, title: NODE_TITLES.knowledge, knowledgeBaseIds: [], rerank: false }
+      return { kind, title: NODE_TITLES.knowledge, knowledgeBaseIds: [], rerank: false, graphRag: false }
     case 'skills':
       return { kind, title: NODE_TITLES.skills, skillIds: [] }
     case 'tools':
@@ -836,6 +852,7 @@ export function graphFromConfig(config: AgentConfig): AgentGraph {
             ...node.data,
             knowledgeBaseIds: config.knowledgeBaseIds ?? [],
             rerank: config.knowledgeRerank ?? false,
+            graphRag: config.knowledgeGraphRag ?? false,
           },
         }
       case 'skills':
@@ -888,6 +905,7 @@ export function configFromGraph(
     },
     knowledgeBaseIds: knowledge?.data.knowledgeBaseIds ?? [],
     knowledgeRerank: knowledge?.data.rerank ?? false,
+    knowledgeGraphRag: knowledge?.data.graphRag ?? false,
     skillIds: skills?.data.skillIds ?? [],
     servers: tools?.data.servers ?? [],
     guardrail: {

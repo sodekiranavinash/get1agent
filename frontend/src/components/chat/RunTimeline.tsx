@@ -6,6 +6,7 @@ import {
   ChevronRight,
   HelpCircle,
   Loader2,
+  Network,
   Paperclip,
   Search,
   Sparkles,
@@ -13,8 +14,15 @@ import {
   Terminal,
   Wrench,
   XCircle,
+  Zap,
 } from 'lucide-react'
-import type { AgentAttachmentRef, AgentSkillRef, AgentUsage } from '../../lib/agentRun'
+import type {
+  AgentAttachmentRef,
+  AgentSkillRef,
+  AgentToolCache,
+  AgentToolGraph,
+  AgentUsage,
+} from '../../lib/agentRun'
 import {
   formatDuration,
   formatUsage,
@@ -113,6 +121,24 @@ function StatusPill({
   )
 }
 
+function CacheBadge({ cache }: { cache: AgentToolCache }) {
+  const backend = cache.backend || 'cache'
+  const kind = cache.kind === 'semantic' ? 'Semantic cache' : 'Exact cache'
+  const match =
+    typeof cache.similarity === 'number'
+      ? ` · ${(cache.similarity * 100).toFixed(1)}% match`
+      : ''
+  return (
+    <span
+      title={`${kind} hit via ${backend}${match}`}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success-soft px-1.5 py-0.5 text-[10px] font-semibold text-success"
+    >
+      <Zap className="size-2.5" />
+      {backend}
+    </span>
+  )
+}
+
 function TodoMarker({ todo, index }: { todo: ChatPlanTodo; index: number }) {
   if (todo.status === 'active') {
     return (
@@ -163,6 +189,73 @@ function ToolField({
   )
 }
 
+function GraphBadge({ graph }: { graph: AgentToolGraph }) {
+  const label = graph.fallback ? 'graph → hybrid' : 'graph'
+  const detail = graph.fallback
+    ? `The knowledge graph had no match${graph.reason ? ` (${graph.reason})` : ''}; hybrid search answered.`
+    : 'Answered through the knowledge graph.'
+  return (
+    <span
+      title={detail}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-info-soft px-1.5 py-0.5 text-[10px] font-semibold text-info"
+    >
+      <Network className="size-2.5" />
+      {label}
+    </span>
+  )
+}
+
+/**
+ * How a graph knowledge base produced its passages: the strategy that answered
+ * (the graph itself, or the hybrid legs as its fallback) and the relationships
+ * the traversal walked, so a graph hit never looks like a plain hybrid hit.
+ */
+function GraphTrace({ graph }: { graph: AgentToolGraph }) {
+  const relationships = graph.relationships ?? []
+  const counts = [
+    typeof graph.seeds === 'number' ? `${graph.seeds} seeds` : '',
+    typeof graph.nodes === 'number' ? `${graph.nodes} nodes` : '',
+    typeof graph.parents === 'number' ? `${graph.parents} passages` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const reason = graph.reason ? ` (${graph.reason})` : ''
+  return (
+    <ToolField
+      label={graph.fallback ? 'Graph · hybrid fallback' : 'Knowledge graph'}
+      icon={Network}
+    >
+      <div className="space-y-1.5 rounded-md border border-border/60 bg-surface/70 p-2.5">
+        <p className="text-[11px] leading-relaxed text-subtle">
+          {graph.fallback
+            ? `The graph had nothing for this question${reason}, so hybrid search answered it.`
+            : 'These passages were reached through the knowledge graph.'}
+          {counts ? ` ${counts}.` : ''}
+        </p>
+        {relationships.length > 0 ? (
+          <ul className="space-y-0.5">
+            {relationships.map((relationship, index) => (
+              <li
+                key={`${relationship.subject}-${relationship.predicate}-${relationship.object}-${index}`}
+                className="font-mono text-[11px] leading-relaxed break-words"
+              >
+                <span className="text-foreground">{relationship.subject}</span>
+                <span className="text-subtle"> → </span>
+                <span className="text-accent">{relationship.predicate.replace(/_/g, ' ')}</span>
+                <span className="text-subtle"> → </span>
+                <span className="text-foreground">{relationship.object}</span>
+                {typeof relationship.hop === 'number' && relationship.hop > 0 ? (
+                  <span className="text-subtle"> · hop {relationship.hop}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </ToolField>
+  )
+}
+
 function ToolCall({ tool, onAnswer }: { tool: ChatToolCall; onAnswer?: AnswerHandler }) {
   // Collapse automatically when the call finishes; a manual toggle wins.
   const [override, setOverride] = useState<boolean | null>(null)
@@ -199,6 +292,8 @@ function ToolCall({ tool, onAnswer }: { tool: ChatToolCall; onAnswer?: AnswerHan
         <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">
           {tool.name}
         </span>
+        {tool.graph ? <GraphBadge graph={tool.graph} /> : null}
+        {tool.cache?.hit ? <CacheBadge cache={tool.cache} /> : null}
         <StatusPill tone={meta.tone} icon={meta.icon} label={meta.label} spin={meta.spin} />
         <Chevron open={open} />
       </button>
@@ -216,6 +311,8 @@ function ToolCall({ tool, onAnswer }: { tool: ChatToolCall; onAnswer?: AnswerHan
               </p>
             )}
           </ToolField>
+
+          {tool.graph ? <GraphTrace graph={tool.graph} /> : null}
 
           <ToolField label="Response" icon={Terminal}>
             {hasOutput ? (

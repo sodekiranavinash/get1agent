@@ -1,5 +1,7 @@
 data "aws_caller_identity" "current" {}
 
+data "aws_region" "current" {}
+
 resource "aws_iam_role" "lambda" {
   name = "${var.name}-lambda"
 
@@ -198,6 +200,27 @@ resource "aws_iam_role_policy" "lambda_invoke" {
   })
 }
 
+# The admin console reaches the MCP servers through the AgentCore Gateway
+# (`MCP_TRANSPORT=gateway`). The gateway's authorizer is AWS_IAM, so the caller
+# must hold bedrock-agentcore:InvokeGateway on the gateway ARN; otherwise every
+# tools/list and tools/call answers 403 "Authorization error - Insufficient
+# permissions".
+resource "aws_iam_role_policy" "gateway_invoke" {
+  count = length(var.gateway_arns) > 0 ? 1 : 0
+  name  = "${var.name}-gateway-invoke"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "InvokeMcpGateway"
+      Effect   = "Allow"
+      Action   = ["bedrock-agentcore:InvokeGateway"]
+      Resource = var.gateway_arns
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "bedrock_agentcore" {
   count = length(var.bedrock_agentcore_arns) > 0 ? 1 : 0
   name  = "${var.name}-bedrock-agentcore"
@@ -314,5 +337,43 @@ resource "aws_iam_role_policy" "xray" {
       Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"]
       Resource = "*"
     }]
+  })
+}
+
+resource "aws_iam_role_policy" "ssm_access" {
+  count = length(var.ssm_parameter_arns) > 0 ? 1 : 0
+  name  = "${var.name}-ssm-access"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ReadParameters"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = var.ssm_parameter_arns
+      },
+      # A SecureString's plaintext is decrypted by SSM on the caller's behalf, so
+      # reading one needs a KMS grant too. The AWS-managed alias/aws/ssm key would
+      # already cover this, but granting it explicitly (and only for calls that
+      # come through SSM — the same kms:ViaService guard the managed key uses)
+      # keeps the policy correct if the parameter is ever moved to a customer
+      # managed key, and cannot widen it: the condition ties the grant to the
+      # SSM call that ssm:GetParameter above already authorises.
+      {
+        Sid    = "DecryptParametersViaSSM"
+        Effect = "Allow"
+        Action = ["kms:Decrypt"]
+        # Restricting to the account's keys keeps it from granting anything
+        # broader; the ViaService condition is what scopes it to SSM.
+        Resource = "arn:aws:kms:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:key/*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${data.aws_region.current.region}.amazonaws.com"
+          }
+        }
+      },
+    ]
   })
 }

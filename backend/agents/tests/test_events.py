@@ -130,6 +130,155 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(source["title"], "resume.pdf")
         self.assertEqual(source["subtitle"], "my-career · page 2")
 
+    def test_tool_result_reports_cache_provenance(self) -> None:
+        payload = {
+            "chunks": [],
+            "sources": [],
+            "meta": {
+                "cache": {
+                    "hit": True,
+                    "kind": "semantic",
+                    "backend": "redis",
+                    "similarity": 0.9812,
+                    "vectorId": "abc",
+                }
+            },
+        }
+        event = events.normalize_many(
+            {
+                "type": "tool_result",
+                "tool_result": {
+                    "toolUseId": "t1",
+                    "status": "success",
+                    "content": [{"text": __import__("json").dumps(payload)}],
+                },
+            }
+        )
+        self.assertEqual(
+            event[0]["cache"],
+            {"hit": True, "kind": "semantic", "backend": "redis", "similarity": 0.9812},
+        )
+
+    def test_tool_result_without_cache_omits_the_field(self) -> None:
+        payload = {"sources": [], "meta": {"cache": {"hit": False, "kind": "none"}}}
+        event = events.normalize_many(
+            {
+                "type": "tool_result",
+                "tool_result": {
+                    "toolUseId": "t1",
+                    "status": "success",
+                    "content": [{"text": __import__("json").dumps(payload)}],
+                },
+            }
+        )
+        # A miss still reports provenance (hit=False), but a payload with no
+        # ``meta.cache`` at all leaves the frame untouched.
+        self.assertEqual(event[0]["cache"], {"hit": False, "kind": "none"})
+        plain = events.normalize_many(
+            {
+                "type": "tool_result",
+                "tool_result": {
+                    "toolUseId": "t2",
+                    "status": "success",
+                    "content": [{"text": '{"results": []}'}],
+                },
+            }
+        )
+        self.assertNotIn("cache", plain[0])
+
+    def test_tool_result_reports_graph_provenance(self) -> None:
+        payload = {
+            "chunks": [],
+            "sources": [],
+            "relationships": [
+                {
+                    "subject": "Alice",
+                    "predicate": "WORKS_AT",
+                    "object": "Acme Corp",
+                    "hop": 0,
+                    "weight": 1.0,
+                },
+                {"subject": "", "predicate": "X", "object": "Y"},
+            ],
+            "meta": {
+                "graph": {
+                    "enabled": True,
+                    "strategy": "graph",
+                    "fallback": False,
+                    "seeds": 2,
+                    "nodes": 5,
+                    "edges": 4,
+                    "parents": 3,
+                }
+            },
+        }
+        event = events.normalize_many(
+            {
+                "type": "tool_result",
+                "tool_result": {
+                    "toolUseId": "t1",
+                    "status": "success",
+                    "content": [{"text": __import__("json").dumps(payload)}],
+                },
+            }
+        )
+        graph = event[0]["graph"]
+        self.assertEqual(graph["strategy"], "graph")
+        self.assertFalse(graph["fallback"])
+        self.assertEqual(graph["seeds"], 2)
+        # Only well-formed triples ride along, capped for the frame.
+        self.assertEqual(
+            graph["relationships"],
+            [{"subject": "Alice", "predicate": "WORKS_AT", "object": "Acme Corp", "hop": 0}],
+        )
+
+    def test_tool_result_reports_graph_fallback(self) -> None:
+        payload = {
+            "sources": [],
+            "relationships": [],
+            "meta": {
+                "graph": {
+                    "enabled": True,
+                    "strategy": "graph",
+                    "fallback": True,
+                    "reason": "no matching entities",
+                    "seeds": 0,
+                }
+            },
+        }
+        event = events.normalize_many(
+            {
+                "type": "tool_result",
+                "tool_result": {
+                    "toolUseId": "t1",
+                    "status": "success",
+                    "content": [{"text": __import__("json").dumps(payload)}],
+                },
+            }
+        )
+        self.assertEqual(event[0]["graph"]["reason"], "no matching entities")
+        self.assertTrue(event[0]["graph"]["fallback"])
+
+    def test_tool_result_without_graph_omits_the_field(self) -> None:
+        # A hybrid-only search (graph disabled) and an ordinary tool result both
+        # leave the frame lean.
+        hybrid = {
+            "sources": [],
+            "meta": {"graph": {"enabled": False, "strategy": "hybrid"}},
+        }
+        for payload in (hybrid, {"results": []}):
+            event = events.normalize_many(
+                {
+                    "type": "tool_result",
+                    "tool_result": {
+                        "toolUseId": "t1",
+                        "status": "success",
+                        "content": [{"text": __import__("json").dumps(payload)}],
+                    },
+                }
+            )
+            self.assertNotIn("graph", event[0])
+
     def test_tool_result_extracts_web_sources(self) -> None:
         payload = {
             "results": [

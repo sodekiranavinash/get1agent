@@ -37,6 +37,25 @@ class CacheConfigTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CACHE_BACKEND": "none"}):
             self.assertFalse(cache.enabled())
 
+    def test_active_backend_resolves_auto_without_redis(self) -> None:
+        # With no Redis answering, ``auto`` degrades to the DynamoDB item cache.
+        with mock.patch.object(cache, "_redis_usable", lambda: False):
+            with mock.patch.dict(os.environ, {"CACHE_BACKEND": "auto"}):
+                self.assertEqual(cache.active_backend(), "dynamodb")
+            with mock.patch.dict(os.environ, {"CACHE_BACKEND": "dynamodb"}):
+                self.assertEqual(cache.active_backend(), "dynamodb")
+            with mock.patch.dict(os.environ, {"CACHE_BACKEND": "none"}):
+                self.assertEqual(cache.active_backend(), "none")
+            with mock.patch.dict(os.environ, {"CACHE_BACKEND": "redis"}):
+                self.assertEqual(cache.active_backend(), "none")
+
+    def test_active_backend_names_redis_when_it_answers(self) -> None:
+        with mock.patch.object(cache, "_redis_usable", lambda: True):
+            with mock.patch.dict(os.environ, {"CACHE_BACKEND": "auto"}):
+                self.assertEqual(cache.active_backend(), "redis")
+            with mock.patch.dict(os.environ, {"CACHE_BACKEND": "redis"}):
+                self.assertEqual(cache.active_backend(), "redis")
+
     def test_ttl_from_env_and_default(self) -> None:
         with mock.patch.dict(os.environ, {"CACHE_SEARCH_TTL_SECONDS": "120"}):
             self.assertEqual(cache.ttl("search", 300), 120)

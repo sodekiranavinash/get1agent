@@ -187,6 +187,32 @@ class KnowledgeCallerTests(unittest.TestCase):
         self.assertEqual(captured["arguments"]["query"], "x")
         self.assertTrue(captured["arguments"]["rerank"])
 
+    def test_graph_is_omitted_unless_forced(self) -> None:
+        """An agent that never opted in must not downgrade a Graph KB.
+
+        Retrieval is the knowledge base's own mode; sending ``graph: false``
+        would silently turn every graph search into plain hybrid.
+        """
+        from unittest import mock
+
+        calls: list[dict] = []
+
+        def fake_call(function, user_id, tool_name, arguments):
+            calls.append(arguments)
+            return None, {"result": {"content": [{"text": "ok"}]}}
+
+        with mock.patch.object(tools.mcp_client, "call_tool", fake_call):
+            tools._knowledge_caller(
+                "kb-fn", "u1", "search-user-knowledge-bases", ["my-kb"], False, {"n": 0}
+            )({"query": "x"})
+            self.assertNotIn("graph", calls[-1])
+
+            tools._knowledge_caller(
+                "kb-fn", "u1", "search-user-knowledge-bases", ["my-kb"], False, {"n": 0},
+                graph=True,
+            )({"query": "x"})
+            self.assertTrue(calls[-1]["graph"])
+
 
 @unittest.skipUnless(HAVE_STRANDS, "strands not installed")
 class MakeToolTests(unittest.TestCase):

@@ -7,5 +7,10 @@ dependencies = [
     "awslabs.mcp-lambda-handler==0.1.15",
     "boto3>=1.43.31",
     "python-dateutil>=2.8.2",
+    # Optional infrastructure: the knowledge cache, semantic cache and the
+    # Bedrock token bucket (core.cache / core.semantic_cache / core.ratelimit_bedrock)
+    # use Redis when REDIS_URL is configured and fall back to DynamoDB / S3 Vectors
+    # otherwise. Absent the extra, every path degrades safely.
+    "redis>=5.0",
     "tzdata>=2024.1",
 ]

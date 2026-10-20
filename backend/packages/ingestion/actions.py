@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
 from retrieval.embedding.config import config_from_dict, config_to_dict, load_config
+from ingestion.graph import build_graph
 from ingestion.pipeline import (
     embed_document,
     emit_event,
@@ -32,13 +34,36 @@ def _storage() -> Storage:
     return Storage()
 
 
+_PLACEHOLDER_ERRORS = {"Handled", "States.TaskFailed", "States.ALL", "Lambda.Unknown"}
+
+
 def _error_message(error: dict[str, Any] | None) -> str:
+    """Best-effort human message from a Step Functions ``Catch`` payload.
+
+    AWS passes the Lambda failure as a JSON string in ``Cause`` (often
+    ``{"errorType": "...", "errorMessage": "..."}``); some emulators only forward
+    ``{"Error": "Handled"}``. Unwrap whatever is available instead of showing a
+    raw JSON blob or a placeholder like ``Handled``.
+    """
     if not error:
         return "Ingestion failed"
-    cause = error.get("Cause")
-    if isinstance(cause, str) and cause:
-        return cause
-    return str(error.get("Error") or "Ingestion failed")
+
+    payload: Any = error.get("Cause")
+    if isinstance(payload, str) and payload:
+        try:
+            payload = json.loads(payload)
+        except (ValueError, TypeError):
+            return payload
+    if isinstance(payload, dict):
+        detail = payload.get("errorMessage") or payload.get("message")
+        error_type = payload.get("errorType") or payload.get("Error")
+        if detail:
+            return f"{error_type}: {detail}" if error_type else str(detail)
+
+    error_name = error.get("Error")
+    if error_name and str(error_name) not in _PLACEHOLDER_ERRORS:
+        return str(error_name)
+    return "Ingestion failed"
 
 
 def _format_bytes(size: int) -> str:
@@ -292,6 +317,103 @@ def index_action(event: dict[str, Any]) -> dict[str, Any]:
         "imageCount": indexed.image_count,
         "parentCount": indexed.parent_count,
     }
+
+
+def graph_extract_action(event: dict[str, Any]) -> dict[str, Any]:
+    """Graph RAG stage: extract entities + relationships into the graph.
+
+    Runs only for knowledge bases created in ``graph`` mode (the state machine's
+    Choice gates it), and is **best-effort**: a model throttling or a malformed
+    reply records a ``graph`` event and returns, leaving the document's hybrid
+    index — already written by the index stage — untouched.
+    """
+    config = config_from_dict(load_config(), event.get("config"))
+    if config.retrieval_mode != "graph":
+        return {"skipped": True, "reason": "hybrid mode"}
+    if (os.environ.get("GRAPH_EXTRACT_ENABLED", "true") or "true").strip().lower() in (
+        "0",
+        "false",
+        "no",
+        "off",
+    ):
+        return {"skipped": True, "reason": "disabled"}
+
+    logger.info(
+        "graph extract started",
+        extra={
+            "documentId": event["documentId"],
+            "knowledgeBaseId": event["knowledgeBaseId"],
+            "stage": "graph",
+        },
+    )
+    emit_event(
+        document_id=event["documentId"],
+        knowledge_base_id=event["knowledgeBaseId"],
+        user_id=event["userId"],
+        stage="graph",
+        status="started",
+        message="Extracting entities and relationships",
+    )
+    try:
+        summary = build_graph(
+            _storage(),
+            config,
+            user_id=event["userId"],
+            knowledge_base_id=event["knowledgeBaseId"],
+            document_id=event["documentId"],
+            chunks_key=event["chunksKey"],
+        )
+    except Exception as exc:  # noqa: BLE001 - graph build must never fail the doc
+        logger.warning(
+            "graph extract failed",
+            extra={
+                "documentId": event["documentId"],
+                "knowledgeBaseId": event["knowledgeBaseId"],
+                "stage": "graph",
+                "error": str(exc),
+            },
+        )
+        emit_event(
+            document_id=event["documentId"],
+            knowledge_base_id=event["knowledgeBaseId"],
+            user_id=event["userId"],
+            stage="graph",
+            status="failed",
+            message=str(exc)[:300],
+        )
+        return {"status": "failed", "error": str(exc)[:300]}
+
+    entities = int(summary.get("entities") or 0)
+    relationships = int(summary.get("relationships") or 0)
+    failed_batches = int(summary.get("failedBatches") or 0)
+    emit_event(
+        document_id=event["documentId"],
+        knowledge_base_id=event["knowledgeBaseId"],
+        user_id=event["userId"],
+        stage="graph",
+        status="succeeded",
+        message=(
+            f"{entities} entit{'y' if entities == 1 else 'ies'} · "
+            f"{relationships} relationship{'s' if relationships != 1 else ''}"
+            + (f" · {failed_batches} batch(es) failed" if failed_batches else "")
+        ),
+        details={
+            "entities": entities,
+            "relationships": relationships,
+            "batches": summary.get("batches"),
+            "failedBatches": failed_batches,
+            "mode": "graph",
+        },
+    )
+    logger.info(
+        "graph extract succeeded",
+        extra={
+            "documentId": event["documentId"],
+            "knowledgeBaseId": event["knowledgeBaseId"],
+            "stage": "graph",
+        },
+    )
+    return {"status": "succeeded", **summary}
 
 
 def mark_failed_action(event: dict[str, Any]) -> dict[str, Any]:

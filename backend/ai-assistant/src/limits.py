@@ -1,10 +1,10 @@
 """AI Assistant's per-caller rate limiting.
 
 This is the **second** layer, not the first. API Gateway throttles the route
-volumetrically before any Lambda runs; this layer is per-caller fairness, using
-the platform's own atomic DynamoDB counter (``core.ratelimit``) so the cap holds
-across concurrently running Lambdas, and so a second ingress path cannot bypass
-it.
+volumetrically before any Lambda runs; this layer is per-caller fairness, backed
+by the platform's shared limiter (``core.ratelimit``: Redis GCRA when configured,
+the DynamoDB counter otherwise) so the cap holds across concurrently running
+Lambdas, and so a second ingress path cannot bypass it.
 
 Three windows per caller, checked shortest first, because they fail differently:
 
@@ -18,6 +18,9 @@ Three windows per caller, checked shortest first, because they fail differently:
 Signed-in users get generous numbers (they are described as unlimited in the
 product, but a leaked token must still be bounded) and no burst cap by default;
 guests are capped per IP hash.
+
+All three windows are consumed in **one** atomic step, so the refusal is exact:
+a caller stopped by the day cap is not also charged against the hour cap.
 """
 
 from __future__ import annotations
@@ -26,12 +29,16 @@ import time
 from dataclasses import dataclass
 
 from core import ratelimit
+from core.ratelimit import Window
 
 from src import settings
 
 SURFACE_USER = "user"
 SURFACE_GUEST = "guest"
 SURFACE_EVAL = "eval"
+
+#: The policy id the shared limiter records these windows under.
+POLICY = "ai-assistant"
 
 #: The short window. Kept in one place so the settings default and the retry
 #: arithmetic cannot drift apart.
@@ -92,14 +99,28 @@ def check_and_count(caller: Caller) -> tuple[bool, int]:
     if not any(limit > 0 for _, _, limit, _ in windows):
         return True, 0
 
-    for _name, kind, limit, window_seconds in windows:
-        if limit <= 0:
-            continue
-        if not ratelimit.allow(
-            caller.key, kind=kind, limit=limit, window_seconds=window_seconds
-        ):
-            return False, _seconds_until(kind, window_seconds)
-    return True, 0
+    active = [
+        Window(name=kind, limit=limit, seconds=window_seconds)
+        for _name, kind, limit, window_seconds in windows
+        if limit > 0
+    ]
+    decision = ratelimit.check_windows(
+        caller.key, active, policy=POLICY, scope=caller.scope
+    )
+    if decision.allowed:
+        return True, 0
+
+    # GCRA reports the exact wait for the next slot; the DynamoDB fallback
+    # reports its window rollover. Either way the refusal names a real time.
+    seconds_by_kind = {
+        kind: window_seconds for _name, kind, _limit, window_seconds in windows
+    }
+    retry = int(decision.retry_after or 0)
+    if retry <= 0:
+        retry = _seconds_until(
+            decision.window, seconds_by_kind.get(decision.window, 60)
+        )
+    return False, retry
 
 
 def usage(caller: Caller) -> dict[str, int | str]:
@@ -107,8 +128,17 @@ def usage(caller: Caller) -> dict[str, int | str]:
     out: dict[str, int | str] = {"scope": caller.scope}
     for name, kind, limit, window_seconds in _windows(caller):
         out[f"{name}Used"] = ratelimit.current(
-            caller.key, kind=kind, window_seconds=window_seconds
+            caller.key,
+            kind=kind,
+            window_seconds=window_seconds,
+            # Reads the window ``check_and_count`` wrote, which is namespaced by
+            # policy (:func:`core.ratelimit.check_windows`).
+            policy=POLICY,
+            # Redis derives the count from the remaining headroom, so it needs
+            # the limit; the DynamoDB fallback ignores it.
+            limit=limit,
         )
         out[f"{name}Limit"] = limit
     return out
+
 

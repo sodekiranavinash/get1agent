@@ -133,7 +133,7 @@ function TabContent({ tab }: { tab: TabId }) {
       return (
         <JourneysTab
           title="Knowledge & retrieval"
-          blurb="Documents are chunked, embedded with Titan and indexed into S3 Vectors; questions are answered by hybrid semantic + BM25 search, fused with RRF and reranked on Bedrock. Read left to right — ingestion on the left, the grounded answer returning along the top."
+          blurb="Documents are chunked, embedded with Titan and indexed into S3 Vectors; questions are answered by hybrid semantic + BM25 search, fused with RRF and reranked on Bedrock. Retrieval is selectable per knowledge base — Hybrid RAG (the vector + BM25 path) or Graph RAG, which builds a graph of the entities and relationships the documents state and answers through that graph, with hybrid search as its fallback when the graph has no match. Read left to right — ingestion on the left, the grounded answer returning along the top."
           journeys={KNOWLEDGE_JOURNEYS}
         />
       )

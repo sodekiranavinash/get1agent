@@ -6,9 +6,11 @@ outputs matter.
 
 Backend is selected by ``CACHE_BACKEND``:
 
-* ``dynamodb`` (default) — one item per entry in the shared ``get1agent`` table
-  (``pk=CACHE#<prefix><kind>``, ``sk=<sha256>``, TTL ``expiresAt``), so there is
-  no external cache service.
+* ``auto`` (default) — **Redis** when it answers, the DynamoDB TTL item
+  otherwise. A dead Redis degrades the cache, it never breaks a request.
+* ``redis`` — Redis only; a miss on failure (the caller recomputes).
+* ``dynamodb`` — one item per entry in the shared ``get1agent`` table
+  (``pk=CACHE#<prefix><kind>``, ``sk=<sha256>``, TTL ``expiresAt``).
 * ``none`` — disabled.
 
 When it is not configured every call is a no-op, and every operation swallows
@@ -31,7 +33,35 @@ _MAX_PAYLOAD_BYTES = int(os.environ.get("CACHE_MAX_PAYLOAD_BYTES", "300000"))
 
 
 def backend() -> str:
-    return (os.environ.get("CACHE_BACKEND") or "dynamodb").strip().lower()
+    return (os.environ.get("CACHE_BACKEND") or "auto").strip().lower() or "auto"
+
+
+def _redis_usable() -> bool:
+    """True when the chosen backend includes Redis and it is answering."""
+    if backend() not in ("auto", "redis"):
+        return False
+    try:
+        from . import redis_client
+    except Exception:  # noqa: BLE001 - optional dependency
+        return False
+    return redis_client.available()
+
+
+def active_backend() -> str:
+    """The backend that actually serves now: ``redis`` | ``dynamodb`` | ``none``.
+
+    ``backend()`` is the *configuration* (and may be ``auto``); this resolves it
+    against the live Redis so callers can name the store that answered — e.g. a
+    cache hit shown on the run timeline.
+    """
+    choice = backend()
+    if choice == "dynamodb":
+        return "dynamodb"
+    if choice in ("auto", "redis"):
+        if _redis_usable():
+            return "redis"
+        return "dynamodb" if choice == "auto" else "none"
+    return "none"
 
 
 def enabled() -> bool:
@@ -56,6 +86,120 @@ def ttl(kind: str, default: int) -> int:
         return max(int(raw), 0)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return default
+
+
+# --- Redis backend ------------------------------------------------------------
+
+
+def _redis_get(key: str) -> Any:
+    raw = _redis_command("get", key)
+    return _decode(raw) if isinstance(raw, str) else None
+
+
+def _redis_get_many(keys: list[str]) -> list[Any]:
+    """One ``MGET`` for the batch (the deployed instance is op-limited)."""
+    redis = _redis_client()
+    if redis is None:
+        return [None] * len(keys)
+    try:
+        raw = redis.mget(keys)
+    except Exception:  # noqa: BLE001
+        _redis_note_failure()
+        return [None] * len(keys)
+    _redis_note_success()
+    if not isinstance(raw, list):
+        return [None] * len(keys)
+    return [_decode(item) if isinstance(item, str) else None for item in raw]
+
+
+def _redis_set(key: str, value: Any, ttl_seconds: int) -> None:
+    encoded = _encode(value)
+    if encoded is None or _too_large(encoded):
+        return
+    if ttl_seconds > 0:
+        _redis_command("set", key, encoded, ex=int(ttl_seconds))
+    else:
+        _redis_command("set", key, encoded)
+
+
+def _redis_set_many(pairs: list[tuple[str, Any]], ttl_seconds: int) -> None:
+    redis = _redis_client()
+    if redis is None:
+        return
+    try:
+        pipe = redis.pipeline(transaction=False)
+        wrote = False
+        for key, value in pairs:
+            encoded = _encode(value)
+            if encoded is None or _too_large(encoded):
+                continue
+            if ttl_seconds > 0:
+                pipe.set(key, encoded, ex=int(ttl_seconds))
+            else:
+                pipe.set(key, encoded)
+            wrote = True
+        if wrote:
+            pipe.execute()
+    except Exception:  # noqa: BLE001
+        _redis_note_failure()
+        return
+    _redis_note_success()
+
+
+def _redis_set_nx(key: str, ttl_seconds: int) -> bool | None:
+    """``SET key 1 NX EX ttl``; True when this caller created it, None on failure."""
+    redis = _redis_client()
+    if redis is None:
+        return None
+    try:
+        result = redis.set(key, "1", nx=True, ex=max(int(ttl_seconds), 1))
+    except Exception:  # noqa: BLE001
+        _redis_note_failure()
+        return None
+    _redis_note_success()
+    return bool(result)
+
+
+def _redis_delete(key: str) -> None:
+    _redis_command("delete", key)
+
+
+def _redis_client() -> Any:
+    try:
+        from . import redis_client as client
+    except Exception:  # noqa: BLE001
+        return None
+    if not client.available():
+        return None
+    return client.client()
+
+
+def _redis_command(fn: str, *args: Any, **kwargs: Any) -> Any:
+    try:
+        from . import redis_client
+    except Exception:  # noqa: BLE001
+        return None
+    # ``redis_client.command(label, method, …)`` — the label is only for the
+    # breaker/diagnostics; the method is what runs.
+    return redis_client.command(f"cache.{fn}", fn, *args, **kwargs)
+
+
+def _redis_note_failure() -> None:
+    try:
+        from . import redis_client
+
+        redis_client.record_failure()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _redis_note_success() -> None:
+    try:
+        from . import redis_client
+
+        redis_client.record_success()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # --- DynamoDB backend ---------------------------------------------------------
@@ -204,6 +348,37 @@ def _ddb_set_many(pairs: list[tuple[str, Any]], ttl_seconds: int) -> None:
             writer.put_item(Item=item)
 
 
+def _ddb_set_nx(key: str, ttl_seconds: int) -> bool:
+    """DynamoDB conditional put. True when this caller created the key."""
+    pk, sk = _pk_sk(key)
+    item: dict[str, Any] = {"pk": pk, "sk": sk, "payload": "1"}
+    if ttl_seconds > 0:
+        item["expiresAt"] = _now() + ttl_seconds
+    try:
+        _table().put_item(
+            Item=item,
+            ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)",
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        try:
+            from data.client import is_conditional_failure
+
+            if is_conditional_failure(exc):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
+
+def _ddb_delete(key: str) -> None:
+    pk, sk = _pk_sk(key)
+    try:
+        _table().delete_item(Key={"pk": pk, "sk": sk})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _encode(value: Any) -> str | None:
     try:
         return json.dumps(value)
@@ -226,11 +401,23 @@ def _decode(raw: Any) -> Any:
 def get(key: str) -> Any:
     if not enabled():
         return None
+    if _redis_usable():
+        # A Redis miss is a miss: falling back to DynamoDB per key would double
+        # the reads on every miss for no benefit (the DynamoDB entry is only
+        # written when Redis was down).
+        return _redis_get(key)
+    if backend() == "redis":
+        return None
     return _ddb_get(key)
 
 
 def set(key: str, value: Any, ttl_seconds: int) -> None:  # noqa: A001 - cache API
     if not enabled():
+        return
+    if _redis_usable():
+        _redis_set(key, value, ttl_seconds)
+        return
+    if backend() == "redis":
         return
     _ddb_set(key, value, ttl_seconds)
 
@@ -238,11 +425,20 @@ def set(key: str, value: Any, ttl_seconds: int) -> None:  # noqa: A001 - cache A
 def get_many(keys: list[str]) -> list[Any]:
     if not keys or not enabled():
         return [None] * len(keys)
+    if _redis_usable():
+        return _redis_get_many(keys)
+    if backend() == "redis":
+        return [None] * len(keys)
     return _ddb_get_many(keys)
 
 
 def set_many(pairs: list[tuple[str, Any]], ttl_seconds: int) -> None:
     if not pairs or not enabled():
+        return
+    if _redis_usable():
+        _redis_set_many(pairs, ttl_seconds)
+        return
+    if backend() == "redis":
         return
     _ddb_set_many(pairs, ttl_seconds)
 
@@ -254,32 +450,25 @@ def set_nx(key: str, ttl_seconds: int) -> bool:
     """Set ``key`` only if absent. True when this caller created it."""
     if not enabled():
         return True
-    pk, sk = _pk_sk(key)
-    item: dict[str, Any] = {"pk": pk, "sk": sk, "payload": "1"}
-    if ttl_seconds > 0:
-        item["expiresAt"] = _now() + ttl_seconds
-    try:
-        _table().put_item(
-            Item=item,
-            ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)",
-        )
+    if _redis_usable():
+        result = _redis_set_nx(key, ttl_seconds)
+        if result is not None:
+            return result
+        # Redis answered nothing: fail open (the caller computes) rather than
+        # serialising behind a lock we could not prove we took.
+        if backend() == "redis":
+            return True
+    elif backend() == "redis":
         return True
-    except Exception as exc:  # noqa: BLE001
-        try:
-            from data.client import is_conditional_failure
-
-            if is_conditional_failure(exc):
-                return False
-        except Exception:  # noqa: BLE001
-            pass
-        return True
+    return _ddb_set_nx(key, ttl_seconds)
 
 
 def delete(key: str) -> None:
     if not enabled():
         return
-    pk, sk = _pk_sk(key)
-    try:
-        _table().delete_item(Key={"pk": pk, "sk": sk})
-    except Exception:  # noqa: BLE001
-        pass
+    if _redis_usable():
+        _redis_delete(key)
+        return
+    if backend() == "redis":
+        return
+    _ddb_delete(key)

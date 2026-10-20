@@ -48,6 +48,29 @@ export const IMAGE_EMBED_MODEL = 'amazon.titan-embed-image-v1'
 export const EMBEDDING_DIM = 1024
 export const DEFAULT_CHUNK_SIZE = 512
 export const DEFAULT_CHUNK_OVERLAP = 64
+// Retrieval mode a knowledge base is created with, fixed at creation. Keep in
+// sync with backend/packages/retrieval/embedding/config.py
+// (SUPPORTED_RETRIEVAL_MODES) and the KB repository.
+export type RetrievalMode = 'hybrid' | 'graph'
+export const DEFAULT_RETRIEVAL_MODE: RetrievalMode = 'hybrid'
+export const RETRIEVAL_MODES: {
+  value: RetrievalMode
+  label: string
+  description: string
+}[] = [
+  {
+    value: 'hybrid',
+    label: 'Hybrid RAG',
+    description:
+      'Vector (semantic) + keyword (BM25) search, fused. The default: fast, and a great fit for most documents.',
+  },
+  {
+    value: 'graph',
+    label: 'Graph RAG',
+    description:
+      'Hybrid search plus a knowledge graph of the entities and relationships in your documents, so related facts across pages are found too. Costs more at ingest (one model pass per document).',
+  },
+]
 // Evenly-spaced, selectable points (no free-form values in the UI).
 export const CHUNK_SIZE_POINTS = [256, 384, 512, 768, 1024] as const
 export const CHUNK_OVERLAP_POINTS = [0, 32, 64, 128, 256] as const
@@ -98,6 +121,8 @@ export type KnowledgeBase = {
   embeddingDim: number
   chunkSize: number
   chunkOverlap: number
+  // hybrid | graph — fixed at creation.
+  retrievalMode: RetrievalMode
   createdAt: string
   updatedAt: string
 }
@@ -124,6 +149,7 @@ export type IngestionStage =
   | 'chunked'
   | 'embedding'
   | 'indexed'
+  | 'graph'
   | 'failed'
 
 export type IngestionEventStatus = 'started' | 'succeeded' | 'failed'
@@ -161,6 +187,12 @@ export type IngestionEventDetails = {
   // indexed
   vectors?: number
   tables?: string[]
+  // graph (Graph RAG knowledge bases)
+  entities?: number
+  relationships?: number
+  batches?: number
+  failedBatches?: number
+  mode?: 'hybrid' | 'graph'
   // failed
   failedStage?: string
 }
@@ -176,6 +208,60 @@ export type IngestionEvent = {
   message: string | null
   details: IngestionEventDetails | null
   createdAt: string
+}
+
+// The graph stage runs *after* the document is marked `ready` (the index stage
+// sets the status), so document status alone cannot tell the Activity panel that
+// work is still in flight. This is how long we keep watching a graph KB's
+// document that has just been indexed for the graph stage's `started` event.
+export const GRAPH_STAGE_SETTLE_MS = 2 * 60 * 1000
+
+/**
+ * Documents whose graph stage is still running.
+ *
+ * A document counts as in flight when its newest `graph` event is `started`
+ * (a terminal `succeeded`/`failed` event ends it), or — for a graph-mode
+ * knowledge base — when the document has just finished indexing and the graph
+ * stage has not reported yet (it is invoked straight after Index, so there is a
+ * short window where no `graph` event exists at all).
+ */
+export function graphStagesInFlight(
+  events: IngestionEvent[],
+  graphKnowledgeBaseIds: ReadonlySet<string>,
+  { settleMs = GRAPH_STAGE_SETTLE_MS, now = Date.now() } = {},
+): Set<string> {
+  const newest = new Map<string, IngestionEvent>()
+  const newestGraph = new Map<string, IngestionEvent>()
+  const at = (event: IngestionEvent) => Date.parse(event.createdAt)
+  for (const event of events) {
+    const latest = newest.get(event.documentId)
+    if (!latest || at(event) >= at(latest)) {
+      newest.set(event.documentId, event)
+    }
+    if (event.stage !== 'graph') continue
+    const latestGraph = newestGraph.get(event.documentId)
+    if (!latestGraph || at(event) >= at(latestGraph)) {
+      newestGraph.set(event.documentId, event)
+    }
+  }
+
+  const inFlight = new Set<string>()
+  for (const [documentId, latest] of newest) {
+    if (!graphKnowledgeBaseIds.has(latest.knowledgeBaseId)) continue
+    const graph = newestGraph.get(documentId)
+    if (graph) {
+      if (graph.status === 'started') inFlight.add(documentId)
+      continue
+    }
+    if (
+      latest.stage === 'indexed' &&
+      latest.status === 'succeeded' &&
+      now - Date.parse(latest.createdAt) <= settleMs
+    ) {
+      inFlight.add(documentId)
+    }
+  }
+  return inFlight
 }
 
 export type KnowledgeBaseDetail = {
@@ -289,6 +375,7 @@ export async function createKnowledgeBase(
     description?: string
     chunkSize?: number
     chunkOverlap?: number
+    retrievalMode?: RetrievalMode
   },
 ): Promise<KnowledgeBase> {
   return api.post<KnowledgeBase>('/v1/knowledge-bases', payload)

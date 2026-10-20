@@ -261,6 +261,9 @@ def search_candidates(
                 "vectorScore": entry.get("vectorScore"),
                 "lexicalScore": entry.get("lexicalScore"),
                 "rrfScore": entry["rrfScore"],
+                # Which retriever produced this passage: the hybrid legs here, or
+                # "graph" from a Graph-mode knowledge base (see search.graph).
+                "source": "hybrid",
             }
         )
     return candidates

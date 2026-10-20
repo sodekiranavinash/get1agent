@@ -18,6 +18,12 @@ SUPPORTED_IMAGE_EMBED_MODELS = (DEFAULT_IMAGE_EMBED_MODEL,)
 SUPPORTED_CHUNK_SIZES = (256, 384, 512, 768, 1024)
 SUPPORTED_CHUNK_OVERLAPS = (0, 32, 64, 128, 256)
 
+# Retrieval mode a knowledge base is created with (fixed at creation, like the
+# chunk settings). ``hybrid`` is the existing vector + BM25 path; ``graph``
+# additionally builds a knowledge graph at ingest and augments retrieval with it.
+SUPPORTED_RETRIEVAL_MODES = ("hybrid", "graph")
+DEFAULT_RETRIEVAL_MODE = "hybrid"
+
 # Child chunks are embedded and searched; parents are returned for context.
 # 512 is the research-backed default (Azure/Pinecone) and stays within the
 # Titan V2 window.
@@ -56,6 +62,8 @@ class IngestionConfig:
     embedding_dim: int
     chunk_size: int
     chunk_overlap: int
+    # hybrid | graph — see SUPPORTED_RETRIEVAL_MODES.
+    retrieval_mode: str
     parent_size: int
     max_images_per_doc: int
     min_image_bytes: int
@@ -101,6 +109,9 @@ def load_config() -> IngestionConfig:
         embedding_dim=_int("EMBED_DIM", DEFAULT_EMBEDDING_DIM),
         chunk_size=_int("CHUNK_SIZE", DEFAULT_CHUNK_SIZE),
         chunk_overlap=_int("CHUNK_OVERLAP", DEFAULT_CHUNK_OVERLAP),
+        retrieval_mode=(os.environ.get("RETRIEVAL_MODE") or DEFAULT_RETRIEVAL_MODE)
+        .strip()
+        .lower(),
         parent_size=_int("PARENT_SIZE", DEFAULT_PARENT_SIZE),
         max_images_per_doc=_int("MAX_IMAGES_PER_DOC", 50),
         min_image_bytes=_int("MIN_IMAGE_BYTES", 5 * 1024),
