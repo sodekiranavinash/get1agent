@@ -81,6 +81,12 @@ variable "mcp_function_arns" {
   default = []
 }
 
+variable "gateway_arns" {
+  type        = list(string)
+  default     = []
+  description = "AgentCore Gateway ARNs this runtime may call (MCP_TRANSPORT=gateway). Tools are reached with bedrock-agentcore:InvokeGateway on the gateway itself."
+}
+
 variable "kms_key_arns" {
   type        = list(string)
   default     = []

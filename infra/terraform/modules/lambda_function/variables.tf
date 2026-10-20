@@ -116,6 +116,12 @@ variable "bedrock_agentcore_arns" {
   description = "Bedrock AgentCore resource ARNs (code-interpreter/browser/registry) this Lambda may use; identity token actions are granted broadly"
 }
 
+variable "gateway_arns" {
+  type        = list(string)
+  default     = []
+  description = "AgentCore Gateway ARNs this Lambda may call (MCP_TRANSPORT=gateway). Requires bedrock-agentcore:InvokeGateway on the gateway itself."
+}
+
 variable "dynamodb_table_arns" {
   type        = list(string)
   default     = []

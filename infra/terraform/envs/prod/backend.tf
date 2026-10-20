@@ -191,11 +191,15 @@ resource "aws_bedrockagentcore_gateway" "agents" {
   }
 
   # Deterministic tool-call policy applies at the gateway as well as in-process.
+  # Policy is default-deny: an engine with no Cedar policies denies every call,
+  # so it is attached in LOG_ONLY until the permit set is authored. Flip to
+  # ENFORCE only once `aws_bedrockagentcore_policy` rules exist (otherwise every
+  # tool call returns "AuthorizeActionException - Tool Execution Denied").
   dynamic "policy_engine_configuration" {
     for_each = length(aws_bedrockagentcore_policy_engine.agents) > 0 ? [1] : []
     content {
       arn  = aws_bedrockagentcore_policy_engine.agents[0].policy_engine_arn
-      mode = "ENFORCE"
+      mode = "LOG_ONLY"
     }
   }
 }
@@ -683,6 +687,13 @@ locals {
   # The runtime always enforces the managed engine.
   agent_policy_engine_id = length(aws_bedrockagentcore_policy_engine.agents) > 0 ? aws_bedrockagentcore_policy_engine.agents[0].policy_engine_id : ""
   agentcore_memory_id    = length(aws_bedrockagentcore_memory.agents) > 0 ? aws_bedrockagentcore_memory.agents[0].id : ""
+  # Gateways reached over `MCP_TRANSPORT=gateway`. Every caller needs
+  # `bedrock-agentcore:InvokeGateway` on the gateway ARN itself (the Web Search
+  # connector lives on its own cross-Region gateway).
+  mcp_gateway_arns = compact([
+    length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_arn : "",
+    length(aws_bedrockagentcore_gateway.web_search) > 0 ? aws_bedrockagentcore_gateway.web_search[0].gateway_arn : "",
+  ])
 }
 
 # check "layer_base_zip_exists" {
@@ -1093,6 +1104,10 @@ module "admin_console" {
     module.http_fetch[0].function_arn,
     module.storage[0].function_arn,
   ]
+
+  # `MCP_TRANSPORT=gateway` below: the console calls the tools through the main
+  # gateway, so its role needs InvokeGateway on that gateway ARN.
+  gateway_arns = length(aws_bedrockagentcore_gateway.agents) > 0 ? [aws_bedrockagentcore_gateway.agents[0].gateway_arn] : []
 
   # Admin → AI Assistant re-ingest starts the ingestion state machine directly. This
   # is the same state machine `ingestion-dispatcher` starts from its SQS event, so
@@ -1697,8 +1712,8 @@ module "ai_assistant" {
   bedrock_rerank_arns = local.bedrock_rerank_model_arns
 
   environment = {
-    DYNAMODB_TABLE             = module.database[0].table_name
-    S3_BUCKET                  = module.knowledge_storage[0].bucket_name
+    DYNAMODB_TABLE = module.database[0].table_name
+    S3_BUCKET      = module.knowledge_storage[0].bucket_name
     # The semantic leg is `retrieval.s3_vectors`, so it needs the vector bucket by
     # name, exactly as knowledge-mcp does. Without it `VectorStore()` raises
     # "S3_VECTOR_BUCKET is required for VECTOR_STORE=s3vectors" and the search
@@ -1812,6 +1827,10 @@ module "agent_runtime" {
     module.mcp_connections[0].function_arn,
     module.custom_tools[0].function_arn,
   ]
+  # MCP_TRANSPORT=gateway below: every tool call is a signed request to the
+  # gateway, so the runtime role needs InvokeGateway on the main gateway and on
+  # the (cross-Region) Web Search gateway.
+  gateway_arns = local.mcp_gateway_arns
 
   jwt_discovery_url    = "https://${var.auth_domain}/.well-known/openid-configuration"
   jwt_allowed_audience = [var.auth_audience]
@@ -1893,6 +1912,7 @@ module "agent_runtime" {
     module.custom_tools,
     module.vault_kms,
     aws_bedrockagentcore_gateway.agents,
+    aws_bedrockagentcore_gateway.web_search,
   ]
 }
 

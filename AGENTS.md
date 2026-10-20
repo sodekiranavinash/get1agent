@@ -1694,8 +1694,22 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
   direct-invoke path remains for local development
   (`MCP_TRANSPORT=aggregator`).
 - The gateway also carries a `policy_engine_configuration` pointing at the managed
-  policy engine, so tool-call policy is enforced at both the gateway and in
-  process. The gateway role can only `lambda:InvokeFunction` the six MCP servers.
+  policy engine. The gateway role can only `lambda:InvokeFunction` the six MCP
+  servers (plus the policy-evaluation actions). **Callers need their own IAM
+  grant** — `bedrock-agentcore:InvokeGateway` on the gateway ARN — because the
+  `AWS_IAM` authorizer authenticates the caller before any tool runs: without it
+  every `tools/call` returns HTTP `403 {"code":-32002,"message":"Authorization
+  error - Insufficient permissions"}` even though tool discovery still works
+  (the runtime lists tools by direct-invoking the Lambda). The runtime role gets
+  both gateways (main + cross-Region Web Search) and `admin-console` gets the
+  main one (`gateway_arns` on `modules/agent_runtime` /
+  `modules/lambda_function`).
+- **Policy is default-deny.** An attached engine with **no** `aws_bedrockagentcore_policy`
+  rules denies every call (a policy denial is a `200` with
+  `AuthorizeActionException - Tool Execution Denied: … [No policy applies to the
+  request (denied by default).]`, not a `403`), and partial evaluation hides the
+  tools from `tools/list`. Until a permit set exists the engine is attached in
+  `LOG_ONLY`; flip to `ENFORCE` only after the rules are applied.
 
 ### AgentCore Memory + Policy (AWS-native)
 

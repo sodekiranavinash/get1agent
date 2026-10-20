@@ -198,6 +198,27 @@ resource "aws_iam_role_policy" "lambda_invoke" {
   })
 }
 
+# The admin console reaches the MCP servers through the AgentCore Gateway
+# (`MCP_TRANSPORT=gateway`). The gateway's authorizer is AWS_IAM, so the caller
+# must hold bedrock-agentcore:InvokeGateway on the gateway ARN; otherwise every
+# tools/list and tools/call answers 403 "Authorization error - Insufficient
+# permissions".
+resource "aws_iam_role_policy" "gateway_invoke" {
+  count = length(var.gateway_arns) > 0 ? 1 : 0
+  name  = "${var.name}-gateway-invoke"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "InvokeMcpGateway"
+      Effect   = "Allow"
+      Action   = ["bedrock-agentcore:InvokeGateway"]
+      Resource = var.gateway_arns
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "bedrock_agentcore" {
   count = length(var.bedrock_agentcore_arns) > 0 ? 1 : 0
   name  = "${var.name}-bedrock-agentcore"
