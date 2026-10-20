@@ -284,21 +284,33 @@ jobs:
           # on its DynamoDB / S3 Vectors fallback, so this never blocks a deploy.
           TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
         run: |
-          # Report whether the optional secrets actually reached this job. A
-          # secret that is missing, misnamed, or created as an Actions
-          # *variable* (vars.*) arrives here as "" and silently leaves the
-          # feature off, so say so in the run summary instead of failing
-          # quietly. Only lengths are printed — never the values.
-          if [ -z "${TF_VAR_redis_url}" ]; then
-            echo "::warning title=Redis disabled::secrets.REDIS_URL is empty in environment 'prod' — the limiter and caches fall back to DynamoDB/S3 Vectors. Check the name and that it is a secret, not a variable."
-          else
-            echo "Redis: secrets.REDIS_URL present (${#TF_VAR_redis_url} chars)"
-          fi
-          if [ -z "${TF_VAR_agent_service_client_secret}" ]; then
-            echo "::warning title=Service auth disabled::secrets.AGENT_SERVICE_CLIENT_SECRET is empty in environment 'prod' — the eval lab's agent task cannot mint a service token."
-          else
-            echo "Service auth: secrets.AGENT_SERVICE_CLIENT_SECRET present (${#TF_VAR_agent_service_client_secret} chars)"
-          fi
+          # Report which secrets actually reached this job. A secret that is
+          # missing, misnamed, created as an Actions *variable* (vars.*) or
+          # scoped to a different environment arrives here as "" and silently
+          # leaves its feature off, which looks identical to "not configured on
+          # purpose" in the apply output. Only lengths are printed — never the
+          # values. Both repository and environment secrets work; on a name
+          # clash the environment wins.
+          check_secret() {
+            local name="$1" value="$2" critical="${3:-no}"
+            if [ -n "$value" ]; then
+              printf '%-32s present (%s chars)\n' "$name" "${#value}"
+            elif [ "$critical" = yes ]; then
+              printf '%-32s MISSING\n' "$name"
+              echo "::warning title=$name is empty::secrets.$name resolved to an empty string in environment 'prod' — check the exact name and that it is a secret, not a variable."
+            else
+              printf '%-32s empty (optional)\n' "$name"
+            fi
+          }
+          echo "Secrets resolved by this job:"
+          check_secret AGENT_SERVICE_CLIENT_ID     "$TF_VAR_agent_service_client_id"
+          check_secret AGENT_SERVICE_CLIENT_SECRET "$TF_VAR_agent_service_client_secret" yes
+          check_secret AUTH_MGMT_CLIENT_ID         "$TF_VAR_auth_mgmt_client_id"
+          check_secret AUTH_MGMT_CLIENT_SECRET     "$TF_VAR_auth_mgmt_client_secret"
+          check_secret MCP_GITHUB_CLIENT_ID        "$TF_VAR_MCP_GITHUB_CLIENT_ID"
+          check_secret MCP_GITHUB_CLIENT_SECRET    "$TF_VAR_MCP_GITHUB_CLIENT_SECRET"
+          check_secret TRACE_LINK_SECRET           "$TF_VAR_trace_link_secret" yes
+          check_secret REDIS_URL                   "$TF_VAR_redis_url" yes
           bash infra/aws/apply-prod.sh
 
       - name: Agent runtime (build + push image, deploy)
