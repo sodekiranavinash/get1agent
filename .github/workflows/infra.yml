@@ -333,6 +333,18 @@ jobs:
           # The runtime only needs the M2M client *id* (SERVICE_AUTH_CLIENT_ID) to
           # know which `sub` to trust; it never receives the secret.
           TF_VAR_agent_service_client_id: ${{ secrets.AGENT_SERVICE_CLIENT_ID }}
+          # This step's second apply targets `module.api_gateway`, which depends on
+          # every Lambda, so it re-plans all of them: a variable that is set in the
+          # Prod step but missing here does not "stay as it is" — it plans to
+          # *remove* that feature's configuration. Keep this list identical to the
+          # Prod step's, or a deploy can strip REDIS_URL_SSM_PARAM / the M2M secrets
+          # from the Lambdas (and plan `count = 0` on the Redis SSM parameter, which
+          # `prevent_destroy` then refuses — failing the run after the real deploy).
+          TF_VAR_agent_service_client_secret: ${{ secrets.AGENT_SERVICE_CLIENT_SECRET }}
+          TF_VAR_auth_mgmt_client_id: ${{ secrets.AUTH_MGMT_CLIENT_ID }}
+          TF_VAR_auth_mgmt_client_secret: ${{ secrets.AUTH_MGMT_CLIENT_SECRET }}
+          TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
+          BROWSER_ALLOWED_DOMAINS: ${{ vars.BROWSER_ALLOWED_DOMAINS }}
         run: bash infra/aws/deploy-agent-runtime.sh
 
       # Cloudflare runs AFTER the AWS stacks: write-cloudflare-tfvars.sh copies

@@ -8,6 +8,22 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 bash "$ROOT/infra/aws/write-prod-tfvars.sh"
 
+# A targeted apply still plans the dependencies of its targets, and
+# `-target=module.api_gateway` reaches every Lambda — so a TF_VAR that is empty in
+# this process does not mean "leave it alone", it means "remove that feature's
+# configuration". For redis_url that is `count = 0`, i.e. destroying the live
+# SecureString, which its `prevent_destroy` refuses: the run then dies at plan time
+# with a graph error instead of a reason. Only guard the destructive case, so a
+# first-time bootstrap (no parameter yet) still applies.
+if [[ -z "${TF_VAR_redis_url:-}" ]] \
+   && aws ssm get-parameter --name /get1agent/prod/redis-url --region "${AWS_REGION:-ap-south-1}" >/dev/null 2>&1; then
+  echo "error: TF_VAR_redis_url is empty but /get1agent/prod/redis-url exists." >&2
+  echo "       This apply would plan to destroy it (blocked by prevent_destroy) and strip" >&2
+  echo "       REDIS_URL_SSM_PARAM from every Lambda. Run the Infrastructure workflow, which" >&2
+  echo "       passes secrets.REDIS_URL, or export TF_VAR_redis_url before applying." >&2
+  exit 1
+fi
+
 TARGETS=()
 [[ "${APPLY_API_GATEWAY:-false}" == "true" ]] && TARGETS+=(-target=module.api_gateway)
 [[ "${APPLY_BACKEND_LAMBDAS:-false}" == "true" ]] && {
