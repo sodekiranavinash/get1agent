@@ -74,6 +74,14 @@ package:
 	@# shows up on the first invocation, after the apply has already gone green.
 	@bad="$$(find dist/unpacked \( -name '*darwin*.so' -o -name '*.dylib' -o -name '*x86_64*linux*.so' \) -print | head -5)"; \
 	[ -z "$$bad" ] || { echo "host-platform wheels in the zip — expected $(LAMBDA_PLATFORM):" >&2; echo "$$bad" >&2; exit 1; }
+	@# A build stamp, so no two builds are byte-identical. Terraform compares
+	@# `source_code_hash` with what the last apply recorded, not with what AWS is
+	@# actually running: a reproducible zip plus any out-of-band code change (or a
+	@# deploy that was replaced by hand) then plans "no change" and leaves the
+	@# Lambda on old code indefinitely — which is exactly what happened here.
+	@printf '{"commit":"%s","builtAt":"%s"}\n' \
+		"$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+		"$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/unpacked/build-info.json
 	@# Keep the unpacked copy as `dist/pkg/`, which is also the zip's source.
 	mv dist/unpacked dist/pkg
 	find dist/pkg -type d -name __pycache__ -prune -exec rm -rf {} +
