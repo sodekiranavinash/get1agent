@@ -9,8 +9,10 @@ package:
 	for p in $(PACKAGES); do cp -R "$(PKG_ROOT)/$$p" "dist/$$p"; done
 	# Install Python dependencies into site-packages
 	if [ -f pyproject.toml ]; then \
-		uv sync --project . --no-dev --quiet; \
-		cp -R .venv/lib/python3.14/site-packages/* dist/ 2>/dev/null || true; \
+		uv sync --project . --no-dev --quiet --python 3.14 || { echo "uv sync failed - dependencies were not installed" >&2; exit 1; }; \
+		sp="$$(ls -d .venv/lib/python*/site-packages 2>/dev/null | head -1)"; \
+		[ -n "$$sp" ] || { echo "no .venv site-packages after uv sync" >&2; exit 1; }; \
+		cp -R "$$sp"/* dist/ || { echo "copying dependencies into dist failed" >&2; exit 1; }; \
 		rm -rf dist/bin dist/*.pth dist/INSTALLER dist/_virtualenv.py; \
 	fi
 	find dist -type d -name __pycache__ -prune -exec rm -rf {} +

@@ -23,12 +23,14 @@ package:
 	# Install Python dependencies into site-packages
 	if [ -f pyproject.toml ]; then \
 		if [ -n "$(DEP_PLATFORM)" ]; then \
-			uv export --project . --no-dev --format requirements-txt --no-hashes --no-emit-project -o .requirements.txt --quiet; \
-			uv pip install --target dist --python-platform $(DEP_PLATFORM) --python-version 3.14 -r .requirements.txt --quiet; \
+			uv export --project . --no-dev --format requirements-txt --no-hashes --no-emit-project -o .requirements.txt --quiet || { echo "uv export failed" >&2; exit 1; }; \
+			uv pip install --target dist --python-platform $(DEP_PLATFORM) --python-version 3.14 -r .requirements.txt --quiet || { echo "uv pip install (native wheels) failed" >&2; exit 1; }; \
 			rm -f .requirements.txt; \
 		else \
-			uv sync --project . --no-dev --quiet; \
-			cp -R .venv/lib/python3.14/site-packages/* dist/ 2>/dev/null || true; \
+			uv sync --project . --no-dev --quiet --python 3.14 || { echo "uv sync failed - dependencies were not installed" >&2; exit 1; }; \
+			sp="$$(ls -d .venv/lib/python*/site-packages 2>/dev/null | head -1)"; \
+			[ -n "$$sp" ] || { echo "no .venv site-packages after uv sync" >&2; exit 1; }; \
+			cp -R "$$sp"/* dist/ || { echo "copying dependencies into dist failed" >&2; exit 1; }; \
 		fi; \
 		rm -rf dist/bin dist/*.pth dist/INSTALLER dist/_virtualenv.py; \
 	fi
