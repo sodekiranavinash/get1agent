@@ -66,6 +66,20 @@ jobs:
         if: inputs.api_gateway || inputs.lambdas
         uses: astral-sh/setup-uv@v5
 
+      # The agent-run control-plane Lambda (backend/services/agent-run) is a
+      # Node package. Pin the toolchain here instead of leaning on whatever
+      # node/npm the runner image happens to ship, so the `npm ci` that builds
+      # its zip behaves the same on every run.
+      - name: Setup Node
+        if: inputs.api_gateway || inputs.lambdas
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            backend/services/agent-run/package-lock.json
+            backend/services/agent-run/microvm/package-lock.json
+
       - name: Run integration tests
         if: inputs.api_gateway || inputs.lambdas
         run: make test
@@ -223,9 +237,15 @@ jobs:
           unzip -l backend/services/mcp/mcp-connections/dist/function.zip | grep handler.py
           test -s backend/services/agent-run/dist/function.zip
           unzip -l backend/services/agent-run/dist/function.zip | grep index.mjs
+          # The control plane imports the SDK lazily; without it bundled the
+          # function deploys fine and only fails on its first real invocation.
+          unzip -l backend/services/agent-run/dist/function.zip \
+            | grep -q '@aws-sdk/client-lambda-microvms/package.json' \
+            || { echo "agent-run function.zip is missing @aws-sdk/client-lambda-microvms" >&2; exit 1; }
           test -s backend/services/agent-run/dist/microvm.zip
           unzip -l backend/services/agent-run/dist/microvm.zip | grep Dockerfile
           unzip -l backend/services/agent-run/dist/microvm.zip | grep 'app.mjs'
+          unzip -l backend/services/agent-run/dist/microvm.zip | grep 'package-lock.json'
           test -s backend/services/scheduler/dist/function.zip
           unzip -l backend/services/scheduler/dist/function.zip | grep handler.py
           test -s backend/services/mcp/browser/dist/function.zip

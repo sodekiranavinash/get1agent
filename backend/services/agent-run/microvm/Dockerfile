@@ -7,9 +7,12 @@ FROM node:24-alpine
 
 WORKDIR /app
 
-# Install the WebSocket server dependency.
-COPY package.json ./
-RUN npm install --omit=dev --no-audit --no-fund
+# Install the WebSocket server dependency from the committed lockfile, so the
+# image build resolves exactly the reviewed versions instead of whatever the
+# registry's `latest` tags point at on build day.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund \
+      --fetch-retries=5 --fetch-retry-maxtimeout=60000
 
 # The streaming server plus the shared proxy core it imports.
 COPY app.mjs ./microvm/app.mjs
