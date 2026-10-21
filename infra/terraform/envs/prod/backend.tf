@@ -1870,7 +1870,20 @@ module "ai_assistant" {
     AI_ASSISTANT_GUEST_ENABLED = "true"
     VECTOR_STORE               = "s3vectors"
     EMBED_MODE                 = "bedrock"
-    CACHE_BACKEND              = "dynamodb"
+    # Redis first, DynamoDB only as the fallback: a cache hit must not cost a
+    # DynamoDB round trip, and a dead Redis degrades to the old behaviour.
+    CACHE_BACKEND               = "auto"
+    CACHE_SEARCH_TTL_SECONDS    = "300"
+    CACHE_EMBEDDING_TTL_SECONDS = "2592000"
+    # Semantic cache: Redis RediSearch ANN (shared `platform` namespace) when it
+    # answers, the S3 Vectors store otherwise; the payload rides the cache
+    # backend above. The {audience, allowAdmin, topK, rerank} signature is part
+    # of the tag, so an admin passage list is never served to a non-admin.
+    SEMANTIC_CACHE_BACKEND     = "auto"
+    SEMANTIC_CACHE_ENABLED     = "true"
+    SEMANTIC_CACHE_THRESHOLD   = "0.95"
+    SEMANTIC_CACHE_TTL_SECONDS = "600"
+    SEMANTIC_CACHE_MAX_BYTES   = tostring(var.semantic_cache_max_bytes)
     # Per-caller fairness: Redis GCRA when configured (SSM), DynamoDB otherwise.
     REDIS_URL_SSM_PARAM = local.redis_ssm_param_name
     RATELIMIT_BACKEND   = "auto"

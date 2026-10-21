@@ -3,8 +3,8 @@
 AI Assistant's knowledge is an **ordinary knowledge base** owned by a reserved scope, not
 a special store. That is what lets AI Assistant reuse the whole existing retrieval stack —
 hybrid S3 Vectors + BM25 search, RRF fusion, opt-in Bedrock rerank, small-to-big
-parent hydration, the exact cache, the semantic cache and single-flight — with no
-new retrieval code to maintain.
+parent hydration, the exact cache and the semantic cache — with no new retrieval
+code to maintain.
 
 The scope is a pseudo-user: there is no profile, no login and no session for it,
 so it can never be listed to a real user, and every key it owns is namespaced by

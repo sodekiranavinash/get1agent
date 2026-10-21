@@ -192,9 +192,37 @@ S3      = raw/platform/…, derived/platform/…, index/platform/…
 ```
 
 Every retrieval call passes that scope instead of a user id, so the existing
-hybrid search, reranking, parent hydration, exact cache, semantic cache and
-single-flight behaviour apply unchanged. A user's own knowledge bases are
-reachable only through `search_my_knowledge`, which is scoped to their own id.
+hybrid search, reranking, parent hydration, exact cache and semantic cache
+behaviour apply unchanged. A user's own knowledge bases are reachable only
+through `search_my_knowledge`, which is scoped to their own id.
+
+### 6.1.1 Retrieval cache
+
+Retrieval is cached in two layers, and both are shared rather than per-user:
+the corpus and the answer surface are the same for every visitor.
+
+- **Exact** (`core.cache`): keyed on the normalized question, `top_k`, the
+  audience and the rerank flag. An identical starter question costs one cache
+  read and no embedding.
+- **Semantic** (`core.semantic_cache`): after the query is embedded, a
+  near-duplicate entry (cosine ≥ `SEMANTIC_CACHE_THRESHOLD`) returns the same
+  passage payload. It uses one shared `platform` namespace, so traffic from
+  guests and signed-in users warms the same index. The entry's requirement
+  signature is `{audience, allowAdmin, topK, rerank}`; without the visibility
+  fields an admin's passages could be served to a non-admin.
+
+A semantic hit skips the S3 Vectors query, the BM25 object reads, parent
+hydration and the cross-region Bedrock Rerank call — the expensive half of a
+turn. It does **not** skip the query embedding (the ANN needs the vector) or the
+model call that writes the answer. Hit rate is therefore a retrieval-latency and
+retrieval-cost lever, not an answer-generation one.
+
+The Lambda is configured Redis-first (`CACHE_BACKEND=auto`,
+`SEMANTIC_CACHE_BACKEND=auto`): RediSearch answers, and DynamoDB (payload) /
+S3 Vectors (ANN) are only the fallback when Redis is unavailable. A cache that
+is broken, malformed or disabled degrades to a normal search — it can never fail
+one. The diagnostic stage is `semantic-cache-hit`, which `metrics.retrieval`
+counts as a `CacheHits` datapoint.
 
 ### 6.2 Corpus sources (repository only)
 
@@ -404,7 +432,7 @@ origin, so the widget talks to it directly.
 | Separate service, not a package inside the agent runtime | Isolates a second framework (LangChain/LangGraph) from Strands, so neither can break the other; the integration surface is only the SSE frames, the DynamoDB keys and the retrieval package |
 | One Lambda behind two API Gateway routes | Identity is the gateway's job, so there is no session token to mint, forward or verify and nothing to keep in sync between two components. A guest is the same engine with `is_guest=True`, which makes "nothing is persisted for a guest" structural rather than a conditional |
 | Buffered response instead of streaming | API Gateway HTTP APIs cannot stream and cap an integration at 30 s. Removing the MicroVM costs the live token-by-token display; the frames, `ttftMs` and the work log are unchanged, and a soft turn budget keeps a slow run renderable |
-| Reserved `platform` scope instead of a new vector store | Reuses hybrid search, rerank, small-to-big hydration, the exact cache, the semantic cache and single-flight — no new retrieval code to maintain |
+| Reserved `platform` scope instead of a new vector store | Reuses hybrid search, rerank, small-to-big hydration, the exact cache and the semantic cache — no new retrieval code to maintain |
 | Generated, committed corpus instead of a crawler | Deterministic, reviewable in a PR, drift-checked in CI, and no authenticated crawl harness to operate |
 | Read-only agent, no shell, no subagents | A support widget must answer in seconds; the harness's planning and context middleware are used, its delegation and filesystem-write middleware are deliberately declined |
 | AI Assistant-specific prefixes | Keeps AI Assistant out of the agent chat sidebar, the agent trace list and the agent feedback table, so neither surface gets noisier |

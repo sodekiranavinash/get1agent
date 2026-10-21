@@ -232,6 +232,15 @@ jobs:
           unzip -l backend/services/mcp/browser/dist/function.zip | grep handler.py
           test -s backend/ai-assistant/dist/function.zip
           unzip -l backend/ai-assistant/dist/function.zip | grep handler.py
+          # The framework *is* the product and `redis` backs the exact cache, the
+          # semantic cache and the rate limiter, so a zip that lost its
+          # site-packages must fail here — not after the apply, where the Lambda
+          # would only fail on its first import. The leading `[[:space:]]` anchors
+          # the path so `langgraph/cache/redis/` cannot satisfy the redis check.
+          for mod in deepagents redis; do
+            unzip -l backend/ai-assistant/dist/function.zip | grep -qE "[[:space:]]$mod/__init__\.py$" \
+              || { echo "ai-assistant zip is missing $mod/__init__.py — dependencies were not bundled" >&2; exit 1; }
+          done
 
       - name: Terraform validate
         if: inputs.api_gateway || inputs.lambdas

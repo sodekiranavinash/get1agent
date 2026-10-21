@@ -1,12 +1,12 @@
 # AI Assistant — the **local development** image. Not a deployable.
 #
 # Production is one Lambda behind two API Gateway routes, packaged by
-# `make -C backend/ai-assistant package`. This image exists because that zip is
-# built from the **host's** wheels, and on a Mac those are macOS binaries
-# (`orjson.cpython-313-darwin.so`), which Floci's Linux Lambda containers cannot
-# import. So locally the service runs from the committed `uv.lock` on Linux
-# instead, serving the **same** `handler.lambda_handler` through the ASGI bridge
-# in `main.py` — the handler is not reimplemented, only transported.
+# `make -C backend/ai-assistant package` for the Lambda's own platform
+# (Linux/arm64). This image is the **local service**: it runs the committed
+# `uv.lock` on Linux with the dev dependency group (`uvicorn`/`fastapi`, which
+# the Lambda zip excludes), serving the **same** `handler.lambda_handler` through
+# the ASGI bridge in `main.py` — the handler is not reimplemented, only
+# transported.
 #
 # It is a service in the Floci stack (`infra/local/floci/docker-compose.yml`), so
 # `make floci` starts it, `make floci-reload` rebuilds it after code changes and

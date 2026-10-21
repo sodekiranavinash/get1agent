@@ -286,15 +286,19 @@ services:
       S3_ADDRESSING_STYLE: path
       S3_BUCKET: ${S3_BUCKET:-get1agent-local}
       S3_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
-      # Retrieval, configured exactly as the host-side corpus ingest does it
-      # (backend/ai-assistant/tools/local_env.py): the local vector store, and no
-      # cache — the DynamoDB cache adds latency locally and hides whether retrieval
-      # actually worked. Embeddings are always Amazon Titan on real AWS (`bedrock`),
-      # so this service and the ingestion workers cannot disagree about which model
-      # wrote the vectors.
+      # Retrieval uses the local vector store. The caches stay **on** and point
+      # at the stack's Redis — the same backend production uses — so a repeated
+      # question takes the path a real user gets. Set CACHE_BACKEND=none in .env
+      # to force fresh retrieval. Embeddings are always Amazon Titan on real AWS
+      # (`bedrock`), so this service and the ingestion workers cannot disagree
+      # about which model wrote the vectors.
       EMBED_MODE: ${EMBED_MODE:-bedrock}
       VECTOR_STORE: local
-      CACHE_BACKEND: none
+      CACHE_BACKEND: ${CACHE_BACKEND:-auto}
+      SEMANTIC_CACHE_BACKEND: ${SEMANTIC_CACHE_BACKEND:-auto}
+      SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED:-true}
+      SEMANTIC_CACHE_THRESHOLD: ${SEMANTIC_CACHE_THRESHOLD:-0.95}
+      SEMANTIC_CACHE_TTL_SECONDS: ${SEMANTIC_CACHE_TTL_SECONDS:-600}
       # Per-caller fairness limiter: Redis GCRA locally, so the refusal path the
       # deployed Lambda uses is the one a developer meets.
       REDIS_URL: redis://redis:6379/0

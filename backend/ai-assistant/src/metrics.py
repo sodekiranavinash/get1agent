@@ -143,7 +143,9 @@ def retrieval(diagnostic: dict[str, Any], *, surface: str) -> dict[str, Any]:
         "stage": str(diagnostic.get("stage") or ""),
         "Retrievals": 1,
         "RetrievalMs": int(diagnostic.get("latencyMs") or 0),
-        "CacheHits": 1 if diagnostic.get("stage") == "cache-hit" else 0,
+        "CacheHits": int(
+            diagnostic.get("stage") in ("cache-hit", "semantic-cache-hit")
+        ),
         "Returned": int(diagnostic.get("returned") or 0),
     }
     _emit(payload)

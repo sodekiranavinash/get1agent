@@ -470,6 +470,19 @@ a request.
       Env: `SEMANTIC_CACHE_ENABLED`, `SEMANTIC_CACHE_BACKEND`,
       `SEMANTIC_CACHE_THRESHOLD`, `SEMANTIC_CACHE_TTL_SECONDS` (600),
       `SEMANTIC_CACHE_MAX_BYTES` (200000).
+    - **AI Assistant reuses it** (`src/retrieval.py`) under one shared
+      `platform` namespace — the corpus is identical for every caller, so a
+      question answered for one visitor warms the cache for all of them,
+      guests included. The requirement signature is
+      `{audience, allowAdmin, topK, rerank}` so an admin's passage list (which
+      includes admin docs) can never be served to a non-admin. A hit skips the
+      S3 Vectors query, the BM25 reads, parent hydration and the cross-region
+      rerank; it does **not** skip the query embedding (the ANN needs the
+      vector) or the answer generation. Its diagnostic stage is
+      `semantic-cache-hit` and `metrics.retrieval` counts it as a cache hit.
+      Its Lambda is configured Redis-first (`CACHE_BACKEND=auto`,
+      `SEMANTIC_CACHE_BACKEND=auto`), with DynamoDB / S3 Vectors only as the
+      fallback.
 - **Cache hits are visible.** `knowledge-mcp` stamps `meta.cache`
   (`{hit, kind, backend, similarity?}`) on every search result — `kind` is
   `exact` / `semantic` / `none` and `backend` is the store that answered

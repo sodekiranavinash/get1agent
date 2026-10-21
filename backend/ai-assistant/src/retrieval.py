@@ -9,7 +9,10 @@ invent a retrieval system: it reuses the platform's own primitives —
 * ``retrieval.s3_vectors`` for the semantic leg (``idx-platform``);
 * ``retrieval.term_index`` + BM25 for the lexical leg;
 * ``retrieval.layout.parent_key`` for small-to-big hydration;
-* ``core.cache`` for the exact-match payload cache.
+* ``core.cache`` for the exact-match payload cache;
+* ``core.semantic_cache`` for the near-duplicate payload cache (Redis RediSearch
+  when it answers), so a reworded version of a common question skips the vector
+  query, the BM25 reads, hydration and the cross-region rerank.
 
 The fusion (Reciprocal Rank Fusion) lives here rather than in the knowledge MCP
 because AI Assistant is deliberately a **separate service**: it depends on the shared
@@ -20,6 +23,7 @@ live retrieval path.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -52,6 +56,10 @@ SNIPPET_CHARS = int(os.environ.get("AI_ASSISTANT_SNIPPET_CHARS", "600") or "600"
 BM25_K1 = float(os.environ.get("AI_ASSISTANT_BM25_K1", "1.2") or "1.2")
 BM25_B = float(os.environ.get("AI_ASSISTANT_BM25_B", "0.75") or "0.75")
 CACHE_TTL_SECONDS = int(os.environ.get("AI_ASSISTANT_RETRIEVAL_CACHE_TTL_SECONDS", "300") or "300")
+#: Every caller searches the same reserved platform corpus, so one shared
+#: namespace lets a question answered for one visitor warm the cache for the
+#: rest — including guests. It is not a user id: nothing user-scoped is stored.
+SEMANTIC_CACHE_USER = os.environ.get("AI_ASSISTANT_SEMANTIC_CACHE_USER", "platform") or "platform"
 
 #: How many fused candidates reach the reranker. Reranking only reorders what it
 #: is given, so this is the recall ceiling: too small and the right passage never
@@ -446,14 +454,126 @@ def rerank_passages(
     return reordered, True
 
 
-def _cache_key(query: str, top_k: int, audience: str, *, rerank: bool = True) -> str:
+def _cache_key(
+    query: str,
+    top_k: int,
+    audience: str,
+    *,
+    rerank: bool = True,
+    allow_admin: bool = False,
+) -> str:
     # The audience is part of the key: without it an admin-scoped answer could be
-    # served to a non-admin asking the same question. Reranking is part of it too,
-    # so turning the reranker off (or running with it on) never serves the other
+    # served to a non-admin asking the same question. The admin flag is too, since
+    # it is what actually widens hydration. Reranking is part of it as well, so
+    # turning the reranker off (or running with it on) never serves the other
     # configuration's ordering from cache.
     return cache.cache_key(
-        "ai-assistant-search", query.strip().lower(), top_k, audience, bool(rerank)
+        "ai-assistant-search",
+        query.strip().lower(),
+        top_k,
+        audience,
+        bool(rerank),
+        bool(allow_admin),
     )
+
+
+def _semantic_cache():
+    try:
+        from core import semantic_cache
+    except Exception:  # noqa: BLE001 - the semantic cache is optional
+        return None
+    return semantic_cache
+
+
+def _semantic_require(
+    audience: str, top_k: int, rerank: bool, allow_admin: bool = False
+) -> dict[str, Any]:
+    """Metadata a cached entry must match to be usable for this search.
+
+    Audience is not optional: ``allow_admin`` decides which documents are
+    hydrated, so an admin's passage list (which legitimately includes admin
+    docs) must never be served to a non-admin asking the same thing. Both the
+    label and the actual flag are in the signature, so a caller that passes
+    ``allow_admin=True`` with an unexpected label still cannot share an entry.
+    """
+    return {
+        "audience": audience,
+        "allowAdmin": bool(allow_admin),
+        "topK": int(top_k),
+        "rerank": bool(rerank),
+    }
+
+
+def _semantic_vector_id(
+    text: str, top_k: int, audience: str, rerank: bool, allow_admin: bool = False
+) -> str:
+    """Deterministic id so the same question upserts instead of accumulating."""
+    parts = "\x1f".join(
+        [
+            text.strip().lower(),
+            str(top_k),
+            audience,
+            str(bool(rerank)),
+            str(bool(allow_admin)),
+        ]
+    )
+    return hashlib.sha256(parts.encode("utf-8")).hexdigest()[:32]
+
+
+def _semantic_lookup(
+    vector: list[float],
+    *,
+    audience: str,
+    top_k: int,
+    rerank: bool,
+    allow_admin: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, Any]] | None:
+    """``(cached passage dicts, cache info)`` for a near-duplicate query."""
+    semantic = _semantic_cache()
+    if semantic is None or not vector:
+        return None
+    try:
+        match = semantic.lookup_match(
+            user_id=SEMANTIC_CACHE_USER,
+            vector=vector,
+            require=_semantic_require(audience, top_k, rerank, allow_admin),
+        )
+    except Exception:  # noqa: BLE001 - a cache can never break a search
+        return None
+    if not match:
+        return None
+    payload, info = match
+    # Validate before trusting it: a malformed entry must be a miss, not an error.
+    if not isinstance(payload, list) or not payload:
+        return None
+    if not all(isinstance(item, dict) for item in payload):
+        return None
+    return payload, info
+
+
+def _semantic_store(
+    vector: list[float],
+    passages: list[Passage],
+    *,
+    text: str,
+    audience: str,
+    top_k: int,
+    rerank: bool,
+    allow_admin: bool = False,
+) -> None:
+    semantic = _semantic_cache()
+    if semantic is None or not vector or not passages:
+        return
+    try:
+        semantic.store(
+            user_id=SEMANTIC_CACHE_USER,
+            vector=vector,
+            value=[passage.to_dict() for passage in passages],
+            vector_id=_semantic_vector_id(text, top_k, audience, rerank, allow_admin),
+            require=_semantic_require(audience, top_k, rerank, allow_admin),
+        )
+    except Exception:  # noqa: BLE001 - a cache can never break a search
+        pass
 
 
 def search(
@@ -478,7 +598,9 @@ def search(
 
     scope = settings.retrieval_scope()
     wants_rerank = rerank_enabled()
-    key = _cache_key(text, top_k, audience, rerank=wants_rerank)
+    key = _cache_key(
+        text, top_k, audience, rerank=wants_rerank, allow_admin=allow_admin
+    )
     if use_cache:
         cached = cache.get(key)
         if isinstance(cached, list) and cached:
@@ -505,6 +627,26 @@ def search(
 
     if not query_vector:
         return [], {**diagnostic, "stage": "no-vector"}
+
+    if use_cache:
+        semantic_hit = _semantic_lookup(
+            query_vector,
+            audience=audience,
+            top_k=top_k,
+            rerank=wants_rerank,
+            allow_admin=allow_admin,
+        )
+        if semantic_hit is not None:
+            cached_items, info = semantic_hit
+            passages = [_passage_from_dict(item) for item in cached_items]
+            return passages, {
+                **diagnostic,
+                "stage": "semantic-cache-hit",
+                "count": len(passages),
+                "returned": len(passages),
+                "cache": info,
+                "latencyMs": int((time.perf_counter() - started) * 1000),
+            }
 
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -584,14 +726,20 @@ def search(
     if diagnostic.get("legErrors"):
         diagnostic["stage"] = "degraded"
     if use_cache and passages:
+        serialized = [passage.to_dict() for passage in passages]
         try:
-            cache.set(
-                key,
-                [passage.to_dict() for passage in passages],
-                ttl_seconds=CACHE_TTL_SECONDS,
-            )
+            cache.set(key, serialized, ttl_seconds=CACHE_TTL_SECONDS)
         except Exception:  # noqa: BLE001 - the cache is never on the critical path
             pass
+        _semantic_store(
+            query_vector,
+            passages,
+            text=text,
+            audience=audience,
+            top_k=top_k,
+            rerank=wants_rerank,
+            allow_admin=allow_admin,
+        )
     return passages, diagnostic
 
 
@@ -607,6 +755,11 @@ def _passage_from_dict(item: dict[str, Any]) -> Passage:
         doc_id=str(item.get("documentId") or ""),
         kb_id=str(item.get("knowledgeBaseId") or ""),
         page=item.get("page") if isinstance(item.get("page"), int) else None,
+        rerank_score=(
+            float(item["rerankScore"])
+            if isinstance(item.get("rerankScore"), (int, float))
+            else None
+        ),
     )
 
 

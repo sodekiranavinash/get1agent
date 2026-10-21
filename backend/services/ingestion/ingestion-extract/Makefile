@@ -1,18 +1,14 @@
 PACKAGES=core data retrieval ingestion
 PKG_ROOT=../../../packages
 
-# Native wheels (pymupdf, lxml) must match the Linux Lambda runtime. On macOS
-# `uv sync` installs Mach-O binaries that fail inside the Linux container with
-# "invalid ELF header", so install manylinux wheels for the Docker host instead.
-# CI runs on Linux, where the plain `uv sync` path is used unchanged.
-DEP_PLATFORM :=
-ifeq ($(shell uname -s),Darwin)
-  ifeq ($(shell uname -m),arm64)
-    DEP_PLATFORM := aarch64-manylinux_2_28
-  else
-    DEP_PLATFORM := x86_64-manylinux_2_28
-  endif
-endif
+# Native wheels (pymupdf, lxml) must match the **Lambda's** runtime, which is
+# arm64 — not the build host. On macOS a plain `uv sync` installs Mach-O binaries
+# ("invalid ELF header" inside a Linux container) and on an x86_64 CI runner it
+# installs x86_64 manylinux wheels, which the arm64 Lambda cannot import — so the
+# target is pinned everywhere instead of only on Darwin. Override it for the one
+# case that needs a different target: a developer on x86_64 Linux whose local
+# Floci Lambda containers are x86_64 (`make package DEP_PLATFORM=x86_64-manylinux_2_28`).
+DEP_PLATFORM ?= aarch64-manylinux_2_28
 
 package:
 	rm -rf dist
@@ -20,18 +16,12 @@ package:
 	cp handler.py dist/
 	@if [ -d src ]; then cp -R src dist/; fi
 	for p in $(PACKAGES); do cp -R "$(PKG_ROOT)/$$p" "dist/$$p"; done
-	# Install Python dependencies into site-packages
+	# Install Python dependencies into site-packages, resolved for the Lambda's
+	# platform rather than the build host's.
 	if [ -f pyproject.toml ]; then \
-		if [ -n "$(DEP_PLATFORM)" ]; then \
-			uv export --project . --no-dev --format requirements-txt --no-hashes --no-emit-project -o .requirements.txt --quiet || { echo "uv export failed" >&2; exit 1; }; \
-			uv pip install --target dist --python-platform $(DEP_PLATFORM) --python-version 3.14 -r .requirements.txt --quiet || { echo "uv pip install (native wheels) failed" >&2; exit 1; }; \
-			rm -f .requirements.txt; \
-		else \
-			uv sync --project . --no-dev --quiet --python 3.14 || { echo "uv sync failed - dependencies were not installed" >&2; exit 1; }; \
-			sp="$$(ls -d .venv/lib/python*/site-packages 2>/dev/null | head -1)"; \
-			[ -n "$$sp" ] || { echo "no .venv site-packages after uv sync" >&2; exit 1; }; \
-			cp -R "$$sp"/* dist/ || { echo "copying dependencies into dist failed" >&2; exit 1; }; \
-		fi; \
+		uv export --project . --no-dev --format requirements-txt --no-hashes --no-emit-project -o .requirements.txt --quiet || { echo "uv export failed" >&2; exit 1; }; \
+		uv pip install --target dist --python-platform $(DEP_PLATFORM) --python-version 3.14 -r .requirements.txt --quiet || { echo "uv pip install (native wheels) failed" >&2; exit 1; }; \
+		rm -f .requirements.txt; \
 		rm -rf dist/bin dist/*.pth dist/INSTALLER dist/_virtualenv.py; \
 	fi
 	find dist -type d -name __pycache__ -prune -exec rm -rf {} +
