@@ -73,6 +73,14 @@ locals {
 
 # The Redis URL is a secret, so it is a SecureString parameter read on first use
 # (not a Lambda environment variable). Created only when a URL is supplied.
+#
+# `prevent_destroy` is deliberate. An empty TF_VAR_redis_url — a missing,
+# misnamed, wrong-environment or variable-instead-of-secret REDIS_URL — makes
+# `count` drop to 0, which destroys this parameter *and* strips
+# REDIS_URL_SSM_PARAM from every Redis-aware Lambda in the same apply. That
+# silently turns Redis off while looking like an ordinary deploy, and nothing in
+# the plan output says "you lost your cache". With the guard the apply fails
+# loudly instead. To retire Redis on purpose, remove this block and the `count`.
 resource "aws_ssm_parameter" "redis_url" {
   count = var.redis_url != "" ? 1 : 0
 
@@ -82,6 +90,10 @@ resource "aws_ssm_parameter" "redis_url" {
   value       = var.redis_url
 
   tags = { Name = "get1agent-prod-redis-url" }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # --- AgentCore Gateway (phase A3) --------------------------------------------
