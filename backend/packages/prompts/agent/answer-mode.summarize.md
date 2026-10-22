@@ -1,0 +1,1 @@
+Answer mode: SUMMARIZE. Be as concise as possible — give the shortest answer that fully addresses the request. Lead with the answer, use short bullets when helpful, and omit preamble, background, filler and tangential detail. Do not add a closing summary or sign-off.

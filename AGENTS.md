@@ -54,15 +54,16 @@ and billed per request.
 
 Deployables live under `backend/services/` (all Lambda apps, including the
 `web-search`/`code-interpreter` MCP servers) and `backend/agents/`. Shared
-application code lives once in **`backend/packages/`** as four top-level modules
-(`core`, `data`, `retrieval`, `ingestion`) and is **bundled into each Lambda's
-zip**. **Third-party dependencies are also bundled per Lambda** (no Lambda layers):
+application code lives once in **`backend/packages/`** as five top-level modules
+(`core`, `data`, `retrieval`, `ingestion`, `prompts`) and is **bundled into each
+Lambda's zip**. **Third-party dependencies are also bundled per Lambda** (no Lambda layers):
 
 ```
 packages/core/       core       auth, mcp_server, mcp_client, storage, json_utils, logging
 packages/data/       data       client, keys, repositories/*
 packages/retrieval/  retrieval  layout, s3_vectors, term_index, maintenance, embedding/
 packages/ingestion/  ingestion  pipeline, chunking, extractors, actions
+packages/prompts/    prompts    every model-facing prompt, as Markdown (agent/, workflow/, …)
 ```
 
 Each app keeps its Lambda entry point as `handler.py` at the app root and the
@@ -89,6 +90,54 @@ App-local code stays in the app's `src/` package: `src.skills`,
 (Bedrock Web Search client), and `src.guard`/`src.sessions`. Layer membership and per-app packages are
 declared in `backend/registry.json`; `agents/` is AgentCore runtime and is
 excluded from the Lambda build.
+
+### Prompts (the prompt library)
+
+**Every prompt is a Markdown file, not a Python string.** They live in
+`backend/packages/prompts/` — one folder per area, one file per prompt:
+
+```
+prompts/agent/         agent runtime: system-prompt blocks, planner, router, HITL
+prompts/workflow/      multi-agent host / member orchestration
+prompts/ai-assistant/  the in-product assistant: rules, scaffolds, classifier
+prompts/evals/         LLM-judge rubrics
+prompts/ingestion/     knowledge-graph extraction
+prompts/custom-tools/  MCP tool generator
+prompts/vault/         provider connectivity probe
+```
+
+The name is the path: `prompt_text("agent/grounding")` is
+`packages/prompts/agent/grounding.md`, loaded by
+`prompts.text(name)` / `prompts.render(name, **slots)`. Do not add prompt prose
+to a `.py` file.
+
+- **The file is the prompt.** No frontmatter or fence; the single trailing
+  newline is dropped on read, so a file and the constant it replaced are
+  byte-identical.
+- **`{{slot}}` is filled with `render`, never `str.format`** — several prompts
+  contain literal JSON and `format` would choke on the braces. A missing value
+  raises `PromptError` instead of leaking `{{name}}` to the model.
+- **`prompts` must be in a Lambda's `PACKAGES`** (`PACKAGES=core data retrieval
+  prompts`) if that app — or anything it bundles, such as `ingestion` — reads a
+  prompt, and in the app's `backend/registry.json` entry for the same reason.
+  The Makefiles `cp -R packages/prompts`, both containers `COPY
+  packages`, and `Path(__file__).parent` therefore resolves in a Lambda
+  (`/var/task/prompts`), the AgentCore runtime (`/app/packages/prompts`), Floci
+  and a checkout. The Infra workflow asserts the user-api, ai-assistant and
+  ingestion-graph-extract zips contain `prompts/agent/grounding.md`, and
+  `backend/services/integration-tests/test_prompt_library.py` loads every
+  prompt, renders every placeholder and fails on an orphan.
+- **Composition stays in code** (which blocks apply, in what order) because that
+  is driven by per-agent settings — answer mode, reasoning, human-in-the-loop,
+  memory, output format, attached KBs/skills. Moving the text does not move that
+  logic.
+- **Not in the library:** tool descriptions (the framework derives schemas from
+  the function), a user's own agent/workflow prompt and `SKILL.md` bodies
+  (user-authored, stored in DynamoDB), and one-off strings that assemble runtime
+  values.
+- **Changing a prompt is a deploy** (the text is bundled, not fetched):
+  `make floci-reload` locally, an Infra run in production. See
+  `backend/packages/prompts/README.md`.
 
 ### DynamoDB single table
 
@@ -630,12 +679,12 @@ each.
   `maxResults` (1–25), plus an optional `filters` domain denylist.
 - The agent runtime registers a single **`web-search`** Strands tool from
   `WEB_SEARCH_GATEWAY_TOOL` (default `web-search___WebSearch`), maps
-  `maxResults`/`excludeDomains` onto the connector input and calls it through the
-  gateway (`MCP_TRANSPORT=gateway`). Source numbering and the chat source
+  `maxResults`/`excludeDomains` onto the connector input and calls it through its
+  gateway (`WEB_SEARCH_GATEWAY_URL`). Source numbering and the chat source
   carousel are unchanged (`results[]` → `_extract_sources`).
-- **No fallback:** the connector is only reachable through the gateway. With the
-  local `aggregator` transport (AgentCore Gateway is not emulated in Floci) the
-  `web-search` tool is simply not offered.
+- **No fallback:** the connector is only reachable through the gateway. When no
+  web-search gateway URL is configured (locally, the AgentCore Gateway is not
+  emulated in Floci) the `web-search` tool is simply not offered.
 
 ### HTTP fetch tool
 
@@ -1909,21 +1958,43 @@ One module, `core/bedrock_features.py`, owns the knobs (all env-driven, safe def
 
 ### AgentCore Gateway (managed MCP)
 
-- The platform's MCP servers are fronted by one **AgentCore Gateway**
-  (`aws_bedrockagentcore_gateway`, protocol `MCP`, `AWS_IAM` authorizer, semantic
-  tool search). Every MCP Lambda (knowledge, code-interpreter,
-  http-fetch, storage, custom-tools, remote MCP) is registered as a **Lambda target**
-  (`aws_bedrockagentcore_gateway_target`, `target_configuration.mcp.lambda`), so
-  agents call a single signed HTTPS endpoint instead of invoking each function.
-- The deployed runtime sets `MCP_TRANSPORT=gateway` and receives the endpoint as
-  `MCP_GATEWAY_URL`; `agentflow/tools.py` then routes every tool call through
-  `core.mcp_client.gateway_call_tool`, which signs the request with **SigV4**
-  (`bedrock-agentcore`) and normalizes JSON **or SSE** MCP responses. The in-app
-  direct-invoke path remains for local development
-  (`MCP_TRANSPORT=aggregator`).
+- **The gateway serves the built-in Web Search connector — not our MCP Lambdas.**
+  One **AgentCore Gateway** (`aws_bedrockagentcore_gateway`, protocol `MCP`,
+  `AWS_IAM` authorizer, semantic tool search) carries the `web-search` connector
+  (`web-search___WebSearch`), which has no Lambda behind it and needs no caller
+  identity. That is the only tool reached through a gateway at run time.
+- **Lambda-backed MCP servers are always invoked directly**
+  (`core.mcp_client.call_tool`/`list_tools`, IAM-trust boundary, the caller's
+  `userId` in the payload): knowledge, code-interpreter, http-fetch, storage,
+  browser, custom tools and remote MCP. A gateway **Lambda target cannot serve
+  them**, for three contract reasons:
+  1. the target exposes only the tools written into its
+     `tool_schema.inline_payload` (one static definition per target), not the
+     server's own `tools/list`, so `knowledge___search-user-knowledge-bases` /
+     `custom-tools___<slug>_<tool>` do not exist and the call fails as
+     "tool not found";
+  2. the gateway invokes the Lambda with **the tool arguments as the event** and
+     the tool name in `context.clientContext.custom['bedrockAgentCoreToolName']`,
+     not a JSON-RPC envelope — `core.mcp_server` (which requires
+     `{jsonrpc,id,method,params,userId}`) answers `-32600 Invalid Request`;
+  3. **no user identity travels through the gateway** (it signs with its own
+     role), so every `require_sub()`-based server cannot resolve the caller.
+  The Terraform Lambda targets are retained (harmless) but are not a transport
+  the runtime or the admin console uses; retiring them is optional cleanup.
+- **Web search only** is routed through the gateway: `agentflow/tools.py` builds
+  it from `WEB_SEARCH_GATEWAY_URL`/`WEB_SEARCH_GATEWAY_TOOL` and calls
+  `core.mcp_client.gateway_call_tool`, which signs with **SigV4**
+  (`bedrock-agentcore`) and normalizes JSON **or SSE** MCP responses.
+  `MCP_TRANSPORT`/`MCP_GATEWAY_URL` survive only as a web-search fallback.
+- **Failures must be visible.** `agentflow/tools.py:_text_of` renders a JSON-RPC
+  **error** as `MCP error <code>: <message>` and the callers return
+  `<tool> failed: <exception>` on a transport error. An empty tool result means
+  the tool genuinely returned nothing — never a swallowed failure (that silence
+  is what hid this bug: every gateway call failed and the model saw `""`).
 - The gateway also carries a `policy_engine_configuration` pointing at the managed
-  policy engine, so tool-call policy is enforced at both the gateway and in
-  process. The gateway role can only `lambda:InvokeFunction` the six MCP servers.
+  policy engine; in-process tool calls are still checked by AgentCore Policy
+  (`agentflow/memory.build_guard`). The gateway role can only
+  `lambda:InvokeFunction` the six MCP servers.
 
 ### AgentCore Memory + Policy (AWS-native)
 

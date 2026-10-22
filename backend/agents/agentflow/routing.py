@@ -38,6 +38,7 @@ from agentflow.models import (
     is_auto_model,
     resolve_model_id,
 )
+from prompts import text as prompt_text
 
 # Capability evidence handed to the classifier. Every platform model must have a
 # profile; ``name`` is the display label, ``description``/``metadata`` are the
@@ -104,16 +105,7 @@ MODEL_PROFILES: dict[str, dict[str, Any]] = {
 
 # Routing policy. The SDK appends its own isolation/validity/structured-output
 # rules, so this only sets the cost/quality trade-off.
-DEFAULT_ROUTING_POLICY = (
-    "You route one request to the single best platform model. First identify the "
-    "request's hard requirements — input size, images or multimodal content, "
-    "coding, and multi-step reasoning — and rule out any candidate whose "
-    "evidence shows it cannot meet them. Among the remaining candidates choose "
-    "the cheapest and fastest one that can still deliver a complete and accurate "
-    "result. Reserve the strongest reasoning model for coding or genuinely hard "
-    "multi-step reasoning, and the large-context model for very long or "
-    "multimodal inputs. Do not infer quality or preference from candidate order."
-)
+DEFAULT_ROUTING_POLICY = prompt_text("agent/router")
 
 # Classifier model that makes the routing decision. A small/fast Bedrock model is
 # enough; it is called once per routed run.

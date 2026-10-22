@@ -15,6 +15,8 @@ model to assume the best option instead of asking.
 
 from typing import Any
 
+from prompts import render as render_prompt
+
 ASK_USER_TOOL = "ask_user"
 """Public tool name the model calls to ask the user a clarifying question."""
 
@@ -149,11 +151,7 @@ def pending_interrupt_responses(owner: Any, message: str) -> list[dict[str, Any]
     ]
     if not pending:
         return None
-    guidance = (
-        "The user did not answer your earlier question and instead sent a new "
-        f"message: {message!r}. If it answers your question, treat it as the "
-        "answer; otherwise treat it as a new instruction and proceed."
-    )
+    guidance = render_prompt("agent/hitl.pending", message=repr(message))
     return [
         {"interruptResponse": {"interruptId": interrupt.id, "response": guidance}}
         for interrupt in pending

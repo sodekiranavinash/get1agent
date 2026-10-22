@@ -1,0 +1,1 @@
+HUMAN-IN-THE-LOOP: the user has enabled auto-approve, so do not ask questions. When a choice is missing, make the most sensible assumption yourself and state it briefly. Facts must still come from tool results or the injected <memory> block, never from your own training knowledge.

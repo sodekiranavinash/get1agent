@@ -222,13 +222,13 @@ resource "aws_iam_role_policy" "runtime" {
   })
 }
 
-# Every MCP tool call is made through the AgentCore Gateway when
-# `MCP_TRANSPORT=gateway` (the deployed setting). The gateway's authorizer is
-# `AWS_IAM`, so the caller — this runtime's execution role — must itself hold
-# `bedrock-agentcore:InvokeGateway` on the gateway resource. Without it the
-# gateway answers every `tools/call` with HTTP 403
-# `{"code":-32002,"message":"Authorization error - Insufficient permissions"}`,
-# while tool discovery still works because it is a direct Lambda invoke.
+# The built-in Web Search connector is the one tool reached through an AgentCore
+# Gateway (Lambda-backed MCP servers are invoked directly with the caller's
+# `userId` in the payload). The gateway's authorizer is `AWS_IAM`, so the caller
+# — this runtime's execution role — must itself hold
+# `bedrock-agentcore:InvokeGateway` on the gateway resource. Without it every
+# `tools/call` answers HTTP 403
+# `{"code":-32002,"message":"Authorization error - Insufficient permissions"}`.
 resource "aws_iam_role_policy" "runtime_gateway" {
   count = length(var.gateway_arns) > 0 ? 1 : 0
   name  = "${var.name}-gateway"

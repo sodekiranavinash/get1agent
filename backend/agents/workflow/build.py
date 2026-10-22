@@ -28,6 +28,8 @@ from agentflow.provider import resolve_model_provider
 from agentflow.skills import build_skills_plugin
 from agentflow.store import resolve_knowledge_bases, resolve_skills
 from agentflow.tools import build_tools
+from prompts import render as render_prompt
+from prompts import text as prompt_text
 
 from workflow.store import resolve_agent_nodes
 
@@ -36,32 +38,14 @@ from workflow.store import resolve_agent_nodes
 HOST_NODE_ID = "host"
 HOST_SYNTH_NODE_ID = "host-synth"
 
-DEFAULT_HOST_PROMPT = (
-    "You are the host agent of a multi-agent workflow. You receive the user's "
-    "request and coordinate a team of specialist agents to fulfil it."
-)
-DEFAULT_MEMBER_PROMPT = "You are a helpful AI agent."
+DEFAULT_HOST_PROMPT = prompt_text("workflow/host.default")
+DEFAULT_MEMBER_PROMPT = prompt_text("workflow/member.default")
 
-_SWARM_HOST_INSTRUCTION = (
-    "You lead this team. Decide which teammate is best for each part of the "
-    "request and hand off to them with `handoff_to_agent`. You own the final "
-    "answer: once the team has what it needs, write the complete response "
-    "yourself instead of handing off again."
-)
+_SWARM_HOST_INSTRUCTION = prompt_text("workflow/host.swarm")
 
-_GRAPH_DISPATCH_INSTRUCTION = (
-    "You are the dispatch step of this workflow. Read the user's request and "
-    "produce a clear, self-contained brief that your team of agents will "
-    "execute. State the goal, the key questions and any constraints. Do not "
-    "answer the request yourself and do not call any tools."
-)
+_GRAPH_DISPATCH_INSTRUCTION = prompt_text("workflow/host.graph-dispatch")
 
-_GRAPH_SYNTH_INSTRUCTION = (
-    "You are the synthesis step of this workflow. You receive the outputs of "
-    "the team's agents. Combine them into one coherent final answer for the "
-    "user, resolving overlaps and filling any gaps. Cite sources inline with "
-    "their bracketed index where relevant."
-)
+_GRAPH_SYNTH_INSTRUCTION = prompt_text("workflow/host.graph-synthesize")
 
 
 def _node_specs(
@@ -74,31 +58,20 @@ def _node_specs(
 
 
 def _team_block(specs: list[dict[str, Any]]) -> str:
-    lines = [
-        "Your team (hand off with the teammate's id as `agent_name`):",
-    ]
+    lines: list[str] = []
     for spec in specs:
         description = f" — {spec['description']}" if spec["description"] else ""
         lines.append(f"- `{spec['nodeId']}` — {spec['agentName']}{description}")
-    return "\n".join(lines)
+    return render_prompt("workflow/team", members="\n".join(lines)).rstrip("\n")
 
 
 def _graph_block() -> str:
-    return (
-        "You are one agent in a multi-agent workflow. You receive the host's "
-        "brief or the previous agent's output as your input, and your result is "
-        "passed to the next step."
-    )
+    return prompt_text("workflow/graph.agent")
 
 
 # Members are intermediate steps, not the final responder. This frames their
 # role; the length/depth of each result follows that agent's own answer mode.
-_MEMBER_RESULT_INSTRUCTION = (
-    "You are an intermediate step in a multi-agent workflow, not the final "
-    "responder: your result is passed on and the host assembles the final answer "
-    "for the user. Return your step's result directly — do not address the end "
-    "user, do not add a greeting or sign-off."
-)
+_MEMBER_RESULT_INSTRUCTION = prompt_text("workflow/member.result")
 
 
 def _build_prompt(

@@ -1,0 +1,2 @@
+PLATFORM DOCS:
+{{passages}}

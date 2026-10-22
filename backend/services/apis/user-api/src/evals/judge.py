@@ -23,6 +23,8 @@ import json
 import re
 from typing import Any
 
+from prompts import text as prompt_text
+
 from . import config
 
 MAX_CLAIMS = 50
@@ -66,65 +68,15 @@ class JudgeError(Exception):
     """The model could not produce a usable answer/verdict."""
 
 
-_ANSWER_SYSTEM = """You are a retrieval-augmented question answering assistant.
-Answer the user's question using ONLY the numbered context passages provided.
-Rules:
-- Use only facts that appear in the context. Never use outside knowledge.
-- Be direct and concise; answer the question that was asked.
-- If the context does not contain the answer, reply exactly: I don't know.
-- Do not mention "the context" or cite passage numbers unless asked."""
+_ANSWER_SYSTEM = prompt_text("evals/answer")
 
-_FAITHFULNESS_SYSTEM = """You verify whether an answer is grounded in the provided context.
-Return ONE JSON object and nothing else, with exactly these keys:
-{
-  "claims": [ { "text": "<one atomic fact from the answer>", "supported": true|false } ],
-  "reasoning": "<one or two sentences>"
-}
-Rules:
-- Break the answer into atomic factual claims (one fact each). Ignore greetings,
-  filler and hedging ("I think", "based on the context").
-- A claim is "supported" only if the context entails it; otherwise false.
-- Do not use outside knowledge.
-- If the answer is an honest "I don't know" and the context does not contain the
-  answer, return an empty claims list.
-Output only the JSON object."""
+_FAITHFULNESS_SYSTEM = prompt_text("evals/faithfulness")
 
-_CONTEXT_RELEVANCE_SYSTEM = """You judge whether each retrieved passage is relevant to a question.
-Return ONE JSON object and nothing else, with exactly these keys:
-{
-  "passages": [ { "index": <the passage number>, "relevant": true|false } ],
-  "reasoning": "<one sentence>"
-}
-Rules:
-- Include every passage index exactly once.
-- A passage is relevant if it contains information that helps answer the question.
-Score only relevance to the question, not whether the passage is sufficient.
-Output only the JSON object."""
+_CONTEXT_RELEVANCE_SYSTEM = prompt_text("evals/context-relevance")
 
-_CORRECTNESS_SYSTEM = """You are a strict grader comparing a generated answer to a
-reference answer for the same question.
-Return ONE JSON object and nothing else, with exactly these keys:
-{
-  "answer_correctness": <number 0..1>,
-  "reasoning": "<one or two sentences>"
-}
-Definition:
-- answer_correctness: how well the generated answer matches the reference in meaning
-  (1.0 = factually equivalent; 0.5 = partially correct or missing key facts;
-  0.0 = incorrect or contradictory). Ignore wording/formatting differences.
-Output only the JSON object."""
+_CORRECTNESS_SYSTEM = prompt_text("evals/correctness")
 
-_RELEVANCE_SYSTEM = """You grade how directly an answer addresses a question, with no
-supporting context available.
-Return ONE JSON object and nothing else, with exactly these keys:
-{
-  "answer_relevance": <number 0..1>,
-  "reasoning": "<one sentence>"
-}
-Definition:
-- answer_relevance: 1.0 = the answer fully addresses the question; 0.0 = unrelated,
-  empty, or evasive. Judge only relevance to the asked question, not correctness.
-Output only the JSON object."""
+_RELEVANCE_SYSTEM = prompt_text("evals/answer-relevance")
 
 
 def _chat(

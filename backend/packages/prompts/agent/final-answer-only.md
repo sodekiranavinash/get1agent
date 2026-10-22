@@ -1,0 +1,1 @@
+Return only the final answer. Never include your internal reasoning, chain-of-thought, planning notes, or step-by-step commentary in your response — use tools silently and write the answer for the user.

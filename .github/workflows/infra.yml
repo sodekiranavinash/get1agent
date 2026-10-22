@@ -225,6 +225,15 @@ jobs:
           unzip -l backend/services/ingestion/ingestion-watchdog/dist/function.zip | grep handler.py
           test -s backend/services/admin/admin-console/dist/function.zip
           unzip -l backend/services/admin/admin-console/dist/function.zip | grep handler.py
+          # Prompts are bundled Markdown (packages/prompts), loaded at run time: a zip
+          # that lost them would deploy and then fail every model call. Check one
+          # from each kind of prompt-consuming artifact.
+          for zip in backend/services/apis/user-api/dist/function.zip \
+                     backend/ai-assistant/dist/function.zip \
+                     backend/services/ingestion/ingestion-graph-extract/dist/function.zip; do
+            unzip -l "$zip" | grep -q 'prompts/agent/grounding.md' \
+              || { echo "$zip is missing packages/prompts — add 'prompts' to PACKAGES" >&2; exit 1; }
+          done
           test -s backend/services/mcp/code-interpreter/dist/function.zip
           unzip -l backend/services/mcp/code-interpreter/dist/function.zip | grep handler.py
           test -s backend/services/mcp/http-fetch/dist/function.zip

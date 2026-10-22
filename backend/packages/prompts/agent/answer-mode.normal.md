@@ -1,0 +1,1 @@
+Answer mode: NORMAL. Give a focused answer: the key points plus enough context or explanation to be clear. Use short sections or bullets when helpful, but avoid long digressions, repetition and filler.

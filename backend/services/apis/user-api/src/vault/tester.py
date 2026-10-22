@@ -29,12 +29,16 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
+from prompts import text as prompt_text
+
 from .providers import auth_style, normalize_provider
 
 CLIENT_USER_AGENT = "get1agent/1.0"
 DEFAULT_TIMEOUT_SECONDS = 15
 MAX_MODELS = 50
-CHAT_PROMPT = "Reply with the single word: ok"
+# A one-word probe: it proves the key, base URL and model all work without
+# costing a real completion.
+CHAT_PROMPT = prompt_text("vault/chat-probe")
 
 
 class TestError(Exception):

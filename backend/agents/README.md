@@ -36,8 +36,10 @@ backend/agents/
    conversation, and AgentCore Memory.
 4. Before executing, one short tool-free planner call produces a JSON plan
    (sub-queries + todos); it is streamed and folded into the agent's input.
-5. Tool calls are checked by **AgentCore Policy** and routed through
-   **AgentCore Gateway** (`MCP_TRANSPORT=gateway`).
+5. Tool calls are checked by **AgentCore Policy** and invoked on their MCP
+   Lambda **directly** (identity travels in the payload). Web search is the one
+   exception: it is the AgentCore Gateway's built-in connector, because that
+   connector has no Lambda behind it.
 6. `agent.stream_async(...)` events are normalized (`agentflow/events.py`) to
    `run.started|skills|plan.started|plan|text|tool.start|tool.input|
    tool.stream|tool.result|run.completed|run.error` (plus `question` for
@@ -60,7 +62,7 @@ spans are exported by the AgentCore ADOT collector to CloudWatch + X-Ray.
 | `VECTOR_STORE`, `S3_VECTOR_BUCKET` | memory vector index |
 | `EMBED_MODE`, `LOCAL_EMBED_MODEL` / `TEXT_EMBED_MODEL` | memory embeddings |
 | `KNOWLEDGE_MCP_FUNCTION`, `CODE_INTERPRETER_MCP_FUNCTION`, `HTTP_FETCH_MCP_FUNCTION`, `BROWSER_MCP_FUNCTION`, `REMOTE_MCP_FUNCTION`, `CUSTOM_TOOLS_MCP_FUNCTION` | MCP server Lambda names (direct-invoke transport) |
-| `MCP_TRANSPORT` (`gateway` \| `aggregator`), `MCP_GATEWAY_URL` | route every tool call through AgentCore Gateway (deployed) or the in-app servers (local) |
+| `MCP_TRANSPORT` (`gateway` \| `aggregator`), `MCP_GATEWAY_URL` | legacy **web-search** fallback only: Lambda-backed MCP servers are always direct-invoked, because a Gateway Lambda target receives just the tool's arguments (no JSON-RPC envelope, no caller identity) and exposes only the tools declared in its inline schema |
 | `WEB_SEARCH_GATEWAY_TOOL` (`web-search___WebSearch`), `WEB_SEARCH_GATEWAY_URL`, `WEB_SEARCH_GATEWAY_REGION` | the AgentCore Gateway built-in Web Search connector; empty disables web search |
 | `AGENTCORE_MEMORY_ID`, `AGENT_MEMORY_BACKEND` (`agentcore` \| `dynamo`) | long-term memory (managed service; `dynamo` is local-only) |
 | `AGENT_POLICY_ENGINE`, `AGENT_POLICY_MODE`, `AGENT_POLICY_DENY_TOOLS` | AgentCore Policy for tool calls |
@@ -86,8 +88,9 @@ The `agent` compose service builds `agents/Dockerfile` (context `backend/`),
 reads the repo-root `.env`, and overrides the endpoints for the compose network
 (`DYNAMODB_ENDPOINT_URL=http://dynamodb:8000`, `AWS_ENDPOINT_URL=http://floci:4566`).
 It serves on container port `8080`, published as host `8090` (the Vite dev proxy
-points `/agent-run` at it). Locally `MCP_TRANSPORT=aggregator` (the gateway is
-not emulated) and `AGENT_MEMORY_BACKEND=dynamo`.
+points `/agent-run` at it). Locally web search is unavailable (the AgentCore
+Gateway is not emulated, so `WEB_SEARCH_GATEWAY_URL` is empty) and
+`AGENT_MEMORY_BACKEND=dynamo`.
 
 ```bash
 curl -N -X POST http://localhost:8090/invocations \

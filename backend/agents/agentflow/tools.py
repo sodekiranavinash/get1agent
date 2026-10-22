@@ -1,12 +1,11 @@
 """Build Strands tools for an agent from its MCP-server + knowledge selection.
 
-Built-in servers (``web-search``, ``code-interpreter``, ``http-fetch``,
-``storage``) and remote servers (through the ``mcp-connections`` aggregator) are
-exposed over the shared
-``core.mcp_client`` direct-invoke transport. Knowledge retrieval exposes the
-knowledge server's real tools (``get-user-knowledge-bases`` +
-``search-user-knowledge-bases``) bound to the agent's KB names and rerank
-setting, so the model cannot query KBs the agent did not attach.
+Every Lambda-backed server (``code-interpreter``, ``http-fetch``, ``storage``,
+``browser``, custom tools, remote servers) and knowledge retrieval are called over
+the shared ``core.mcp_client`` **direct-invoke** transport: it carries the caller's
+``userId`` in the payload and returns the server's real JSON-RPC result. The
+AgentCore Gateway is used for exactly one thing — the built-in Web Search
+connector — because that connector has no Lambda behind it and needs no identity.
 """
 
 from __future__ import annotations
@@ -59,6 +58,17 @@ def _tool_specs(function: str, user_id: str) -> list[dict[str, Any]]:
 
 
 def _text_of(response: dict[str, Any]) -> str:
+    """Flatten a JSON-RPC response into the text the model reads.
+
+    A JSON-RPC **error** becomes readable text, never an empty string: an empty
+    tool result is indistinguishable from "the tool returned nothing", which
+    hides a broken server from the model, the run timeline and the operator.
+    Every failure mode that used to look like silence (wrong transport, missing
+    identity, unknown tool) is surfaced here instead.
+    """
+    error = (response or {}).get("error")
+    if isinstance(error, dict) and (error.get("message") or error.get("code") is not None):
+        return f"MCP error {error.get('code')}: {error.get('message') or 'unknown error'}"
     result = (response or {}).get("result") or {}
     content = result.get("content")
     if isinstance(content, list):
@@ -162,46 +172,24 @@ def _number_sources(text: str, counter: dict[str, int]) -> str:
     return json.dumps(payload, default=str) if changed else text
 
 
-# The gateway namespaces every target's tools as "<target>___<tool>". These are
-# the target names created in Terraform for each server family.
-_GATEWAY_TARGETS = {
-    "knowledge": "knowledge",
-    "code-interpreter": "code-interpreter",
-    "http-fetch": "http-fetch",
-    "storage": "storage",
-    "browser": "browser",
-    "custom-tools": "custom-tools",
-    "remote-mcp": "remote-mcp",
-}
-
-
-def _gateway_tool_name(target: str, tool_name: str) -> str:
-    """Fully-qualified gateway tool name for a target's tool."""
-    resolved = _GATEWAY_TARGETS.get(target, target)
-    return f"{resolved}___{tool_name}" if resolved else tool_name
-
-
 def _mcp_caller(
     function: str,
     user_id: str,
     tool_name: str,
     counter: dict[str, int],
     guard: Callable[[str, dict[str, Any]], tuple[bool, str]] | None = None,
-    gateway_url: str = "",
-    session_id: str = "",
-    gateway_tool_name: str = "",
 ) -> Callable[[dict[str, Any]], str]:
     def call(arguments: dict[str, Any]) -> str:
         if guard is not None:
             allowed, reason = guard(tool_name, arguments)
             if not allowed:
                 return f"Blocked by policy: {reason}"
-        if gateway_url:
-            response = mcp_client.gateway_call_tool(
-                gateway_url, session_id, gateway_tool_name or tool_name, arguments
-            )
-        else:
+        try:
             _, response = mcp_client.call_tool(function, user_id, tool_name, arguments)
+        except mcp_client.McpClientError as exc:
+            # A transport failure must reach the model as text, not as an
+            # exception that ends the run or an empty result it cannot explain.
+            return f"{tool_name} failed: {exc}"
         return _number_sources(_text_of(response), counter)
 
     return call
@@ -215,9 +203,6 @@ def _knowledge_caller(
     rerank: bool,
     counter: dict[str, int],
     guard: Callable[[str, dict[str, Any]], tuple[bool, str]] | None = None,
-    gateway_url: str = "",
-    session_id: str = "",
-    gateway_tool_name: str = "",
     graph: bool | None = None,
 ) -> Callable[[dict[str, Any]], str]:
     """Call a knowledge MCP tool scoped to the agent's attached KBs.
@@ -240,12 +225,10 @@ def _knowledge_caller(
             allowed, reason = guard(tool_name, payload)
             if not allowed:
                 return f"Blocked by policy: {reason}"
-        if gateway_url:
-            response = mcp_client.gateway_call_tool(
-                gateway_url, session_id, gateway_tool_name or tool_name, payload
-            )
-        else:
+        try:
             _, response = mcp_client.call_tool(function, user_id, tool_name, payload)
+        except mcp_client.McpClientError as exc:
+            return f"{tool_name} failed: {exc}"
         return _number_sources(_text_of(response), counter)
 
     return call
@@ -345,9 +328,15 @@ def build_tools(
     MCP server is invoked, and a denial is returned to the model as a policy error.
     """
     tools: list[Any] = []
-    # When the AgentCore Gateway is configured, every MCP tool call goes through
-    # it (managed MCP endpoint, Policy enforced, SigV4). Otherwise the in-app
-    # servers are invoked directly (local development).
+    # Lambda-backed MCP servers are always invoked directly. The AgentCore
+    # Gateway cannot serve them: a Lambda target is reached with the tool's
+    # *arguments* as the event (the tool name rides in the Lambda client context),
+    # the gateway exposes only the tools written in the target's inline schema
+    # rather than the server's own `tools/list`, and it carries no user identity.
+    # Our MCP servers read a JSON-RPC envelope plus `userId`, so routing them
+    # through the gateway returned "Invalid Request"/"tool not found" for every
+    # call. The gateway is used for the built-in Web Search connector below, where
+    # it is the only transport and no identity is needed.
     gateway_url = config.gateway_url if config.mcp_transport == "gateway" else ""
     # Run-global citation counter: every source across every tool call gets the
     # next number, so the model's inline ``[n]`` matches the UI's source list.
@@ -386,9 +375,6 @@ def build_tools(
                         rerank,
                         counter,
                         guard,
-                        gateway_url,
-                        session_id,
-                        _gateway_tool_name("knowledge", tool_name),
                         graph,
                     ),
                     schema,
@@ -418,23 +404,17 @@ def build_tools(
             continue
         if source == "builtin" and server_id == "code-interpreter":
             function = config.code_interpreter_function
-            gateway_target = "code-interpreter"
         elif source == "builtin" and server_id == "http-fetch":
             function = config.http_fetch_function
-            gateway_target = "http-fetch"
         elif source == "builtin" and server_id == "storage":
             function = config.storage_function
-            gateway_target = "storage"
         elif source == "builtin" and server_id == "browser":
             function = config.browser_function
-            gateway_target = "browser"
         elif source == "custom":
             # User-defined Playground tools; the server id is the tool namespace.
             function = config.custom_tools_function
-            gateway_target = "custom-tools"
         elif source == "mcp":
             function = config.remote_function
-            gateway_target = "remote-mcp"
         else:
             continue
         if not function:
@@ -468,9 +448,6 @@ def build_tools(
                         tool_name,
                         counter,
                         guard,
-                        gateway_url,
-                        session_id,
-                        _gateway_tool_name(gateway_target, tool_name),
                     ),
                     schema,
                 )

@@ -36,6 +36,14 @@ class TextOfTests(unittest.TestCase):
     def test_empty_result(self) -> None:
         self.assertEqual(tools._text_of({}), "")
 
+    def test_jsonrpc_error_becomes_readable_text(self) -> None:
+        """A failed call must never look like "the tool returned nothing"."""
+        response = {"jsonrpc": "2.0", "id": 1, "error": {"code": -32600, "message": "Invalid Request"}}
+        self.assertEqual(tools._text_of(response), "MCP error -32600: Invalid Request")
+
+    def test_error_without_a_message_still_surfaces(self) -> None:
+        self.assertIn("-32601", tools._text_of({"error": {"code": -32601}}))
+
 
 class SlugTests(unittest.TestCase):
     def test_slugifies(self) -> None:
@@ -103,43 +111,56 @@ class RegisteredToolNamesTests(unittest.TestCase):
         self.assertEqual(tools.registered_tool_names(agent), ["ok", "two"])
 
 
-class GatewayNamingTests(unittest.TestCase):
-    def test_prefixes_target(self) -> None:
-        self.assertEqual(
-            tools._gateway_tool_name("code-interpreter", "code-interpreter"),
-            "code-interpreter___code-interpreter",
-        )
-        self.assertEqual(
-            tools._gateway_tool_name("knowledge", "search-user-knowledge-bases"),
-            "knowledge___search-user-knowledge-bases",
-        )
+class LambdaTransportTests(unittest.TestCase):
+    """Lambda-backed MCP servers are always reached by direct invoke.
 
-    def test_knowledge_caller_accepts_gateway_args(self) -> None:
+    The AgentCore Gateway cannot serve them: a Lambda target is invoked with the
+    tool's *arguments* as its event (the tool name rides in the Lambda client
+    context), the gateway only exposes the tools written into the target's inline
+    schema, and it carries no caller identity. Routing knowledge/custom tools
+    through it returned nothing at all in production.
+    """
+
+    def test_mcp_caller_invokes_the_lambda_directly(self) -> None:
         from unittest import mock
 
-        captured: dict = {}
+        response = {"result": {"content": [{"text": "ok"}]}}
+        with mock.patch.object(tools.mcp_client, "gateway_call_tool") as gateway, \
+                mock.patch.object(
+                    tools.mcp_client, "call_tool", return_value=(None, response)
+                ) as direct:
+            caller = tools._mcp_caller("storage-fn", "u1", "list-storage-files", {"n": 0})
+            self.assertEqual(caller({"maxItems": 5}), "ok")
 
-        def fake_gateway(gateway_url, session_id, tool_name, arguments, region=None):
-            captured.update(tool_name=tool_name, arguments=arguments)
-            return {"result": {"content": [{"text": "ok"}]}}
+        gateway.assert_not_called()
+        direct.assert_called_once_with(
+            "storage-fn", "u1", "list-storage-files", {"maxItems": 5}
+        )
 
-        with mock.patch.object(tools.mcp_client, "gateway_call_tool", fake_gateway):
+    def test_knowledge_caller_invokes_the_lambda_directly(self) -> None:
+        from unittest import mock
+
+        response = {"result": {"content": [{"text": "ok"}]}}
+        with mock.patch.object(tools.mcp_client, "gateway_call_tool") as gateway, \
+                mock.patch.object(
+                    tools.mcp_client, "call_tool", return_value=(None, response)
+                ) as direct:
             caller = tools._knowledge_caller(
-                "kb-fn",
-                "u1",
-                "search-user-knowledge-bases",
-                ["my-kb"],
-                True,
-                {"n": 0},
-                None,
-                "https://gw.example/mcp",
-                "sess",
-                tools._gateway_tool_name("knowledge", "search-user-knowledge-bases"),
+                "kb-fn", "u1", "search-user-knowledge-bases", ["my-kb"], True, {"n": 0}
             )
             self.assertEqual(caller({"query": "x"}), "ok")
 
-        self.assertEqual(captured["tool_name"], "knowledge___search-user-knowledge-bases")
-        self.assertEqual(captured["arguments"]["knowledgeBaseNames"], ["my-kb"])
+        gateway.assert_not_called()
+        self.assertEqual(direct.call_args[0][3]["knowledgeBaseNames"], ["my-kb"])
+
+    def test_transport_failure_is_reported_not_swallowed(self) -> None:
+        from unittest import mock
+
+        with mock.patch.object(
+            tools.mcp_client, "call_tool", side_effect=tools.mcp_client.McpClientError("boom")
+        ):
+            caller = tools._mcp_caller("storage-fn", "u1", "list-storage-files", {"n": 0})
+            self.assertIn("boom", caller({}))
 
 
 class NumberSourcesTests(unittest.TestCase):
@@ -293,6 +314,62 @@ class WebSearchAvailabilityTests(unittest.TestCase):
             for tool in tools.build_tools(self._config("https://gw.example/mcp"), "u1", agent, [])
         ]
         self.assertEqual(names, ["web-search"])
+
+
+@unittest.skipUnless(HAVE_STRANDS, "strands not installed")
+class GatewayTransportRoutingTests(unittest.TestCase):
+    """`MCP_TRANSPORT=gateway` (the deployed setting) reaches Lambda servers directly."""
+
+    @staticmethod
+    def _config():
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            mcp_transport="gateway",
+            gateway_url="https://gw.example/mcp",
+            web_search_gateway_url="https://web.example/mcp",
+            web_search_gateway_tool="web-search___WebSearch",
+            web_search_gateway_region="us-west-2",
+            knowledge_function="",
+            code_interpreter_function="",
+            http_fetch_function="",
+            storage_function="storage-fn",
+            browser_function="",
+            custom_tools_function="",
+            remote_function="",
+        )
+
+    def test_builtin_server_still_direct_invokes(self) -> None:
+        import asyncio
+        from unittest import mock
+
+        specs = [
+            {
+                "name": "list-storage-files",
+                "description": "List files.",
+                "inputSchema": {"type": "object", "properties": {}},
+            }
+        ]
+        response = {"result": {"content": [{"text": "3 files"}]}}
+        spec_response = {"result": {"tools": specs}}
+        agent = {"servers": [{"source": "builtin", "id": "storage"}]}
+        with mock.patch.object(tools.mcp_client, "list_tools", return_value=(None, spec_response)), \
+                mock.patch.object(tools.mcp_client, "gateway_call_tool") as gateway, \
+                mock.patch.object(
+                    tools.mcp_client, "call_tool", return_value=(None, response)
+                ) as direct:
+            built = tools.build_tools(self._config(), "u1", agent, [])
+            self.assertEqual([tool.tool_name for tool in built], ["list-storage-files"])
+
+            async def run() -> None:
+                tool_use = {"toolUseId": "1", "name": "list-storage-files", "input": {}}
+                async for _ in built[0].stream(tool_use, {}):
+                    pass
+
+            asyncio.run(run())
+
+        gateway.assert_not_called()
+        direct.assert_called_once_with("storage-fn", "u1", "list-storage-files", {})
 
 
 if __name__ == "__main__":

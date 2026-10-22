@@ -1,29 +1,25 @@
-"""Assemble the agent's system prompt from its canonical config."""
+"""Assemble the agent's system prompt from its canonical config.
+
+The wording itself lives in the shared prompt library
+(``backend/packages/prompts/agent/``) so it can be read and tuned
+as prose; this module only decides which blocks apply to a run and in what
+order. Everything here is still prompt *structure*, which is a per-agent setting:
+answer mode, reasoning effort, human-in-the-loop, memory and attached sources.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
+from prompts import render as render_prompt
+from prompts import text as prompt_text
+
 _OUTPUT_LABELS = {"markdown": "Markdown", "text": "plain text", "json": "JSON"}
 
 # How detailed the answer should be, chosen per agent. Defaults to `normal`.
 _ANSWER_MODE_INSTRUCTIONS = {
-    "summarize": (
-        "Answer mode: SUMMARIZE. Be as concise as possible — give the shortest "
-        "answer that fully addresses the request. Lead with the answer, use short "
-        "bullets when helpful, and omit preamble, background, filler and tangential "
-        "detail. Do not add a closing summary or sign-off."
-    ),
-    "normal": (
-        "Answer mode: NORMAL. Give a focused answer: the key points plus enough "
-        "context or explanation to be clear. Use short sections or bullets when "
-        "helpful, but avoid long digressions, repetition and filler."
-    ),
-    "detailed": (
-        "Answer mode: DETAILED. Give a thorough, well-structured answer with clear "
-        "sections, full context and supporting detail, as you normally would for an "
-        "in-depth response."
-    ),
+    mode: prompt_text(f"agent/answer-mode.{mode}")
+    for mode in ("summarize", "normal", "detailed")
 }
 
 # Values stored before the modes were renamed.
@@ -34,8 +30,7 @@ _DEFAULT_ANSWER_MODE = "summarize"
 # Reasoning effort is a prompt-level hint (the gateway exposes no reasoning token
 # budget). `medium` adds nothing.
 _REASONING_HINTS = {
-    "low": "Reasoning effort: LOW. Keep your internal reasoning brief.",
-    "high": "Reasoning effort: HIGH. Think carefully and check edge cases before answering.",
+    effort: prompt_text(f"agent/reasoning.{effort}") for effort in ("low", "high")
 }
 
 
@@ -52,49 +47,18 @@ def reasoning_instruction(effort: Any) -> str:
     return _REASONING_HINTS.get(str(effort or "").strip().lower(), "")
 
 
-_HITL_ASK_INSTRUCTION = (
-    "HUMAN-IN-THE-LOOP: use the `ask_user` tool ONLY when a specific, "
-    "mutually-exclusive choice genuinely blocks the task and you cannot pick a "
-    "sensible default — for example choosing between named accounts, formats or "
-    "scopes that lead to materially different work. When you do ask, give 2-4 "
-    "concrete options.\n"
-    "- NEVER ask open-ended questions such as \"what aspect are you interested "
-    "in?\", never ask the user to clarify, narrow or restate their request, and "
-    "never ask for routine confirmation.\n"
-    "- For any general, factual or \"tell me about X\" request, do NOT ask — "
-    "answer it, using your tools where they help. Pick the most useful default "
-    "and proceed.\n"
-    "- Ask at most ONE question per run."
-)
+_HITL_ASK_INSTRUCTION = prompt_text("agent/hitl.ask")
 
-_HITL_ASSUME_INSTRUCTION = (
-    "HUMAN-IN-THE-LOOP: the user has enabled auto-approve, so do not ask "
-    "questions. When a choice is missing, make the most sensible assumption "
-    "yourself and state it briefly. Facts must still come from tool results or "
-    "the injected <memory> block, never from your own training knowledge."
-)
+_HITL_ASSUME_INSTRUCTION = prompt_text("agent/hitl.assume")
 
 # Injected by the Strands MemoryManager as a <memory> block before each model
 # call. This is the user's own long-term context, not training knowledge, so it
 # is allowed to answer personal questions directly.
-_USER_MEMORY_INSTRUCTION = (
-    "USER MEMORY (long-term): a `<memory>` block may be injected with durable "
-    "facts, preferences and past decisions about this user. Treat it as the "
-    "user's own context: answer personal questions (\"what is my favorite "
-    "color?\", \"what did we decide?\") directly from it, without a tool call, "
-    "and never report such a question as not found or as something you could not "
-    "find. Only use what the block actually contains — never invent memories — and "
-    "add no `[n]` or `[memory]` tag for it."
-)
+_USER_MEMORY_INSTRUCTION = prompt_text("agent/memory.use")
 
 # Only added when the memory manager exposes an add tool, so the prompt never
 # names a tool the run does not have.
-_USER_MEMORY_SAVE_INSTRUCTION = (
-    "When the user asks you to remember, note or keep something about themselves "
-    "(a preference, a fact, a decision), call the `add_memory` tool with it in "
-    "plain language — that is the user's long-term memory. Never save it as a "
-    "storage file or knowledge-base document instead. Confirm briefly afterwards."
-)
+_USER_MEMORY_SAVE_INSTRUCTION = prompt_text("agent/memory.save")
 
 
 def build_system_prompt(
@@ -107,14 +71,14 @@ def build_system_prompt(
     parts: list[str] = []
 
     prompt = (config.get("prompt") or "").strip()
-    parts.append(prompt or "You are a helpful AI agent.")
+    parts.append(prompt or prompt_text("agent/default"))
 
     output = config.get("output") or {}
     format_label = _OUTPUT_LABELS.get(
         output.get("format") or config.get("outputFormat"), "Markdown"
     )
     instructions = (output.get("instructions") or "").strip()
-    output_line = f"Respond in {format_label}."
+    output_line = render_prompt("agent/output-format", format=format_label)
     if instructions:
         output_line += f" {instructions}"
     parts.append(output_line)
@@ -127,31 +91,11 @@ def build_system_prompt(
     if reasoning:
         parts.append(reasoning)
 
-    parts.append(
-        "Return only the final answer. Never include your internal reasoning, "
-        "chain-of-thought, planning notes, or step-by-step commentary in your "
-        "response — use tools silently and write the answer for the user."
-    )
+    parts.append(prompt_text("agent/final-answer-only"))
 
-    parts.append(
-        "When you are given a plan or multiple steps, execute them strictly in "
-        "order, one at a time, finishing each step before starting the next."
-    )
+    parts.append(prompt_text("agent/plan-order"))
 
-    parts.append(
-        "GROUNDING (mandatory): answer ONLY from information returned by tool "
-        "calls in this run. Do NOT use your own or training knowledge to state "
-        "facts, and never present anything as fact that no tool returned. Every "
-        "factual sentence or bullet MUST carry the bracketed `index` of the tool "
-        "source it came from, e.g. [1] or [1][3]; a fact taken from the user's "
-        "`<memory>` block has no index, so leave it uncited and add no tag. If the "
-        "tools did not return the answer, reply that you could not find it in the "
-        "available sources rather than answering from your own training knowledge "
-        "— unless the `<memory>` block answers it, in which case answer from that "
-        "block. Call only tools that actually exist; never invent a tool name. "
-        "Never fabricate sources, source names or citation markers. The only "
-        "exception is a bare greeting or sign-off, which needs no tool."
-    )
+    parts.append(prompt_text("agent/grounding"))
 
     if memory_enabled:
         parts.append(_USER_MEMORY_INSTRUCTION)
@@ -164,26 +108,10 @@ def build_system_prompt(
         # ``<available_skills>`` block (name + description) and exposes a
         # ``skills`` tool. We only tell the model how to use it — never paste the
         # skill bodies here, or the model loses the choice of applying a skill.
-        parts.append(
-            "You have skills available under `available_skills`. When the user's "
-            "request matches a skill's description, call the `skills` tool to load "
-            "that skill's full instructions, then follow them."
-        )
+        parts.append(prompt_text("agent/skills"))
 
     if config.get("knowledgeBaseIds"):
-        parts.append(
-            "KNOWLEDGE BASES (primary source for the user's documents): the "
-            "attached knowledge bases hold authoritative, user-specific context (a "
-            "resume/profile, policies, uploaded documents). Before answering, call "
-            "`get-user-knowledge-bases` once to see what is available, then ALWAYS "
-            "call `search-user-knowledge-bases` to check them — including when the "
-            "request is not phrased as being about them — and prefer their content "
-            "over your own training knowledge. Cite what you use. The one exception "
-            "is a question about the user personally (a preference, a personal "
-            "detail, something they asked you to remember): answer that from the "
-            "`<memory>` block directly, with no knowledge-base search, and never "
-            "report it as not found."
-        )
+        parts.append(prompt_text("agent/knowledge-bases"))
 
     # Chat-only. `None` means the caller did not opt in (builder, automation),
     # so the agent's normal behavior is unchanged.

@@ -1,4 +1,4 @@
-PACKAGES=core data retrieval
+PACKAGES=core data retrieval prompts
 PKG_ROOT=../../../packages
 
 package:

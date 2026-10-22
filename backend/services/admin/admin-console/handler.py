@@ -3,10 +3,13 @@
 The admin-only API behind the admin console. It has three jobs:
 
 * **MCP client** — exercise the tools exposed by the get1agent MCP servers
-  (``knowledge-mcp``, ``web-search``, ``code-interpreter``): read the caller's
-  admin claim and ``sub`` from the JWT, build standard MCP JSON-RPC messages and
-  invoke the servers over direct-invoke Lambda transport or the AgentCore
-  Gateway (``MCP_TRANSPORT``).
+  (``knowledge-mcp``, ``code-interpreter``, ``http-fetch``, ``storage``, custom
+  tools, remote servers): read the caller's admin claim and ``sub`` from the JWT,
+  resolve the internal ``userId``, build standard MCP JSON-RPC messages and
+  invoke the owning server over the **direct-invoke Lambda transport** (which
+  carries the identity). The AgentCore Gateway is not used for these servers: a
+  Lambda target only exposes the tools declared in its inline schema and receives
+  the tool arguments as its event, with no caller identity.
 * **Admin operations** — AI-credit management and the support/security inboxes.
 * **Platform status** — AgentCore Identity, Registry, Browser and Optimization
   plus the Bedrock cost/latency levers, under ``/v1/admin/platform/*``.
@@ -38,8 +41,6 @@ from core.auth import AuthError, require_admin
 from core.mcp_client import (
     McpClientError,
     call_tool,
-    gateway_call_tool,
-    gateway_list_tools,
     find_tool_server,
     list_tools_multi,
 )
@@ -59,19 +60,6 @@ def _json(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
 def _mcp_functions() -> list[str]:
     raw = os.environ.get("MCP_FUNCTIONS") or os.environ.get("MCP_FUNCTION") or ""
     return [name.strip() for name in raw.split(",") if name.strip()]
-
-def _mcp_transport() -> str:
-    """Return 'gateway' if MCP_TRANSPORT=gateway and gateway URL is configured."""
-    transport = (os.environ.get("MCP_TRANSPORT") or "aggregator").strip().lower()
-    if transport == "gateway" and not os.environ.get("MCP_GATEWAY_URL"):
-        # Gateway transport requires a gateway URL
-        return "aggregator"
-    return transport
-
-def _gateway_url() -> str | None:
-    """Return the MCP gateway URL if configured."""
-    url = os.environ.get("MCP_GATEWAY_URL") or ""
-    return url.strip() or None
 
 
 def _claims(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -145,73 +133,28 @@ def _text_payload(response: dict[str, Any]) -> Any:
 
 
 def _handle_list_tools(
-    functions: list[str], user_id: str, region: str | None,
-    transport: str = "aggregator", gateway_url: str | None = None, session_id: str = ""
+    functions: list[str], user_id: str, region: str | None
 ) -> dict[str, Any]:
+    """List every tool the MCP servers expose, over the direct-invoke transport.
+
+    The AgentCore Gateway is deliberately not used for these servers: a Lambda
+    target exposes only the tools declared in its inline target schema (not the
+    server's own ``tools/list``), receives the tool's arguments as its event, and
+    carries no caller identity — so listing or calling through it returned the
+    wrong names and no data.
+    """
     started = time.perf_counter()
-    
-    if transport == "gateway" and gateway_url:
-        # Gateway mode: get tools from gateway
-        try:
-            response = gateway_list_tools(gateway_url, session_id, region)
-        except McpClientError as exc:
-            return _json(502, {"error": f"Gateway list tools failed: {exc}"})
-        
-        tools = []
-        per_server = []
-        
-        # Parse gateway response
-        result = response.get("result") or {}
-        gateway_tools = result.get("tools") or []
-        
-        # Extract server info from gateway tool names (format: server___tool-name)
-        for tool_spec in gateway_tools:
-            if not isinstance(tool_spec, dict):
-                continue
-            tool_name = str(tool_spec.get("name") or "")
-            if "___" in tool_name:
-                server, base_tool_name = tool_name.split("___", 1)
-            else:
-                server = "gateway"
-                base_tool_name = tool_name
-            
-            # Create normalized tool spec
-            tool = {
-                "name": base_tool_name,
-                "description": tool_spec.get("description"),
-                "inputSchema": tool_spec.get("inputSchema"),
-                "server": server,
-                "gateway_name": tool_name  # Keep original gateway name for calls
-            }
-            tools.append(tool)
-        
-        duration = _elapsed_ms(started)
-        return _json(
-            200,
-            {
-                "ok": True,
-                "tools": tools,
-                "servers": [{"function": "gateway", "request": {"method": "tools/list"}, "response": response}],
-                "userId": user_id,
-                "gatewayMode": True,
-                "durationMs": duration,
-            },
-        )
-    else:
-        # Direct-invoke (aggregator) mode
-        tools, per_server = list_tools_multi(functions, user_id, region)
-        duration = _elapsed_ms(started)
-        return _json(
-            200,
-            {
-                "ok": True,
-                "tools": tools,
-                "servers": per_server,
-                "userId": user_id,
-                "gatewayMode": False,
-                "durationMs": duration,
-            },
-        )
+    tools, per_server = list_tools_multi(functions, user_id, region)
+    return _json(
+        200,
+        {
+            "ok": True,
+            "tools": tools,
+            "servers": per_server,
+            "userId": user_id,
+            "durationMs": _elapsed_ms(started),
+        },
+    )
 
 
 def _handle_call_tool(
@@ -219,9 +162,6 @@ def _handle_call_tool(
     user_id: str,
     region: str | None,
     body: dict[str, Any],
-    transport: str = "aggregator",
-    gateway_url: str | None = None,
-    session_id: str = "",
 ) -> dict[str, Any]:
     name = str(body.get("name") or "").strip()
     if not name:
@@ -233,80 +173,23 @@ def _handle_call_tool(
         return _json(400, {"error": "arguments must be a JSON object"})
 
     started = time.perf_counter()
-    
-    if transport == "gateway" and gateway_url:
-        # Gateway mode
-        # In gateway mode, we need to find the gateway tool name.
-        # First, get the tool list to find the gateway name
-        try:
-            list_response = gateway_list_tools(gateway_url, session_id, region)
-        except McpClientError as exc:
-            return _json(502, {"error": f"Gateway list tools failed: {exc}"})
-        
-        # Find the gateway tool name
-        result = list_response.get("result") or {}
-        gateway_tools = result.get("tools") or []
-        gateway_tool_name = None
-        server_from_gateway = "gateway"
-        
-        for tool_spec in gateway_tools:
-            if not isinstance(tool_spec, dict):
-                continue
-            tool_gateway_name = str(tool_spec.get("name") or "")
-            # Check if this gateway tool matches the requested tool
-            if "___" in tool_gateway_name:
-                server_part, base_tool_name = tool_gateway_name.split("___", 1)
-                if base_tool_name == name:
-                    gateway_tool_name = tool_gateway_name
-                    server_from_gateway = server_part
-                    break
-            elif tool_gateway_name == name:
-                gateway_tool_name = tool_gateway_name
-                break
-        
-        if not gateway_tool_name:
-            return _json(
-                200,
-                {
-                    "ok": False,
-                    "tool": name,
-                    "userId": user_id,
-                    "arguments": arguments,
-                    "error": {"code": -32601, "message": f"Tool '{name}' not found in gateway"},
-                    "request": None,
-                    "response": None,
-                    "durationMs": _elapsed_ms(started),
-                },
-            )
-        
-        # Call the tool via gateway
-        try:
-            response = gateway_call_tool(gateway_url, session_id, gateway_tool_name, arguments, region)
-            request = {"method": "tools/call", "params": {"name": gateway_tool_name, "arguments": arguments}}
-        except McpClientError as exc:
-            return _json(502, {"error": f"Gateway call failed: {exc}"})
-        
-        server = server_from_gateway
-    else:
-        # Direct-invoke (aggregator) mode
-        server = find_tool_server(functions, user_id, name, region)
-        if not server:
-            return _json(
-                200,
-                {
-                    "ok": False,
-                    "tool": name,
-                    "userId": user_id,
-                    "arguments": arguments,
-                    "error": {"code": -32601, "message": f"Tool '{name}' not found"},
-                    "request": None,
-                    "response": None,
-                    "durationMs": _elapsed_ms(started),
-                },
-            )
+    server = find_tool_server(functions, user_id, name, region)
+    if not server:
+        return _json(
+            200,
+            {
+                "ok": False,
+                "tool": name,
+                "userId": user_id,
+                "arguments": arguments,
+                "error": {"code": -32601, "message": f"Tool '{name}' not found"},
+                "request": None,
+                "response": None,
+                "durationMs": _elapsed_ms(started),
+            },
+        )
 
-        request, response = call_tool(server, user_id, name, arguments, region)
-    
+    request, response = call_tool(server, user_id, name, arguments, region)
     duration = _elapsed_ms(started)
 
     if "error" in response:
@@ -1020,16 +903,10 @@ def lambda_handler(event: dict[str, Any], _context) -> dict[str, Any]:
     user_id = str(profile.get("userId") or sub).strip()
 
     try:
-        # Get transport mode and gateway URL
-        transport = _mcp_transport()
-        gateway = _gateway_url()
-        # Generate a session ID for gateway calls (can be empty for stateless calls)
-        session_id = f"admin-{user_id}-{int(time.time())}"
-        
         if method == "GET" and path.endswith("/mcp/tools"):
-            return _handle_list_tools(functions, user_id, region, transport, gateway, session_id)
+            return _handle_list_tools(functions, user_id, region)
         if method == "POST" and path.endswith("/mcp/call"):
-            return _handle_call_tool(functions, user_id, region, _body(event), transport, gateway, session_id)
+            return _handle_call_tool(functions, user_id, region, _body(event))
         return _json(404, {"error": "Not found"})
     except (McpClientError, ValueError) as exc:
         return _json(502, {"error": str(exc)})

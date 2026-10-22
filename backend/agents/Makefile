@@ -29,7 +29,7 @@ run:
 	cd "$(CURDIR)" && PYTHONPATH="$(BACKEND_ROOT)/packages:$(CURDIR)" "$(PY)" main.py
 
 test:
-	@if [ -d tests ]; then uv run --frozen --python 3.13 python -m unittest discover -s tests -t tests -v; else echo "no unit tests for agents"; fi
+	@if [ -d tests ]; then PYTHONPATH="$(BACKEND_ROOT)/packages:$(CURDIR)" uv run --frozen --python 3.13 python -m unittest discover -s tests -t tests -v; else echo "no unit tests for agents"; fi
 
 clean:
 	rm -rf dist

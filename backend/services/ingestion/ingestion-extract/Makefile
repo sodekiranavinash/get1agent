@@ -1,4 +1,4 @@
-PACKAGES=core data retrieval ingestion
+PACKAGES=core data retrieval ingestion prompts
 PKG_ROOT=../../../packages
 
 # Native wheels (pymupdf, lxml) must match the **Lambda's** runtime, which is

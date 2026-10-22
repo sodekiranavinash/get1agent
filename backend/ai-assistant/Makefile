@@ -14,7 +14,7 @@
 # excludes, along with everything they would pull in.
 #
 # Shared application code is copied in, not layered — the repo rule.
-PACKAGES=core data retrieval
+PACKAGES=core data retrieval prompts
 # Resolved from the Makefile's own location, because `make -C <dir>` leaves
 # CURDIR at the invocation directory — a relative ../packages breaks there.
 AI_ASSISTANT_DIR:=$(realpath $(CURDIR)/$(dir $(lastword $(MAKEFILE_LIST))))

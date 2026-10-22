@@ -722,9 +722,11 @@ locals {
   # The runtime always enforces the managed engine.
   agent_policy_engine_id = length(aws_bedrockagentcore_policy_engine.agents) > 0 ? aws_bedrockagentcore_policy_engine.agents[0].policy_engine_id : ""
   agentcore_memory_id    = length(aws_bedrockagentcore_memory.agents) > 0 ? aws_bedrockagentcore_memory.agents[0].id : ""
-  # Gateways reached over `MCP_TRANSPORT=gateway`. Every caller needs
-  # `bedrock-agentcore:InvokeGateway` on the gateway ARN itself (the Web Search
-  # connector lives on its own cross-Region gateway).
+  # Gateways a caller may reach. Lambda-backed MCP servers are invoked directly
+  # (a Gateway Lambda target receives only the tool's arguments, exposes only the
+  # tools in its inline schema and carries no caller identity), so the only
+  # gateway still used at run time is the built-in Web Search connector on its
+  # own cross-Region gateway. `MCP_GATEWAY_URL` remains as a legacy fallback.
   mcp_gateway_arns = compact([
     length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_arn : "",
     length(aws_bedrockagentcore_gateway.web_search) > 0 ? aws_bedrockagentcore_gateway.web_search[0].gateway_arn : "",
@@ -1170,9 +1172,11 @@ module "admin_console" {
     module.storage[0].function_arn,
   ]
 
-  # `MCP_TRANSPORT=gateway` below: the console calls the tools through the main
-  # gateway, so its role needs InvokeGateway on that gateway ARN.
-  gateway_arns = length(aws_bedrockagentcore_gateway.agents) > 0 ? [aws_bedrockagentcore_gateway.agents[0].gateway_arn] : []
+  # The admin console lists and calls the MCP servers over the direct-invoke
+  # transport (identity in the payload), so its role needs `lambda:InvokeFunction`
+  # on them — not InvokeGateway. A Gateway Lambda target exposes only its inline
+  # tool schema and receives no caller identity.
+  gateway_arns = []
 
   # Admin → AI Assistant re-ingest starts the ingestion state machine directly. This
   # is the same state machine `ingestion-dispatcher` starts from its SQS event, so
@@ -1191,9 +1195,7 @@ module "admin_console" {
       module.http_fetch[0].function_name,
       module.storage[0].function_name,
     ])
-    MCP_GATEWAY_URL = length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_url : ""
-    MCP_TRANSPORT   = "gateway"
-    BEDROCK_REGION  = var.aws_region
+    BEDROCK_REGION = var.aws_region
     # AI Assistant transcripts and trace trees (`/v1/admin/ai-assistant/{traces,conversations}/…`).
     S3_BUCKET = module.knowledge_storage[0].bucket_name
     S3_REGION = var.aws_region
@@ -1974,17 +1976,21 @@ module "agent_runtime" {
   kms_key_arns = [module.vault_kms[0].key_arn]
   # Platform model gateway (Amazon Bedrock: Nova + third-party models).
   bedrock_model_arns = local.bedrock_llm_model_arns
-  mcp_function_arns = [
+  mcp_function_arns = compact([
     module.knowledge_mcp[0].function_arn,
     module.code_interpreter[0].function_arn,
     module.http_fetch[0].function_arn,
     module.storage[0].function_arn,
     module.mcp_connections[0].function_arn,
     module.custom_tools[0].function_arn,
-  ]
-  # MCP_TRANSPORT=gateway below: every tool call is a signed request to the
-  # gateway, so the runtime role needs InvokeGateway on the main gateway and on
-  # the (cross-Region) Web Search gateway.
+    # Browser is gated by BROWSER_ALLOWED_DOMAINS; the ARN is empty when the
+    # browser is not provisioned, and `compact` drops it.
+    local.browser_function_arn,
+  ])
+  # Every Lambda-backed MCP server is invoked directly (the runtime passes the
+  # caller's `userId` in the payload), so the role needs `lambda:InvokeFunction`
+  # on each one. The gateway grant below remains for the built-in Web Search
+  # connector, the only tool that is still reached through a gateway.
   gateway_arns = local.mcp_gateway_arns
 
   jwt_discovery_url    = "https://${var.auth_domain}/.well-known/openid-configuration"
@@ -2008,24 +2014,27 @@ module "agent_runtime" {
       BEDROCK_PROFILE_INGESTION = var.bedrock_profile_ingestion
       GUARDRAIL_ID              = local.guardrail_id
       GUARDRAIL_VERSION         = var.guardrail_version
-      MCP_TRANSPORT             = "gateway"
-      MCP_GATEWAY_URL           = length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_url : ""
-      BROWSER_ID                = local.browser_id
-      BROWSER_REGION            = var.aws_region
-      BROWSER_ALLOWED_DOMAINS   = var.browser_allowed_domains
-      BROWSER_MCP_FUNCTION      = local.browser_function_arn
-      AGENTCORE_MEMORY_ID       = local.agentcore_memory_id
-      AGENT_POLICY_ENGINE       = local.agent_policy_engine_id
-      AGENT_POLICY_MODE         = "enforce"
-      AGENT_POLICY_DENY_TOOLS   = var.agent_policy_deny_tools
-      DYNAMODB_TABLE            = module.database[0].table_name
-      S3_BUCKET                 = module.knowledge_storage[0].bucket_name
-      S3_VECTOR_BUCKET          = module.vectors[0].vector_bucket_name
-      EMBED_MODE                = "bedrock"
-      TEXT_EMBED_MODEL          = "amazon.titan-embed-text-v2:0"
-      IMAGE_EMBED_MODEL         = "amazon.titan-embed-image-v1"
-      BEDROCK_REGION            = var.aws_region
-      KNOWLEDGE_MCP_FUNCTION    = module.knowledge_mcp[0].function_name
+      # Lambda-backed MCP servers are always direct-invoked (identity in the
+      # payload); these two only serve as a legacy web-search fallback when
+      # WEB_SEARCH_GATEWAY_URL is unset.
+      MCP_TRANSPORT           = "gateway"
+      MCP_GATEWAY_URL         = length(aws_bedrockagentcore_gateway.agents) > 0 ? aws_bedrockagentcore_gateway.agents[0].gateway_url : ""
+      BROWSER_ID              = local.browser_id
+      BROWSER_REGION          = var.aws_region
+      BROWSER_ALLOWED_DOMAINS = var.browser_allowed_domains
+      BROWSER_MCP_FUNCTION    = local.browser_function_arn
+      AGENTCORE_MEMORY_ID     = local.agentcore_memory_id
+      AGENT_POLICY_ENGINE     = local.agent_policy_engine_id
+      AGENT_POLICY_MODE       = "enforce"
+      AGENT_POLICY_DENY_TOOLS = var.agent_policy_deny_tools
+      DYNAMODB_TABLE          = module.database[0].table_name
+      S3_BUCKET               = module.knowledge_storage[0].bucket_name
+      S3_VECTOR_BUCKET        = module.vectors[0].vector_bucket_name
+      EMBED_MODE              = "bedrock"
+      TEXT_EMBED_MODEL        = "amazon.titan-embed-text-v2:0"
+      IMAGE_EMBED_MODEL       = "amazon.titan-embed-image-v1"
+      BEDROCK_REGION          = var.aws_region
+      KNOWLEDGE_MCP_FUNCTION  = module.knowledge_mcp[0].function_name
       # Web Search is the AgentCore Gateway built-in connector, not a Lambda.
       # It runs on a dedicated gateway in a supported Region (cross-region call).
       WEB_SEARCH_GATEWAY_TOOL       = local.web_search_gateway_tool
